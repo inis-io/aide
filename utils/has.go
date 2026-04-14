@@ -7,9 +7,9 @@ func HasDuplicate[T comparable](slice []T) bool {
 	seen := make(map[T]struct{}, len(slice))
 	
 	for _, v := range slice {
-		if _, exists := seen[v]; exists {
-			return true // 发现重复
-		}
+		// 发现重复
+		if _, exists := seen[v]; exists { return true }
+		// 记录已见过的元素
 		seen[v] = struct{}{}
 	}
 	
