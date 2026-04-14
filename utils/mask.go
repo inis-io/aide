@@ -93,14 +93,69 @@ func (this *MaskClass) Password(password string) string {
 	return "******"
 }
 
-// Custom - 自定义脱敏
+// Custom - 自定义脱敏（支持中文字符）
 func (this *MaskClass) Custom(str string, start, end int) string {
-
+	
 	if Is.Empty(str) { return "" }
-
-	if start < 0 || end < 0 || start > end || end > len(str) {
+	
+	// 转换为 rune 切片，按字符处理
+	runes  := []rune(str)
+	strLen := len(runes)
+	
+	// 边界检查（使用字符长度）
+	if start < 0 || end < 0 || start > end || end > strLen {
 		return str
 	}
+	
+	// 处理 start 和 end 相同的情况（脱敏空字符串，直接返回原串）
+	if start == end {
+		return str
+	}
+	
+	// 拼接：前 start 个字符 + "****" + 从 end 开始的字符
+	return fmt.Sprintf("%s****%s", string(runes[:start]), string(runes[end:]))
+}
 
-	return fmt.Sprintf("%s****%s", str[:start], str[end:])
+// Name - 中文姓名脱敏
+func (this *MaskClass) Name(name string) string {
+	
+	if Is.Empty(name) { return "" }
+	
+	// 转换为 rune 切片以正确处理中文字符
+	nameRunes := []rune(name)
+	nameLen   := len(nameRunes)
+	
+	// 根据长度进行脱敏处理
+	switch nameLen {
+	case 1:
+		// 单字姓名：直接返回原字（无法脱敏）
+		return name
+	
+	case 2:
+		// 两字姓名：张三 -> 张*
+		return string(nameRunes[:1]) + "*"
+	
+	case 3:
+		// 三字姓名：张三丰 -> 张*丰
+		return string(nameRunes[:1]) + "*" + string(nameRunes[2:])
+	
+	case 4:
+		// 四字姓名：欧阳慕容 -> 欧**蓉
+		// 或：张小三丰 -> 张***丰
+		prefix := string(nameRunes[:1])
+		suffix := string(nameRunes[nameLen-1:])
+		return prefix + "**" + suffix
+	
+	default:
+		// 五字及以上：保留首尾各一个字符，中间全部用*代替
+		// 例如：欧阳慕容复 -> 欧***复
+		prefix  := string(nameRunes[:1])
+		suffix  := string(nameRunes[nameLen-1:])
+		maskLen := nameLen - 2
+		mask  := ""
+		for i := 0; i < maskLen; i++ {
+			mask += "*"
+		}
+		return prefix + mask + suffix
+	}
 }
