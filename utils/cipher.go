@@ -18,6 +18,8 @@ import (
 	"reflect"
 	"time"
 	
+	"strings"
+	
 	"github.com/inis-io/aide/dto"
 	"github.com/spf13/cast"
 )
@@ -42,19 +44,19 @@ func (this *HashClass) Sum32(text any) (result string) {
  * token := utils.Hash.Token("test", 16)
  */
 func (this *HashClass) Token(value any, length int) (result string) {
-
+	
 	// 计算 MD5 哈希值
 	hash := md5.Sum([]byte(cast.ToString(value)))
 	MD5Hash := hex.EncodeToString(hash[:])
-
+	
 	if length > len(MD5Hash) { length = len(MD5Hash) }
 	result = MD5Hash[:length]
-
+	
 	// 确保结果长度满足要求
 	for len(result) < length {
 		result += this.Token(result, length - len(result))
 	}
-
+	
 	return result
 }
 
@@ -71,12 +73,12 @@ func (this *HashClass) Number(length any) (result string) {
 	seed   := Hash.Sum32(fmt.Sprintf("%s-%d-%d", Get.Mac(), Get.Pid(), time.Now().UnixNano()))
 	// 使用当前时间戳创建随机数生成器
 	source := rand2.New(rand2.NewSource(cast.ToInt64(seed)))
-
+	
 	// 生成一个随机数
 	for i := 0; i < cast.ToInt(length); i++ {
 		result += fmt.Sprintf("%d", source.Intn(10))
 	}
-
+	
 	return result
 }
 
@@ -266,23 +268,23 @@ type RSAResponse struct {
 func (this *RSAClass) Generate(bits any) (result *RSAResponse) {
 	
 	result = &RSAResponse{}
-
+	
 	private, err := rsa.GenerateKey(rand.Reader, cast.ToInt(bits))
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
+	
 	privateKeyBytes := x509.MarshalPKCS1PrivateKey(private)
 	privateKeyBlock := pem.Block{
 		Type:    "RSA PRIVATE KEY",
 		Headers: nil,
 		Bytes:   privateKeyBytes,
 	}
-
+	
 	// 生成私钥
 	result.PrivateKey = string(pem.EncodeToMemory(&privateKeyBlock))
-
+	
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&private.PublicKey)
 	if err != nil {
 		result.Error = err
@@ -293,117 +295,117 @@ func (this *RSAClass) Generate(bits any) (result *RSAResponse) {
 		Headers: nil,
 		Bytes:   publicKeyBytes,
 	}
-
+	
 	// 生成公钥
 	result.PublicKey = string(pem.EncodeToMemory(&publicKeyBlock))
-
+	
 	return result
 }
 
 // Encrypt 加密
 func (this *RSAClass) Encrypt(publicKey, text string) (result *RSAResponse) {
-
+	
 	result = &RSAResponse{}
-
+	
 	defer func() {
 		if r := recover(); r != nil {
 			result.Error = fmt.Errorf("%v", r)
 		}
 	}()
-
+	
 	block, _ := pem.Decode([]byte(publicKey))
 	if block == nil {
 		result.Error = errors.New("public key error")
 		return result
 	}
-
+	
 	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
+	
 	pub := pubInterface.(*rsa.PublicKey)
 	encode, err := rsa.EncryptPKCS1v15(rand.Reader, pub, []byte(text))
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
+	
 	result.Text = base64.StdEncoding.EncodeToString(encode)
-
+	
 	return result
 }
 
 // Decrypt 解密
 func (this *RSAClass) Decrypt(privateKey, text string) (result *RSAResponse) {
-
+	
 	result = &RSAResponse{}
-
+	
 	defer func() {
 		if r := recover(); r != nil {
 			result.Error = fmt.Errorf("%v", r)
 		}
 	}()
-
+	
 	block, _ := pem.Decode([]byte(privateKey))
 	if block == nil {
 		result.Error = errors.New("private key error")
 		return result
 	}
-
+	
 	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
+	
 	decode, err := base64.StdEncoding.DecodeString(text)
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
+	
 	encode, err := rsa.DecryptPKCS1v15(rand.Reader, priv, decode)
 	if err != nil {
 		result.Error = err
 		return result
 	}
-
+	
 	result.Text = string(encode)
-
+	
 	return result
 }
 
 // PublicPem - 输出完整的 PEM 格式公钥证书
 func (this *RSAClass) PublicPem(key string) (cert string) {
-
+	
 	// 创建 PEM 格式块
 	block := &pem.Block{
 		Type:  "RSA PUBLIC KEY",
 		Bytes: []byte(key),
 	}
-
+	
 	// 生成完整的 PEM 证书字符串
 	var PEM bytes.Buffer
 	if err := pem.Encode(&PEM, block); err != nil { return "" }
-
+	
 	return PEM.String()
 }
 
 // PrivatePem - 输出完整的 PEM 格式私钥证书
 func (this *RSAClass) PrivatePem(key string) (cert string) {
-
+	
 	// 创建 PEM 格式块
 	block := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: []byte(key),
 	}
-
+	
 	// 生成完整的 PEM 证书字符串
 	var PEM bytes.Buffer
 	if err := pem.Encode(&PEM, block); err != nil { return "" }
-
+	
 	return PEM.String()
 }
 
@@ -419,6 +421,8 @@ type Md5Class struct {
 	Fields Md5Fields
 	// 签名是否过滤空值（true：过滤，false：不过滤）
 	IsOmitEmpty bool
+	// 签名结果是否大写
+	IsToUpper   bool
 }
 
 // Md5 - MD5 加密
@@ -427,6 +431,7 @@ var Md5 = &Md5Class{
 		SignName:   "sign",
 		SecretName: "secret",
 	},
+	IsToUpper  : true,
 	IsOmitEmpty: true,
 }
 
@@ -471,7 +476,9 @@ func (this *Md5Class) GenSign(params any, secret string) (result string) {
 	// maps 中可能包含 this.Fields.SignName 字段，需要排除掉
 	delete(maps, this.Fields.SignName)
 	
-	return Md5.Encrypt(Ascii.ToString(maps, this.IsOmitEmpty) + fmt.Sprintf("&%s=%s", this.Fields.SecretName, secret))
+	sign := Md5.Encrypt(Ascii.ToString(maps, this.IsOmitEmpty) + fmt.Sprintf("&%s=%s", this.Fields.SecretName, secret))
+	
+	return Ternary(this.IsToUpper, strings.ToUpper(sign), sign)
 }
 
 // VerifySign - 验证签名
@@ -492,5 +499,8 @@ func (this *Md5Class) VerifySign(params any, secret, sign string) bool {
 	// maps 中可能包含 this.Fields.SignName 字段，需要排除掉
 	delete(maps, this.Fields.SignName)
 	
-	return this.GenSign(maps, secret) == sign
+	value := Ternary(this.IsToUpper, strings.ToUpper(this.GenSign(maps, secret)), this.GenSign(maps, secret))
+	sign   = Ternary(this.IsToUpper, strings.ToUpper(sign), sign)
+	
+	return value == sign
 }
