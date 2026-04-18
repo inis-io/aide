@@ -159,8 +159,7 @@ func Calc(input any) (output float64) {
 	return result[0]
 }
 
-var Ascii *AsciiClass
-
+var Ascii = &AsciiClass{}
 type AsciiClass struct {}
 
 // ToString - 根据ASCII码排序

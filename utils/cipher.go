@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	rand2 "math/rand"
+	"reflect"
 	"time"
 	
 	"github.com/inis-io/aide/dto"
@@ -406,10 +407,28 @@ func (this *RSAClass) PrivatePem(key string) (cert string) {
 	return PEM.String()
 }
 
-type Md5Class struct {}
+type Md5Fields struct {
+	// 签名字段名
+	SignName   string
+	// 令牌字段名
+	SecretName string
+}
+
+type Md5Class struct {
+	// 字段配置
+	Fields Md5Fields
+	// 签名是否过滤空值（true：过滤，false：不过滤）
+	IsOmitEmpty bool
+}
 
 // Md5 - MD5 加密
-var Md5 *Md5Class
+var Md5 = &Md5Class{
+	Fields: Md5Fields{
+		SignName:   "sign",
+		SecretName: "secret",
+	},
+	IsOmitEmpty: true,
+}
 
 // Encrypt 计算字符串的 MD5 哈希值（返回十六进制字符串）
 func (this *Md5Class) Encrypt(value string) string {
@@ -421,4 +440,54 @@ func (this *Md5Class) Encrypt(value string) string {
 	hashBytes := hash.Sum(nil)
 	// 转为十六进制字符串
 	return hex.EncodeToString(hashBytes)
+}
+
+// SetFields - 设置字段配置
+func (this *Md5Class) SetFields(signName, secretName string) {
+	this.Fields.SignName   = signName
+	this.Fields.SecretName = secretName
+}
+
+// SetOmitEmpty - 设置是否过滤空值
+func (this *Md5Class) SetOmitEmpty(omitEmpty bool) {
+	this.IsOmitEmpty = omitEmpty
+}
+
+// GenSign - 生成签名
+func (this *Md5Class) GenSign(params any, secret string) (result string) {
+	
+	// params的类型可能是结构体，也可能是map[string]any
+	var maps map[string]any
+	
+	switch cast.ToString(reflect.TypeOf(params).Kind()) {
+	case "struct":
+		maps = cast.ToStringMap(Json.Encode(params))
+	case "map":
+		maps = cast.ToStringMap(params)
+	default:
+		return ""
+	}
+	
+	return Md5.Encrypt(Ascii.ToString(maps, this.IsOmitEmpty) + fmt.Sprintf("&%s=%s", this.Fields.SecretName, secret))
+}
+
+// VerifySign - 验证签名
+func (this *Md5Class) VerifySign(params any, secret, sign string) bool {
+	
+	// params的类型可能是结构体，也可能是map[string]any
+	var maps map[string]any
+	
+	switch cast.ToString(reflect.TypeOf(params).Kind()) {
+	case "struct":
+		maps = cast.ToStringMap(Json.Encode(params))
+	case "map":
+		maps = cast.ToStringMap(params)
+	default:
+		return false
+	}
+	
+	// maps 中可能包含 this.Fields.SignName 字段，需要排除掉
+	delete(maps, this.Fields.SignName)
+	
+	return this.GenSign(maps, secret) == sign
 }
