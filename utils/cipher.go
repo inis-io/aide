@@ -468,7 +468,7 @@ func (this *Md5Class) GenSign(params any, secret string) (result string) {
 		return ""
 	}
 	
-	// 移除可能存在的签名字段，该字段不参与签名计算
+	// maps 中可能包含 this.Fields.SignName 字段，需要排除掉
 	delete(maps, this.Fields.SignName)
 	
 	return Md5.Encrypt(Ascii.ToString(maps, this.IsOmitEmpty) + fmt.Sprintf("&%s=%s", this.Fields.SecretName, secret))
