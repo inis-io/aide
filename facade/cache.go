@@ -53,7 +53,7 @@ func (this *CacheClass) normConfig(config dto.CacheConfig) dto.CacheConfig {
 		config.Redis.Expired = 7200
 	}
 	if utils.Is.Empty(config.Redis.Prefix) {
-		config.Redis.Prefix = "INIS"
+		config.Redis.Prefix = "AIDE"
 	}
 	
 	if utils.Is.Empty(config.File.Root) {
@@ -66,7 +66,7 @@ func (this *CacheClass) normConfig(config dto.CacheConfig) dto.CacheConfig {
 		config.File.Expired = 7200
 	}
 	if utils.Is.Empty(config.File.Prefix) {
-		config.File.Prefix = "INIS"
+		config.File.Prefix = "AIDE"
 	}
 	
 	if utils.Is.Empty(config.Hash) {

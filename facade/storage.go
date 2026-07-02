@@ -51,14 +51,14 @@ func (this *StorageClass) normConfig(config dto.StorageConfig) dto.StorageConfig
 		config.OSS.Endpoint = "oss-cn-guangzhou.aliyuncs.com"
 	}
 	if utils.Is.Empty(config.OSS.Path) {
-		config.OSS.Path = "inis"
+		config.OSS.Path = "AIDE"
 	}
 
 	if utils.Is.Empty(config.COS.Region) {
 		config.COS.Region = "ap-guangzhou"
 	}
 	if utils.Is.Empty(config.COS.Path) {
-		config.COS.Path = "inis"
+		config.COS.Path = "AIDE"
 	}
 
 	if utils.Is.Empty(config.Hash) {
