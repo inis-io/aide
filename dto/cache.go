@@ -23,7 +23,7 @@ type CacheRedisConfig struct {
 	// Expired  - 过期时间
 	Expired  int    `json:"expired"  comment:"过期时间" validate:"numeric" default:"7200"`
 	// Prefix   - 前缀
-	Prefix   string `json:"prefix"   comment:"前缀" validate:"alphaDash,max=12" default:"INIS"`
+	Prefix   string `json:"prefix"   comment:"前缀" validate:"alphaDash,max=12" default:"AIDE"`
 	// Database - 数据库
 	Database int    `json:"database" comment:"数据库索引" validate:"numeric"`
 }
@@ -33,7 +33,7 @@ type CacheFileConfig struct {
 	// Expired - 过期时间
 	Expired int    `json:"expired" comment:"过期时间" validate:"numeric" default:"7200"`
 	// Prefix  - 前缀
-	Prefix  string `json:"prefix"  comment:"前缀" validate:"alphaDash,max=12" default:"INIS"`
+	Prefix  string `json:"prefix"  comment:"前缀" validate:"alphaDash,max=12" default:"AIDE"`
 	// Root    - 文件缓存根目录
 	Root    string `json:"root"    comment:"文件缓存根目录" default:"./runtime/cache"`
 	// Suffix  - 文件后缀

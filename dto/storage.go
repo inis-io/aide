@@ -32,7 +32,7 @@ type OSS struct {
 	// Domain          - OSS 外网域名 - 用于访问 - 不填写则使用默认域名
 	Domain          string `json:"domain"   comment:"外网域名" validate:"omitempty,url"`
 	// Path            - OSS 存储目录
-	Path            string `json:"path" comment:"存储目录" validate:"required" default:"inis"`
+	Path            string `json:"path" comment:"存储目录" validate:"required" default:"AIDE"`
 }
 
 // COS - 腾讯COS配置
@@ -50,5 +50,5 @@ type COS struct {
 	// Domain    - COS 外网域名 - 用于访问 - 不填写则使用默认域名
 	Domain    string `json:"domain" comment:"外网域名" validate:"omitempty,url"`
 	// Path      - COS 存储目录
-	Path      string `json:"path"   comment:"存储目录" default:"inis"`
+	Path      string `json:"path"   comment:"存储目录" default:"AIDE"`
 }
