@@ -13,7 +13,7 @@ type PasswordStruct struct{}
 // Create - 创建密码
 func (this *PasswordStruct) Create(password any) (result string) {
 
-	item, _ := bcrypt.GenerateFromPassword([]byte(password.(string)), bcrypt.MinCost)
+	item, _ := bcrypt.GenerateFromPassword([]byte(cast.ToString(password)), bcrypt.DefaultCost)
 
 	return string(item)
 }

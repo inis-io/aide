@@ -82,6 +82,9 @@ func (this *MaskClass) BankCard(bankCard string) string {
 
 	if Is.Empty(bankCard) { return "" }
 
+	// 长度不足4位时无法切片，直接返回原串
+	if len(bankCard) < 4 { return bankCard }
+
 	return fmt.Sprintf("%s****%s", bankCard[:4], bankCard[len(bankCard)-4:])
 }
 

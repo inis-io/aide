@@ -25,10 +25,11 @@ var Cases = &CasesClass{
 	},
 }
 
-// IsUpper 是否大写
+// IsUpper 是否大写（返回副本，避免修改全局单例导致状态串扰）
 func (this *CasesClass) IsUpper(yes bool) *CasesClass {
-	this.Params.IsUpper = yes
-	return this
+	clone := *this
+	clone.Params.IsUpper = yes
+	return &clone
 }
 
 // Snake 蛇式命名法

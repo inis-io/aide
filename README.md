@@ -3,7 +3,7 @@
 
 ### 安装
 ```bash
-go get github.com/inis-io/go-utils
+go get github.com/inis-io/aide
 ```
 
 ### 使用
@@ -61,7 +61,7 @@ func main() {
 
 	// 2) 使用全局实例（两种方式都支持）
 	facade.Log.Info(map[string]any{"module": "user", "id": 1001}, "create user")
-	facade.Warn(map[string]any{"module": "user", "id": 1001}, "slow query")
+	facade.Log.Warn(map[string]any{"module": "user", "id": 1001}, "slow query")
 
 	// 3) 按配置创建独立实例（适合临时调试、多租户）
 	custom := facade.Log.NewLog(dto.LogConfig{Enable: true, Size: 5, Age: 3, Backups: 5})

@@ -152,17 +152,18 @@ func (this *LogClass) Write(data map[string]any, msg ...any) {
 		level = "info"
 	}
 
-	this.Msg = cast.ToString(msg[0])
+	// 使用局部变量分发消息，避免并发写入共享字段 Msg 互相覆盖
+	message := cast.ToString(msg[0])
 
 	switch level {
 	case "warn":
-		Log.Warn(data, this.Msg)
+		Log.Warn(data, message)
 	case "error":
-		Log.Error(data, this.Msg)
+		Log.Error(data, message)
 	case "debug":
-		Log.Debug(data, this.Msg)
+		Log.Debug(data, message)
 	default:
-		Log.Info(data, this.Msg)
+		Log.Info(data, message)
 	}
 }
 

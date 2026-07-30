@@ -468,47 +468,65 @@ func (this *RedisClass) Delete(key ...string) (ok bool) {
 	cache := this.clone()
 	if cache == nil { return false }
 	
-	var err error
 	ctx := context.Background()
-	
-	// // 根据标签删除缓存
-	// if len(this.Body.Tags) > 0 {
-	// 	for _, tag := range this.Body.Tags {
-	// 		// 获取标签下的所有成员
-	// 		members, _ := this.Client.SMembers(ctx, tag).Result()
-	// 		for _, member := range members {
-	// 			// 删除成员
-	// 			err = this.Client.Del(ctx, member).Err()
-	// 			if err != nil { return false }
-	// 		}
-	// 		// 删除标签
-	// 		err = this.Client.Del(ctx, tag).Err()
-	// 		// 清空标签
-	// 		this.Body.Tags = []string{}
-	// 	}
-	// }
-	
+
 	if cloned, ok := cache.Keys(key).(*RedisClass); ok {
 		cache = cloned
 	}
-	
+
 	// 根据键集删除缓存
-	_ = cache.Client.Del(ctx, cache.Body.Keys...).Err()
-	
+	err := cache.Client.Del(ctx, cache.Body.Keys...).Err()
+
 	// 根据标签删除缓存
 	cache.DelTags()
 	// 重置配置
 	cache.Reset()
-	
+
 	return utils.Ternary[bool](err != nil, false, true)
 }
 
 // Clear - 清空缓存
 func (this *RedisClass) Clear() (ok bool) {
-	
+
 	ctx := context.Background()
-	err := this.Client.FlushDB(ctx).Err()
-	return utils.Ternary[bool](err != nil, false, true)
+
+	// 前缀为空时保持兼容 - 回退为清空整个库
+	prefix := this.Body.Prefix
+	if utils.Is.Empty(prefix) {
+		err := this.Client.FlushDB(ctx).Err()
+		return utils.Ternary[bool](err != nil, false, true)
+	}
+
+	// 按前缀扫描匹配 Name() 生成的键，避免清空共享库中其他应用的数据
+	var (
+		cursor uint64
+		keys   []string
+	)
+	for {
+		batch, next, err := this.Client.Scan(ctx, cursor, prefix+"-*", 100).Result()
+		if err != nil {
+			return false
+		}
+		keys = append(keys, batch...)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+
+	// 分批删除，避免单次 DEL 携带过多键
+	const batchSize = 100
+	for start := 0; start < len(keys); start += batchSize {
+		end := start + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		if err := this.Client.Del(ctx, keys[start:end]...).Err(); err != nil {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Name - 缓存名称规则

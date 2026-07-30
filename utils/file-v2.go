@@ -115,6 +115,11 @@ func(this *FileClass) AutoExtract(sourceURL, dest string) error {
 		// 构建目标路径
 		destPath := filepath.Join(dest, fileInfo.NameInArchive)
 
+		// 防止 ZipSlip：解压后的路径必须位于目标目录内
+		if !strings.HasPrefix(destPath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("非法的压缩包路径: %s", fileInfo.NameInArchive)
+		}
+
 		// 处理目录
 		if fileInfo.IsDir() {
 			return os.MkdirAll(destPath, 0755)

@@ -159,7 +159,7 @@ func (this *StructClass) Map(obj any) (result map[string]any) {
 	// 获取结构体的类型
 	typ := value.Type()
 	// 定义一个map
-	// result := make(map[string]any)
+	result = make(map[string]any)
 	// 遍历结构体的字段
 	for i := 0; i < value.NumField(); i++ {
 		// 获取结构体的字段

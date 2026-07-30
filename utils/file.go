@@ -9,8 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	
+
 	"github.com/spf13/cast"
 )
 
@@ -381,12 +380,16 @@ func (this *FileStruct) List(path ...any) (result *FileResponse) {
 
 	var slice []string
 	this.response.Error = filepath.Walk(this.request.Dir, func(path string, info os.FileInfo, err error) error {
+		// 遍历出错（如权限不足）时跳过该条目，避免 info 为 nil 崩溃
+		if err != nil {
+			return nil
+		}
 		// 忽略当前目录
 		if info.IsDir() {
 			return nil
 		}
 		// 忽略子目录
-		if !this.request.Sub && filepath.Dir(path) != path {
+		if !this.request.Sub && filepath.Dir(path) != filepath.Clean(this.request.Dir) {
 			return nil
 		}
 		// []string 转 []any
@@ -459,31 +462,7 @@ func (this *FileStruct) Line(path ...any) (result *FileResponse) {
 		return this.response
 	}
 
-	// 读取块
-	readBlock := func(file *os.File, start int, end int) ([]string, error) {
-
-		lines := make([]string, 0)
-		scanner := bufio.NewScanner(file)
-
-		// 移动扫描器到指定的起始行
-		for i := 1; i < start && scanner.Scan(); i++ {
-		}
-
-		// 开始读取需要的行
-		for i := start; i <= end && scanner.Scan(); i++ {
-			// 只把需要的行保存到切片中
-			if i >= start && i <= end {
-				lines = append(lines, scanner.Text())
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-
-		return lines, nil
-	}
-
+	// 读取指定区间的行
 	file, err := os.Open(this.request.Path)
 	if err != nil {
 		this.response.Error = err
@@ -499,40 +478,25 @@ func (this *FileStruct) Line(path ...any) (result *FileResponse) {
 	end := this.request.Page * this.request.Limit
 	start := end - this.request.Limit + 1
 
+	// 顺序扫描文件，只保留 [start, end] 区间的行
 	lines := make([]string, 0)
-	// 计算每个块的大小（以10MB为一个块）
-	blockSize := 10 * 1024 * 1024
-	numBlocks := (end - start + 1) / blockSize
-
-	if (end-start+1)%blockSize != 0 {
-		numBlocks++
+	scanner := bufio.NewScanner(file)
+	current := 0
+	for scanner.Scan() {
+		current++
+		if current < start {
+			continue
+		}
+		if current > end {
+			break
+		}
+		lines = append(lines, scanner.Text())
 	}
 
-	// 并发读取每个块
-	var wg sync.WaitGroup
-	wg.Add(numBlocks)
-	for i := 0; i < numBlocks; i++ {
-		go func(i int) {
-
-			startLine := start + i*blockSize
-			endLine := startLine + blockSize - 1
-			if endLine > end {
-				endLine = end
-			}
-
-			blockLines, err := readBlock(file, startLine, endLine)
-			if err != nil {
-				this.response.Error = err
-				return
-			} else {
-				lines = append(lines, blockLines...)
-			}
-
-			wg.Done()
-		}(i)
+	if err := scanner.Err(); err != nil {
+		this.response.Error = err
+		return this.response
 	}
-
-	wg.Wait()
 
 	this.response.Result = lines
 	this.response.Text = Json.Encode(this.response.Result)
@@ -827,6 +791,11 @@ func (this *FileStruct) extract(file *zip.File, dir string) (err error) {
 	}(read)
 
 	path := filepath.Join(dir, file.Name)
+
+	// 防止 ZipSlip：解压后的路径必须位于目标目录内
+	if !strings.HasPrefix(path, filepath.Clean(dir)+string(os.PathSeparator)) {
+		return errors.New("非法的压缩包路径: " + file.Name)
+	}
 
 	if file.FileInfo().IsDir() {
 

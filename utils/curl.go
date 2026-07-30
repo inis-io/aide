@@ -9,7 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	
+	"time"
+
 	"github.com/spf13/cast"
 )
 
@@ -66,7 +67,8 @@ func Curl(request ...CurlRequest) *CurlClass {
 	}
 
 	if Is.Empty(request[0].Client) {
-		request[0].Client = &http.Client{}
+		// 默认客户端带 30 秒超时，避免请求无限挂起（用户显式传入的 Client 不受影响）
+		request[0].Client = &http.Client{ Timeout: 30 * time.Second }
 	}
 
 	return &CurlClass{
@@ -314,10 +316,20 @@ func (this *CurlClass) Send() *CurlResponse {
 
 // Redirect - 获取重定向地址
 func Redirect(url any) (result string) {
+	return redirect(cast.ToString(url), 0)
+}
+
+// redirect - 递归获取重定向地址，depth 限制最大重定向深度，避免循环重定向导致栈溢出
+func redirect(url string, depth int) (result string) {
+
+	// 超过最大重定向深度
+	if depth >= 10 {
+		return "maximum redirect depth exceeded"
+	}
 
 	item := Curl(CurlRequest{
 		Method: "GET",
-		Url:    cast.ToString(url),
+		Url:    url,
 		Client: &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -331,7 +343,7 @@ func Redirect(url any) (result string) {
 	}
 
 	if item.StatusCode == 301 || item.StatusCode == 302 {
-		result = Redirect(item.Headers.Get("Location"))
+		result = redirect(item.Headers.Get("Location"), depth+1)
 		return
 	}
 

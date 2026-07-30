@@ -10,6 +10,11 @@ import (
 
 var Lang *LangClass
 
+func init() {
+	// 初始化语言包实例（New 内部不依赖 Lang 自身）
+	Lang = (&LangClass{}).New()
+}
+
 type LangClass struct {
 	Directory string // 语言包目录
 	Lang      string // 当前语言

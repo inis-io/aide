@@ -1,8 +1,9 @@
 package utils
 
 import (
+	"errors"
 	"os"
-	
+
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
 )
@@ -29,7 +30,8 @@ type ViperResponse struct {
 
 func Viper(model ...ViperClass) *ViperClass {
 
-	var item *ViperClass
+	// 无参时返回空实例，避免后续链式调用空指针崩溃
+	item := &ViperClass{}
 
 	if len(model) > 0 {
 		item = &model[0]
@@ -79,27 +81,18 @@ func (this *ViperClass) Read() (result ViperResponse) {
 	result.Result = cast.ToStringMap(item.AllSettings())
 
 	if result.Error != nil {
-		// 如果错误中包含文件不存在，则创建文件
-		if !os.IsNotExist(result.Error) && !Is.Empty(this.Content) {
+		// 仅当配置文件不存在时，才创建并写入默认配置；解析失败等其他错误原样返回，绝不触碰文件
+		var notFound viper.ConfigFileNotFoundError
+		if (errors.As(result.Error, &notFound) || os.IsNotExist(result.Error)) && !Is.Empty(this.Content) {
 
 			path := this.Path + "/" + this.Name + "." + this.Mode
 
-			// 释放之前的文件
-			result.Error = item.SafeWriteConfigAs(path)
-
-			// 如果文件不存在，则创建文件
-			file, err := os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0755)
-			if err != nil {
+			// 写入默认配置文件
+			if err := os.WriteFile(path, []byte(this.Content), 0755); err != nil {
 				result.Error = err
+			} else {
+				result.Error = nil
 			}
-
-			// 写入文件
-			_, err = file.WriteString(this.Content)
-			if err != nil {
-				result.Error = err
-			}
-
-			result.Error = file.Close()
 		}
 	}
 
@@ -137,16 +130,18 @@ func (this *ViperResponse) Set(key string, value any) (result ViperResponse) {
 	file, err := os.OpenFile(this.Viper.ConfigFileUsed(), os.O_WRONLY|os.O_TRUNC, 0755)
 	if err != nil {
 		result.Error = err
+		return
 	}
 
 	this.Result[key] = value
 	this.Viper.Set(key, value)
+	result = *this
 	result.Error = this.Viper.WriteConfigAs(file.Name())
 
-	result = *this
-
-	// 释放资源
-	result.Error = file.Close()
+	// 释放资源（Close 错误不覆盖此前的真实错误）
+	if err := file.Close(); err != nil && result.Error == nil {
+		result.Error = err
+	}
 
 	return
 }

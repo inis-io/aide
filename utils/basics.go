@@ -156,6 +156,11 @@ func Calc(input any) (output float64) {
 		}
 	}
 
+	// 表达式没有匹配到任何有效内容时，避免索引越界
+	if len(result) == 0 {
+		return 0
+	}
+
 	return result[0]
 }
 

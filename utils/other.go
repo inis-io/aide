@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -18,114 +17,67 @@ func typeof(args ...any) (typeof string, empty bool) {
 		}
 
 		// 先利用反射获取数据类型，再进入不同类型的判空逻辑
-		switch reflect.TypeOf(item).Kind().String() {
-		case "int":
-			typeof = "int"
-			if item == 0 {
+		kind := reflect.TypeOf(item).Kind()
+		typeof = kind.String()
+		switch kind {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			// int 系，0 为空
+			if reflect.ValueOf(item).Int() == 0 {
 				empty = true
 			}
-		case "string":
-			typeof = "string"
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			// uint 系（byte 与 uint8 同 kind，统一标记为 uint8），0 为空
+			if reflect.ValueOf(item).Uint() == 0 {
+				empty = true
+			}
+		case reflect.Float32, reflect.Float64:
+			// 浮点系，0 为空
+			if reflect.ValueOf(item).Float() == 0 {
+				empty = true
+			}
+		case reflect.Bool:
+			// false 为空
+			if !reflect.ValueOf(item).Bool() {
+				empty = true
+			}
+		case reflect.String:
 			if item == "" {
 				empty = true
 			}
-		case "int64":
-			typeof = "int64"
-			if item == 0 {
-				empty = true
-			}
-		case "uint8":
-			typeof = "bool"
-			if item == false {
-				empty = true
-			}
-		case "float64":
-			typeof = "float"
-			if item == 0.0 {
-				empty = true
-			}
-		case "byte":
-			typeof = "byte"
-			if item == 0 {
-				empty = true
-			}
-		case "ptr":
-			typeof = "ptr"
+		case reflect.Ptr, reflect.Interface:
 			// 接口状态下，它不认为自己是nil，所以要用反射判空
-			if item == nil {
-				empty = true
-			}
-			// 反射判空逻辑
 			if reflect.ValueOf(item).IsNil() {
-				// 利用反射直接判空
 				empty = true
 			}
-		case "struct":
-			typeof = "struct"
-			if item == nil {
-				empty = true
-			}
-		case "slice":
-			typeof = "slice"
+		case reflect.Slice, reflect.Array:
 			s := reflect.ValueOf(item)
-			// 遍历所有元素
+			// 遍历所有元素，元素包含 map 时标记为二维
 			for i := 0; i < s.Len(); i++ {
 				elem := reflect.ValueOf(s.Index(i).Interface())
 				if elem.Kind() == reflect.Map {
-					typeof = "2d slice"
+					if kind == reflect.Slice {
+						typeof = "2d slice"
+					} else {
+						typeof = "2d array"
+					}
 					break
 				}
 			}
 			if s.Len() == 0 {
 				empty = true
 			}
-			// typeof = "slice"
-			// s := reflect.ValueOf(item)
-			// if s.Len() == 0 {
-			// 	empty = true
-			// }
-		case "array":
-			typeof = "array"
-			s := reflect.ValueOf(item)
-			// 遍历所有元素
-			for i := 0; i < s.Len(); i++ {
-				elem := reflect.ValueOf(s.Index(i).Interface())
-				if elem.Kind() == reflect.Map {
-					typeof = "2d array"
-					break
-				}
-			}
-			if s.Len() == 0 {
+		case reflect.Map, reflect.Chan:
+			if reflect.ValueOf(item).Len() == 0 {
 				empty = true
 			}
-		case "map":
-			typeof = "map"
-			s := reflect.ValueOf(item)
-			if s.Len() == 0 {
+		case reflect.Func:
+			if reflect.ValueOf(item).IsNil() {
 				empty = true
 			}
-		case "chan":
-			typeof = "chan"
-			s := reflect.ValueOf(item)
-			if s.Len() == 0 {
-				empty = true
-			}
-		case "func":
-			typeof = "func"
-			if item == nil {
-				empty = true
-			}
+		case reflect.Struct:
+			// 结构体不判空
 		default:
-			if item == "true" || item == "false" || item == true || item == false {
-				typeof = "bool"
-				if item == false {
-					empty = true
-				}
-			} else {
-				typeof = "other"
-				empty = true
-				fmt.Println("奇怪的数据类型")
-			}
+			// 其他类型不判空
 		}
 
 	}

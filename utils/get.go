@@ -40,7 +40,11 @@ func (this *GetClass) Ip(key ...string) (result any) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		conn, _ := net.Dial("udp", "8.8.8.8:80")
+		conn, err := net.Dial("udp", "8.8.8.8:80")
+		// 无网络环境时跳过内网 IP 获取，避免空指针崩溃
+		if err != nil {
+			return
+		}
 		defer func(conn net.Conn) {
 			err := conn.Close()
 			if err != nil {

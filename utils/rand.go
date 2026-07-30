@@ -1,10 +1,11 @@
 package utils
 
 import (
+	cryptorand "crypto/rand"
 	"fmt"
 	"math/rand"
 	"time"
-	
+
 	"github.com/spf13/cast"
 )
 
@@ -13,32 +14,21 @@ var Rand *RandClass
 
 type RandClass struct {}
 
-// Number - 生成指定长度的随机数
+// Number - 生成指定长度的随机数（数字验证码，使用加密安全随机源）
 func (this *RandClass) Number(length any) (result string) {
 
-	mac := Hash.Sum32(Get.Mac())
-	pid := Get.Pid()
-	nano := time.Now().UnixNano()
-
-	// 生成一个随机种子
-	seed := fmt.Sprintf("%v%d%d", mac, pid, nano)
-
-	// 如果 种子 超过了 int64 的最大值
-	if len(seed) > 19 {
-		// 压缩种子
-		seed = Hash.Sum32(seed)
-	}
-
-	// 种子长度不足 int64 的最大值，补足
-	if len(seed) < 19 {
-		seed = seed + Hash.Number(19-len(seed))
-	}
-
-	rand.NewSource(cast.ToInt64(seed))
-
-	// 生成指定长度的随机数
+	// 逐位读取随机字节映射到数字（>=250 的字节重取，消除取模偏差）
 	for i := 0; i < cast.ToInt(length); i++ {
-		result += fmt.Sprintf("%d", rand.Intn(10))
+		b := make([]byte, 1)
+		for {
+			if _, err := cryptorand.Read(b); err != nil {
+				// 随机源不可用时退化为伪随机，保证输出形态不变
+				b[0] = byte(rand.Intn(10))
+				break
+			}
+			if b[0] < 250 { break }
+		}
+		result += fmt.Sprintf("%d", b[0]%10)
 	}
 
 	return result
@@ -100,7 +90,6 @@ func (this *RandClass) Int(max any, min ...any) (result int) {
 	if max == min[0] {
 		return cast.ToInt(max)
 	}
-	rand.NewSource(time.Now().UnixNano())
 	return rand.Intn(cast.ToInt(max)-cast.ToInt(min[0])) + cast.ToInt(min[0])
 }
 
@@ -112,29 +101,18 @@ func (this *RandClass) Slice(slice []any, limit any) (result []any) {
 		return slice
 	}
 
-	// 设置随机数种子
-	rand.NewSource(time.Now().UnixNano())
+	// 限制最大长度，超过切片长度时返回全部
+	n := cast.ToInt(limit)
+	if n < 0 { n = 0 }
+	if n > len(slice) { n = len(slice) }
 
-	// 创建一个map用于存储选中的元素
-	selected := make(map[any]bool)
+	// 拷贝副本后打乱顺序取前 N 个，避免修改调用方的原切片
+	item := append([]any{}, slice...)
+	rand.Shuffle(len(item), func(i, j int) {
+		item[i], item[j] = item[j], item[i]
+	})
 
-	// 限制最大长度
-	if cast.ToInt(limit) > len(slice) {
-		limit = len(slice)
-	}
-
-	// 随机选择指定数量的不重复元素
-	for len(selected) < cast.ToInt(limit) {
-		index := rand.Intn(len(slice))
-		selected[slice[index]] = true
-	}
-
-	// 将选中的元素存储到切片中
-	for key := range selected {
-		result = append(result, key)
-	}
-
-	return result
+	return item[:n]
 }
 
 // MapSlice - 打乱切片顺序
@@ -144,9 +122,6 @@ func (this *RandClass) MapSlice(slice []map[string]any) (result []map[string]any
 	if len(slice) == 0 {
 		return slice
 	}
-
-	// 设置随机数种子
-	rand.NewSource(time.Now().UnixNano())
 
 	// 打乱切片顺序
 	rand.Shuffle(len(slice), func(i, j int) {

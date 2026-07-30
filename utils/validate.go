@@ -59,19 +59,28 @@ func (this *validator) Check(params any) (err error) {
 		return err
 	}
 
-	// 获取结构体的字段和标签
-	for i := 0; i < reflect.TypeOf(this.model).NumField(); i++ {
+	// 解指针并校验 model 必须为结构体，避免 NumField 崩溃
+	model := reflect.TypeOf(this.model)
+	if model.Kind() == reflect.Ptr {
+		model = model.Elem()
+	}
+	if model.Kind() != reflect.Struct {
+		return errors.New("model must be a struct or pointer to struct")
+	}
 
-		field := reflect.TypeOf(this.model).Field(i)
+	// 获取结构体的字段和标签
+	for i := 0; i < model.NumField(); i++ {
+
+		field := model.Field(i)
 		tag := field.Tag
 		rule := tag.Get("rule")
 
-		// 字段名
+		// 字段名（剥离 json tag 中的 ,omitempty 等选项）
 		var name string
 		// 字段值
 		var value any
-		if !Is.Empty(cast.ToString(tag.Get("json"))) {
-			name = tag.Get("json")
+		if jsonTag := strings.Split(tag.Get("json"), ",")[0]; !Is.Empty(jsonTag) {
+			name = jsonTag
 		} else {
 			name = field.Name
 		}

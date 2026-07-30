@@ -298,9 +298,18 @@ type StorageAPI interface {
 	Root() string
 }
 
-// cleanDir - 标准化目录，确保目录以 / 结尾
+// cleanDir - 标准化目录，清理 .. 与多余分隔符，确保目录以 / 结尾
 func (this *StorageClass) cleanDir(dir string) string {
-	if !utils.Is.Empty(dir) && !strings.HasSuffix(dir, "/") {
+	if utils.Is.Empty(dir) {
+		return dir
+	}
+	// 规范化路径，防止通过 .. 越出存储根目录（正常多级目录不受影响）
+	dir = strings.TrimPrefix(pathpkg.Clean("/"+dir), "/")
+	// 清理后仍指向父级目录视为非法，按空目录走默认路径
+	if dir == ".." || strings.HasPrefix(dir, "../") {
+		return ""
+	}
+	if !strings.HasSuffix(dir, "/") {
 		dir += "/"
 	}
 	return dir
@@ -378,7 +387,8 @@ func (this *LocalStorageClass) Path() (path string) {
 	}
 	// 自定义文件名
 	if !utils.Is.Empty(this.Params.Name) {
-		name = this.Params.Name
+		// 去除目录成分，防止通过文件名越出存储目录
+		name = pathpkg.Base(this.Params.Name)
 	}
 
 	// 得到文件路径 - 但是可能还存在重复的 /

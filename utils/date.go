@@ -9,6 +9,11 @@ import (
 
 var Date *DateClass
 
+func init() {
+	// 初始化日期实例，默认当前时间
+	Date = &DateClass{ Time: time.Now() }
+}
+
 type DateClass struct {
 	Time time.Time
 }
@@ -99,7 +104,9 @@ func (this *DateClass) Today(location any) (start time.Duration, end time.Durati
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now    := time.Now().In(loc)
 	today  := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	
@@ -113,7 +120,9 @@ func (this *DateClass) Yesterday(location any) (start time.Duration, end time.Du
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now    := time.Now().In(loc)
 	today  := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	
@@ -127,7 +136,9 @@ func (this *DateClass) Week(location any) (start time.Duration, end time.Duratio
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now   := time.Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	
@@ -145,7 +156,9 @@ func (this *DateClass) LastWeek(location any) (start time.Duration, end time.Dur
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now   := time.Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	
@@ -163,7 +176,9 @@ func (this *DateClass) Month(location any) (start time.Duration, end time.Durati
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now   := time.Now().In(loc)
 	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 	
@@ -177,7 +192,9 @@ func (this *DateClass) LastMonth(location any) (start time.Duration, end time.Du
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now   := time.Now().In(loc)
 	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 	
@@ -191,7 +208,9 @@ func (this *DateClass) Year(location any) (start time.Duration, end time.Duratio
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now  := time.Now().In(loc)
 	year := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, loc)
 	
@@ -205,7 +224,9 @@ func (this *DateClass) LastYear(location any) (start time.Duration, end time.Dur
 	
 	if Is.Empty(location) { location = "Asia/Shanghai" }
 	
-	loc, _ := time.LoadLocation(cast.ToString(location))
+	loc, err := time.LoadLocation(cast.ToString(location))
+	// 非法时区回退为本地时区，避免 In(nil) 崩溃
+	if err != nil { loc = time.Local }
 	now  := time.Now().In(loc)
 	year := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, loc)
 	
