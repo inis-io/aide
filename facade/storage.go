@@ -290,6 +290,12 @@ type StorageAPI interface {
 
 	// NewStorage - 使用传入配置创建新的存储实例
 	NewStorage(config dto.StorageConfig) StorageAPI
+
+	// Root 获取存储根公开路径（如 /storage、/AIDE）
+	/**
+	 * @returns string - 存储根公开路径
+	 */
+	Root() string
 }
 
 // cleanDir - 标准化目录，确保目录以 / 结尾
@@ -1524,4 +1530,19 @@ func encodeUriKey(key string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
+}
+
+// Root - 获取存储根公开路径
+func (this *LocalStorageClass) Root() string {
+	return "/" + localManageRoot
+}
+
+// Root - 获取存储根公开路径
+func (this *OssClass) Root() string {
+	return StorageInst.joinPublicPath(this.manageRoot(), "")
+}
+
+// Root - 获取存储根公开路径
+func (this *CosClass) Root() string {
+	return StorageInst.joinPublicPath(this.manageRoot(), "")
 }
