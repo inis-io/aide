@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cast"
 )
 
-// CurlRequest - 发起请求的结构体
-type CurlRequest struct {
+// HttpRequest - 发起请求的结构体
+type HttpRequest struct {
 	Body    any
 	Url     string
 	Method  string
@@ -25,11 +25,12 @@ type CurlRequest struct {
 	Headers map[string]any
 }
 
-// CurlResponse - 响应的结构体
-type CurlResponse struct {
+// HttpResponse - 响应的结构体
+type HttpResponse struct {
 	StatusCode int
 	Request    *http.Request
 	Headers    *http.Header
+	// 已废弃：响应体读取后即关闭，不再回传（请使用 Byte/Text/Json），保留字段仅为兼容
 	Body       *io.ReadCloser
 	Byte       []byte
 	Text       string
@@ -37,17 +38,17 @@ type CurlResponse struct {
 	Error      error
 }
 
-// CurlClass - Curl 结构体
-type CurlClass struct {
-	request  *CurlRequest
-	response *CurlResponse
+// HttpClass - Http 结构体
+type HttpClass struct {
+	request  *HttpRequest
+	response *HttpResponse
 }
 
-// Curl - 发起请求 - 入口
-func Curl(request ...CurlRequest) *CurlClass {
+// Http - 发起请求 - 入口
+func Http(request ...HttpRequest) *HttpClass {
 
 	if len(request) == 0 {
-		request = append(request, CurlRequest{})
+		request = append(request, HttpRequest{})
 	}
 
 	if Is.Empty(request[0].Method) {
@@ -71,69 +72,69 @@ func Curl(request ...CurlRequest) *CurlClass {
 		request[0].Client = &http.Client{ Timeout: 30 * time.Second }
 	}
 
-	return &CurlClass{
+	return &HttpClass{
 		request: &request[0],
-		response: &CurlResponse{
+		response: &HttpResponse{
 			Json: make(map[string]any),
 		},
 	}
 }
 
 // Get - 发起 GET 请求
-func (this *CurlClass) Get(url string) *CurlClass {
+func (this *HttpClass) Get(url string) *HttpClass {
 	this.request.Url = url
 	this.request.Method = "GET"
 	return this
 }
 
 // Post - 发起 POST 请求
-func (this *CurlClass) Post(url string) *CurlClass {
+func (this *HttpClass) Post(url string) *HttpClass {
 	this.request.Url = url
 	this.request.Method = "POST"
 	return this
 }
 
 // Put - 发起 PUT 请求
-func (this *CurlClass) Put(url string) *CurlClass {
+func (this *HttpClass) Put(url string) *HttpClass {
 	this.request.Url = url
 	this.request.Method = "PUT"
 	return this
 }
 
 // Patch - 发起 PATCH 请求
-func (this *CurlClass) Patch(url string) *CurlClass {
+func (this *HttpClass) Patch(url string) *HttpClass {
 	this.request.Url = url
 	this.request.Method = "PATCH"
 	return this
 }
 
 // Delete - 发起 DELETE 请求
-func (this *CurlClass) Delete(url string) *CurlClass {
+func (this *HttpClass) Delete(url string) *HttpClass {
 	this.request.Url = url
 	this.request.Method = "DELETE"
 	return this
 }
 
 // Method - 定义请求类型 - 默认 GET
-func (this *CurlClass) Method(method string) *CurlClass {
+func (this *HttpClass) Method(method string) *HttpClass {
 	this.request.Method = strings.ToUpper(method)
 	return this
 }
 
 // Url - 定义请求地址
-func (this *CurlClass) Url(url string) *CurlClass {
+func (this *HttpClass) Url(url string) *HttpClass {
 	this.request.Url = url
 	return this
 }
 
 // Header - 定义请求头
-func (this *CurlClass) Header(key any, value any) *CurlClass {
+func (this *HttpClass) Header(key any, value any) *HttpClass {
 	this.request.Headers[cast.ToString(key)] = cast.ToString(value)
 	return this
 }
 
 // Headers - 批量定义请求头
-func (this *CurlClass) Headers(headers map[string]any) *CurlClass {
+func (this *HttpClass) Headers(headers map[string]any) *HttpClass {
 	for key, val := range headers {
 		this.request.Headers[cast.ToString(key)] = cast.ToString(val)
 	}
@@ -141,13 +142,13 @@ func (this *CurlClass) Headers(headers map[string]any) *CurlClass {
 }
 
 // Query - 定义请求参数
-func (this *CurlClass) Query(key any, value any) *CurlClass {
+func (this *HttpClass) Query(key any, value any) *HttpClass {
 	this.request.Query[cast.ToString(key)] = cast.ToString(value)
 	return this
 }
 
 // Querys - 批量定义请求参数
-func (this *CurlClass) Querys(params map[string]any) *CurlClass {
+func (this *HttpClass) Querys(params map[string]any) *HttpClass {
 	for key, val := range params {
 		this.request.Query[cast.ToString(key)] = cast.ToString(val)
 	}
@@ -155,13 +156,13 @@ func (this *CurlClass) Querys(params map[string]any) *CurlClass {
 }
 
 // Data - 定义请求数据
-func (this *CurlClass) Data(key string, value any) *CurlClass {
+func (this *HttpClass) Data(key string, value any) *HttpClass {
 	this.request.Data[key] = cast.ToString(value)
 	return this
 }
 
 // Datas - 批量定义请求数据
-func (this *CurlClass) Datas(data map[string]any) *CurlClass {
+func (this *HttpClass) Datas(data map[string]any) *HttpClass {
 	for key, val := range data {
 		this.request.Data[key] = cast.ToString(val)
 	}
@@ -169,36 +170,42 @@ func (this *CurlClass) Datas(data map[string]any) *CurlClass {
 }
 
 // Body - 定义请求体
-func (this *CurlClass) Body(body any) *CurlClass {
+func (this *HttpClass) Body(body any) *HttpClass {
 	this.request.Body = body
 	return this
 }
 
 // Client - 定义请求客户端
-func (this *CurlClass) Client(client *http.Client) *CurlClass {
+func (this *HttpClass) Client(client *http.Client) *HttpClass {
 	this.request.Client = client
 	return this
 }
 
 // Send - 发起请求
-func (this *CurlClass) Send() *CurlResponse {
+func (this *HttpClass) Send() *HttpResponse {
 
 	if Is.Empty(this.request.Url) {
 		this.response.Error = errors.New("url is required")
 		return this.response
 	}
 
-	// Encode query parameters if any
+	// 拼接 query 到请求地址（局部变量，避免二次调用 Send 重复拼接；地址已有 ? 时用 & 连接）
+	method := strings.ToUpper(this.request.Method)
+	reqUrl := this.request.Url
 	if len(this.request.Query) > 0 {
 		query := url.Values{}
 		for key, val := range this.request.Query {
 			query.Add(key, cast.ToString(val))
 		}
-		this.request.Url += "?" + query.Encode()
+		sep := "?"
+		if strings.Contains(reqUrl, "?") { sep = "&" }
+		reqUrl += sep + query.Encode()
 	}
 
-	// 如果没有设置 Content-Type 则默认为 application/json
-	if _, ok := this.request.Headers["Content-Type"]; !ok {
+	// 仅当请求携带内容时才设置默认 Content-Type（GET/HEAD 空请求不强塞）
+	hasPayload := this.request.Body != nil || len(this.request.Data) > 0 ||
+		(method != "GET" && method != "HEAD")
+	if _, ok := this.request.Headers["Content-Type"]; !ok && hasPayload {
 		this.request.Headers["Content-Type"] = "application/json"
 	}
 
@@ -209,13 +216,16 @@ func (this *CurlClass) Send() *CurlResponse {
 		switch {
 		case strings.Contains(cast.ToString(contentType), "application/json"):
 
-			// buffer, _ = json.Marshal(this.request.Body)
-
-			// 如果 this.request.Body 是 map 类型，则直接转换为 json
-			if Is.Map(this.request.Body) {
+			// string/[]byte 原样写入，其余（map/struct 等）统一编码为 json
+			switch body := this.request.Body.(type) {
+			case nil:
+				// 无请求体
+			case string:
+				buffer = []byte(body)
+			case []byte:
+				buffer = body
+			default:
 				buffer = []byte(Json.Encode(this.request.Body))
-			} else {
-				buffer = []byte(cast.ToString(this.request.Body))
 			}
 
 		case strings.Contains(cast.ToString(contentType), "application/x-www-form-urlencoded"):
@@ -246,13 +256,7 @@ func (this *CurlClass) Send() *CurlResponse {
 					this.response.Error = err
 					return this.response
 				}
-				defer func(item multipart.File) {
-					err := item.Close()
-					if err != nil {
-						this.response.Error = err
-						return
-					}
-				}(item)
+				defer func() { _ = item.Close() }()
 				_, err = io.Copy(filePart, item)
 				if err != nil {
 					this.response.Error = err
@@ -271,7 +275,7 @@ func (this *CurlClass) Send() *CurlResponse {
 		}
 	}
 
-	req, err := http.NewRequest(strings.ToUpper(this.request.Method), this.request.Url, bytes.NewBuffer(buffer))
+	req, err := http.NewRequest(method, reqUrl, bytes.NewBuffer(buffer))
 	if err != nil {
 		this.response.Error = err
 		return this.response
@@ -287,13 +291,7 @@ func (this *CurlClass) Send() *CurlResponse {
 		this.response.Error = err
 		return this.response
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			this.response.Error = err
-			return
-		}
-	}(response.Body)
+	defer func() { _ = response.Body.Close() }()
 
 	// Read response body
 	body, err := io.ReadAll(response.Body)
@@ -304,7 +302,6 @@ func (this *CurlClass) Send() *CurlResponse {
 
 	// Set response
 	this.response.Byte = body
-	this.response.Body = &response.Body
 	this.response.Text = string(body)
 	this.response.Headers = &response.Header
 	this.response.Request = response.Request
@@ -327,7 +324,7 @@ func redirect(url string, depth int) (result string) {
 		return "maximum redirect depth exceeded"
 	}
 
-	item := Curl(CurlRequest{
+	item := Http(HttpRequest{
 		Method: "GET",
 		Url:    url,
 		Client: &http.Client{

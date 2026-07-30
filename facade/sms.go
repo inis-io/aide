@@ -900,7 +900,7 @@ func (this *SmsBaoClass) Send(target ...any) (*dto.SmsResp, error) {
 	
 	if utils.Is.Empty(sms.Account) { return nil, errors.New("账号不能为空") }
 	
-	item := utils.Curl(utils.CurlRequest{
+	item := utils.Http(utils.HttpRequest{
 		Method: "GET",
 		Url:    fmt.Sprintf("%s/sms", sms.BaseUrl),
 		Query: map[string]any{

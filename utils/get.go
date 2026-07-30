@@ -61,7 +61,7 @@ func (this *GetClass) Ip(key ...string) (result any) {
 	go func() {
 		defer wg.Done()
 		// 外网IP - 替代品：https://api.ipify.org https://ipinfo.io/ip https://api.ip.sb/ip
-		item := Curl().Get("https://myexternalip.com/raw").Send()
+		item := Http().Get("https://myexternalip.com/raw").Send()
 		if item.Error != nil {
 			return
 		}
