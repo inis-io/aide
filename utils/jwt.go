@@ -15,6 +15,8 @@ type JwtClass struct {
 	Dest    any         `json:"dest"`
 	// 记录配置 Hash 值，用于检测配置文件是否有变化
 	Hash    string      `json:"hash"`
+	// 会话编号（指定后 Encode 优先使用，为空则自动生成 uuid）
+	No      string      `json:"no"`
 }
 
 var Jwt = &JwtClass{
@@ -43,6 +45,13 @@ func (this *JwtClass) SetHash(hash string) *JwtClass {
 	return this
 }
 
+// WithNo - 指定会话编号（返回副本，避免并发竞争共享字段）
+func (this *JwtClass) WithNo(no string) *JwtClass {
+	clone := *this
+	clone.No = no
+	return &clone
+}
+
 // Encode - 创建JWT
 func (this *JwtClass) Encode(data any) (resp dto.JwtResp, err error) {
 	
@@ -66,10 +75,14 @@ func (this *JwtClass) Encode(data any) (resp dto.JwtResp, err error) {
 	
 	if err != nil { return resp, err }
 	
+	// 会话编号：指定优先，否则自动生成
+	no := this.No
+	if Is.Empty(no) { no = uuid.NewString() }
+	
 	return dto.JwtResp{
 		Data : data,
 		Value: value,
-		No: uuid.NewString(),
+		No: no,
 		Expired: this.GetExpired().Unix(),
 	}, nil
 }
@@ -100,10 +113,11 @@ func (this *JwtClass) Decode(token string) (resp dto.JwtResp, err error) {
 	return resp, nil
 }
 
-// Unmarshal - 解析JWT
+// Unmarshal - 解析JWT（返回副本，避免并发竞争共享 Dest 字段）
 func (this *JwtClass) Unmarshal(dest any) *JwtClass {
-	this.Dest = dest
-	return this
+	clone := *this
+	clone.Dest = dest
+	return &clone
 }
 
 // GetExpired - 获取JWT过期时间
