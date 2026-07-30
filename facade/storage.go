@@ -1,12 +1,16 @@
 package facade
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	pathpkg "path"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -254,6 +258,35 @@ type StorageAPI interface {
 	 * @returns StorageAPI - 存储接口
 	 */
 	Ext(ext string) StorageAPI
+
+	// List 列出目录内容（目录在前，文件在后）
+	/**
+	 * @param params StorageListParams - 列目录参数
+	 * @returns StorageListResp - 列目录响应
+	 */
+	List(params StorageListParams) *StorageListResp
+
+	// MakeDir 创建目录
+	/**
+	 * @param dir string - 目录（公开路径，如 /storage/media）
+	 * @returns StorageResp - 存储响应
+	 */
+	MakeDir(dir string) *StorageResp
+
+	// Remove 删除文件或目录（目录递归删除）
+	/**
+	 * @param paths ...string - 公开路径列表
+	 * @returns StorageResp - 存储响应
+	 */
+	Remove(paths ...string) *StorageResp
+
+	// Move 移动或重命名文件/目录
+	/**
+	 * @param src string - 源公开路径
+	 * @param dst string - 目标公开路径
+	 * @returns StorageResp - 存储响应
+	 */
+	Move(src, dst string) *StorageResp
 
 	// NewStorage - 使用传入配置创建新的存储实例
 	NewStorage(config dto.StorageConfig) StorageAPI
@@ -703,4 +736,792 @@ func (this *CosClass) Ext(ext string) StorageAPI {
 // NewStorage - 使用传入配置创建存储实例
 func (this *CosClass) NewStorage(config dto.StorageConfig) StorageAPI {
 	return StorageInst.newWithConfig(config)
+}
+
+// ================================== 存储文件管理 - 开始 ==================================
+
+// StorageEntry - 存储条目（文件或目录）
+type StorageEntry struct {
+	// Name - 条目名称
+	Name string `json:"name"`
+	// Path - 公开路径（与 Upload 返回的 Path 一致，带前导 /）
+	Path string `json:"path"`
+	// Url - 访问地址（仅文件有效）
+	Url string `json:"url"`
+	// Size - 文件大小（字节）
+	Size int64 `json:"size"`
+	// IsDir - 是否目录
+	IsDir bool `json:"isDir"`
+	// ModTime - 修改时间（毫秒时间戳）
+	ModTime int64 `json:"modTime"`
+}
+
+// StorageListParams - 列目录参数
+type StorageListParams struct {
+	// Dir - 目标目录（公开路径，空串表示存储根）
+	Dir string `json:"dir"`
+	// Marker - 分页标记（上一页响应的 NextMarker）
+	Marker string `json:"marker"`
+	// Limit - 每页数量（默认 100，上限 1000）
+	Limit int `json:"limit"`
+	// Prefix - 名称前缀过滤（可选）
+	Prefix string `json:"prefix"`
+}
+
+// StorageListResp - 列目录响应
+type StorageListResp struct {
+	Error error `json:"-"`
+	// Root - 存储根公开路径（如 /storage、/AIDE）
+	Root string `json:"root"`
+	// List - 条目列表（目录在前，文件在后）
+	List []StorageEntry `json:"list"`
+	// NextMarker - 下一页分页标记，空串表示没有更多
+	NextMarker string `json:"nextMarker"`
+}
+
+// splitPublicPath - 将公开路径转换为相对存储根的路径
+// root 为引擎存储根（local 固定 storage，oss/cos 为配置的 Path），返回空串表示存储根本身
+func (this *StorageClass) splitPublicPath(root, path string) (string, bool) {
+	root = strings.Trim(strings.TrimSpace(root), "/")
+	path = strings.Trim(strings.TrimSpace(strings.ReplaceAll(path, "\\", "/")), "/")
+	if root == "" {
+		return "", false
+	}
+	if path == "" || path == root {
+		return "", true
+	}
+	if !strings.HasPrefix(path, root+"/") {
+		return "", false
+	}
+	rel := pathpkg.Clean(strings.TrimPrefix(path, root+"/"))
+	// 拒绝越界字符
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	if rel == "." {
+		return "", true
+	}
+	return rel, true
+}
+
+// joinPublicPath - 拼接公开路径（带前导 /）
+func (this *StorageClass) joinPublicPath(root, rel string) string {
+	root = strings.Trim(strings.TrimSpace(root), "/")
+	rel = strings.Trim(strings.TrimSpace(rel), "/")
+	if rel == "" {
+		return "/" + root
+	}
+	return "/" + root + "/" + rel
+}
+
+// normListLimit - 标准化列目录每页数量
+func (this *StorageClass) normListLimit(limit int) int {
+	if limit <= 0 || limit > 1000 {
+		return 100
+	}
+	return limit
+}
+
+// ================================== 本地存储文件管理 - 开始 ==================================
+
+// localManageRoot - 本地存储文件管理根目录（相对 public）
+const localManageRoot = "storage"
+
+// localFsPath - 相对路径转本地文件系统路径
+func (this *LocalStorageClass) localFsPath(rel string) string {
+	return filepath.Join("public", localManageRoot, rel)
+}
+
+// List - 列出目录内容
+func (this *LocalStorageClass) List(params StorageListParams) (response *StorageListResp) {
+
+	response = &StorageListResp{Root: "/" + localManageRoot, List: []StorageEntry{}}
+
+	rel, ok := StorageInst.splitPublicPath(localManageRoot, params.Dir)
+	if !ok {
+		response.Error = fmt.Errorf("目录越出存储根")
+		return
+	}
+
+	entries, err := os.ReadDir(this.localFsPath(rel))
+	if err != nil {
+		// 目录不存在视为空目录（新用户尚未上传过文件的场景）
+		if os.IsNotExist(err) {
+			return
+		}
+		response.Error = err
+		return
+	}
+
+	// 收集条目 - 目录与文件分开，便于目录前置
+	var dirs, files []StorageEntry
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		// 名称前缀过滤
+		if !utils.Is.Empty(params.Prefix) && !strings.HasPrefix(entry.Name(), params.Prefix) {
+			continue
+		}
+		item := StorageEntry{
+			Name:    entry.Name(),
+			Path:    StorageInst.joinPublicPath(localManageRoot, strings.Trim(strings.Join([]string{rel, entry.Name()}, "/"), "/")),
+			IsDir:   entry.IsDir(),
+			ModTime: info.ModTime().UnixMilli(),
+		}
+		if entry.IsDir() {
+			dirs = append(dirs, item)
+			continue
+		}
+		item.Size = info.Size()
+		item.Url = this.Config.Local.Domain + item.Path
+		files = append(files, item)
+	}
+
+	// 目录按名称排序，文件按修改时间倒序
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i].Name < dirs[j].Name })
+	sort.Slice(files, func(i, j int) bool { return files[i].ModTime > files[j].ModTime })
+	all := append(dirs, files...)
+
+	// 内存分页 - Marker 为偏移量
+	offset := cast.ToInt(params.Marker)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(all) {
+		offset = len(all)
+	}
+	limit := StorageInst.normListLimit(params.Limit)
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	response.List = all[offset:end]
+	if end < len(all) {
+		response.NextMarker = cast.ToString(end)
+	}
+	return
+}
+
+// MakeDir - 创建目录
+func (this *LocalStorageClass) MakeDir(dir string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	rel, ok := StorageInst.splitPublicPath(localManageRoot, dir)
+	if !ok || rel == "" {
+		response.Error = fmt.Errorf("目录路径不合法")
+		return
+	}
+	if err := os.MkdirAll(this.localFsPath(rel), 0755); err != nil {
+		response.Error = err
+		return
+	}
+
+	response.Path = StorageInst.joinPublicPath(localManageRoot, rel)
+	response.Name = pathpkg.Base(rel)
+	return
+}
+
+// Remove - 删除文件或目录（目录递归删除）
+func (this *LocalStorageClass) Remove(paths ...string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	for _, item := range paths {
+		rel, ok := StorageInst.splitPublicPath(localManageRoot, item)
+		if !ok || rel == "" {
+			response.Error = fmt.Errorf("路径不合法或越出存储根：%s", item)
+			return
+		}
+		if err := os.RemoveAll(this.localFsPath(rel)); err != nil {
+			response.Error = err
+			return
+		}
+	}
+	return
+}
+
+// Move - 移动或重命名文件/目录
+func (this *LocalStorageClass) Move(src, dst string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	srcRel, ok := StorageInst.splitPublicPath(localManageRoot, src)
+	if !ok || srcRel == "" {
+		response.Error = fmt.Errorf("源路径不合法或越出存储根")
+		return
+	}
+	dstRel, ok := StorageInst.splitPublicPath(localManageRoot, dst)
+	if !ok || dstRel == "" {
+		response.Error = fmt.Errorf("目标路径不合法或越出存储根")
+		return
+	}
+	// 禁止移动到自身内部
+	if dstRel == srcRel || strings.HasPrefix(dstRel, srcRel+"/") {
+		response.Error = fmt.Errorf("不能移动到自身内部")
+		return
+	}
+	// 目标父目录不存在则创建
+	if err := os.MkdirAll(filepath.Dir(this.localFsPath(dstRel)), 0755); err != nil {
+		response.Error = err
+		return
+	}
+	if err := os.Rename(this.localFsPath(srcRel), this.localFsPath(dstRel)); err != nil {
+		response.Error = err
+		return
+	}
+
+	response.Path = StorageInst.joinPublicPath(localManageRoot, dstRel)
+	response.Name = pathpkg.Base(dstRel)
+	return
+}
+
+// ================================== 阿里云对象存储文件管理 - 开始 ==================================
+
+// manageBucket - 获取 Bucket（文件管理场景，不触发自动创建存储空间）
+func (this *OssClass) manageBucket() (*oss.Bucket, error) {
+	if this.Client == nil {
+		return nil, fmt.Errorf("OSS Client 未初始化")
+	}
+	return this.Client.Bucket(this.Config.OSS.Bucket)
+}
+
+// manageRoot - OSS 存储根目录
+func (this *OssClass) manageRoot() string {
+	return strings.Trim(this.Config.OSS.Path, "/")
+}
+
+// manageKey - 相对路径转 OSS 对象 Key
+func (this *OssClass) manageKey(rel string) string {
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		return this.manageRoot()
+	}
+	return this.manageRoot() + "/" + rel
+}
+
+// manageDomain - OSS 访问域名（未配置则使用默认域名）
+func (this *OssClass) manageDomain() string {
+	if !utils.Is.Empty(this.Config.OSS.Domain) {
+		return strings.TrimSuffix(this.Config.OSS.Domain, "/")
+	}
+	return "https://" + this.Config.OSS.Bucket + "." + this.Config.OSS.Endpoint
+}
+
+// List - 列出目录内容
+func (this *OssClass) List(params StorageListParams) (response *StorageListResp) {
+
+	response = &StorageListResp{Root: StorageInst.joinPublicPath(this.manageRoot(), ""), List: []StorageEntry{}}
+
+	rel, ok := StorageInst.splitPublicPath(this.manageRoot(), params.Dir)
+	if !ok {
+		response.Error = fmt.Errorf("目录越出存储根")
+		return
+	}
+
+	bucket, err := this.manageBucket()
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	// 目录前缀 - 如 AIDE/media/
+	prefix := this.manageKey(rel) + "/"
+	options := []oss.Option{
+		oss.Prefix(prefix),
+		oss.Delimiter("/"),
+		oss.MaxKeys(StorageInst.normListLimit(params.Limit)),
+	}
+	if !utils.Is.Empty(params.Marker) {
+		options = append(options, oss.Marker(params.Marker))
+	}
+
+	result, err := bucket.ListObjects(options...)
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	// 目录 - CommonPrefixes 形如 AIDE/media/users/
+	for _, item := range result.CommonPrefixes {
+		name := pathpkg.Base(strings.TrimSuffix(item, "/"))
+		if !utils.Is.Empty(params.Prefix) && !strings.HasPrefix(name, params.Prefix) {
+			continue
+		}
+		response.List = append(response.List, StorageEntry{
+			Name:  name,
+			Path:  "/" + strings.TrimSuffix(item, "/"),
+			IsDir: true,
+		})
+	}
+	// 文件 - 跳过目录占位对象
+	for _, item := range result.Objects {
+		if item.Key == prefix || strings.HasSuffix(item.Key, "/") {
+			continue
+		}
+		name := pathpkg.Base(item.Key)
+		if !utils.Is.Empty(params.Prefix) && !strings.HasPrefix(name, params.Prefix) {
+			continue
+		}
+		response.List = append(response.List, StorageEntry{
+			Name:    name,
+			Path:    "/" + item.Key,
+			Url:     this.manageDomain() + "/" + item.Key,
+			Size:    item.Size,
+			ModTime: item.LastModified.UnixMilli(),
+		})
+	}
+
+	if result.IsTruncated {
+		response.NextMarker = result.NextMarker
+	}
+	return
+}
+
+// collectKeys - 收集指定路径对应的全部对象 Key（文件返回自身，目录返回前缀下全部对象）
+func (this *OssClass) collectKeys(bucket *oss.Bucket, key string) (keys []string, err error) {
+
+	// 目录场景 - 前缀下全部对象
+	marker := ""
+	for {
+		result, item := bucket.ListObjects(oss.Prefix(key+"/"), oss.Marker(marker), oss.MaxKeys(1000))
+		if item != nil {
+			return nil, item
+		}
+		for _, object := range result.Objects {
+			keys = append(keys, object.Key)
+		}
+		if !result.IsTruncated {
+			break
+		}
+		marker = result.NextMarker
+	}
+	if len(keys) > 0 {
+		return keys, nil
+	}
+
+	// 单文件场景
+	exist, item := bucket.IsObjectExist(key)
+	if item != nil {
+		return nil, item
+	}
+	if exist {
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+// deleteKeys - 分批删除对象（单次最多 1000 个）
+func (this *OssClass) deleteKeys(bucket *oss.Bucket, keys []string) error {
+	for len(keys) > 0 {
+		batch := keys
+		if len(batch) > 1000 {
+			batch = keys[:1000]
+		}
+		if _, err := bucket.DeleteObjects(batch, oss.DeleteObjectsQuiet(true)); err != nil {
+			return err
+		}
+		keys = keys[len(batch):]
+	}
+	return nil
+}
+
+// MakeDir - 创建目录
+func (this *OssClass) MakeDir(dir string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	rel, ok := StorageInst.splitPublicPath(this.manageRoot(), dir)
+	if !ok || rel == "" {
+		response.Error = fmt.Errorf("目录路径不合法")
+		return
+	}
+
+	bucket, err := this.manageBucket()
+	if err != nil {
+		response.Error = err
+		return
+	}
+	// 目录占位对象 - 以 / 结尾的空对象
+	if err = bucket.PutObject(this.manageKey(rel)+"/", bytes.NewReader([]byte{})); err != nil {
+		response.Error = err
+		return
+	}
+
+	response.Path = StorageInst.joinPublicPath(this.manageRoot(), rel)
+	response.Name = pathpkg.Base(rel)
+	return
+}
+
+// Remove - 删除文件或目录（目录递归删除）
+func (this *OssClass) Remove(paths ...string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	bucket, err := this.manageBucket()
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	for _, item := range paths {
+		rel, ok := StorageInst.splitPublicPath(this.manageRoot(), item)
+		if !ok || rel == "" {
+			response.Error = fmt.Errorf("路径不合法或越出存储根：%s", item)
+			return
+		}
+		keys, err := this.collectKeys(bucket, this.manageKey(rel))
+		if err != nil {
+			response.Error = err
+			return
+		}
+		if err = this.deleteKeys(bucket, keys); err != nil {
+			response.Error = err
+			return
+		}
+	}
+	return
+}
+
+// Move - 移动或重命名文件/目录
+func (this *OssClass) Move(src, dst string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	srcRel, ok := StorageInst.splitPublicPath(this.manageRoot(), src)
+	if !ok || srcRel == "" {
+		response.Error = fmt.Errorf("源路径不合法或越出存储根")
+		return
+	}
+	dstRel, ok := StorageInst.splitPublicPath(this.manageRoot(), dst)
+	if !ok || dstRel == "" {
+		response.Error = fmt.Errorf("目标路径不合法或越出存储根")
+		return
+	}
+	// 禁止移动到自身内部
+	if dstRel == srcRel || strings.HasPrefix(dstRel, srcRel+"/") {
+		response.Error = fmt.Errorf("不能移动到自身内部")
+		return
+	}
+
+	bucket, err := this.manageBucket()
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	srcKey := this.manageKey(srcRel)
+	dstKey := this.manageKey(dstRel)
+	keys, err := this.collectKeys(bucket, srcKey)
+	if err != nil {
+		response.Error = err
+		return
+	}
+	if len(keys) == 0 {
+		response.Error = fmt.Errorf("源路径不存在")
+		return
+	}
+
+	// 逐对象复制到新路径
+	for _, key := range keys {
+		if _, err = bucket.CopyObject(key, dstKey+strings.TrimPrefix(key, srcKey)); err != nil {
+			response.Error = err
+			return
+		}
+	}
+	// 复制成功后删除源对象
+	if err = this.deleteKeys(bucket, keys); err != nil {
+		response.Error = err
+		return
+	}
+
+	response.Path = StorageInst.joinPublicPath(this.manageRoot(), dstRel)
+	response.Name = pathpkg.Base(dstRel)
+	return
+}
+
+// ================================== 腾讯云对象存储文件管理 - 开始 ==================================
+
+// manageRoot - COS 存储根目录
+func (this *CosClass) manageRoot() string {
+	return strings.Trim(this.Config.COS.Path, "/")
+}
+
+// manageKey - 相对路径转 COS 对象 Key
+func (this *CosClass) manageKey(rel string) string {
+	rel = strings.Trim(rel, "/")
+	if rel == "" {
+		return this.manageRoot()
+	}
+	return this.manageRoot() + "/" + rel
+}
+
+// manageDomain - COS 访问域名（未配置则使用默认域名）
+func (this *CosClass) manageDomain() string {
+	if !utils.Is.Empty(this.Config.COS.Domain) {
+		return strings.TrimSuffix(this.Config.COS.Domain, "/")
+	}
+	return fmt.Sprintf("https://%s-%s.cos.%s.myqcloud.com", this.Config.COS.Bucket, this.Config.COS.AppId, this.Config.COS.Region)
+}
+
+// manageClient - 获取 COS 客户端（文件管理场景，不触发自动创建存储桶）
+func (this *CosClass) manageClient() (*cos.Client, error) {
+	if this.Client == nil {
+		return nil, fmt.Errorf("COS Client 未初始化")
+	}
+	return this.Client, nil
+}
+
+// List - 列出目录内容
+func (this *CosClass) List(params StorageListParams) (response *StorageListResp) {
+
+	response = &StorageListResp{Root: StorageInst.joinPublicPath(this.manageRoot(), ""), List: []StorageEntry{}}
+
+	rel, ok := StorageInst.splitPublicPath(this.manageRoot(), params.Dir)
+	if !ok {
+		response.Error = fmt.Errorf("目录越出存储根")
+		return
+	}
+
+	client, err := this.manageClient()
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	// 目录前缀 - 如 AIDE/media/
+	prefix := this.manageKey(rel) + "/"
+	result, _, err := client.Bucket.Get(context.Background(), &cos.BucketGetOptions{
+		Prefix:    prefix,
+		Delimiter: "/",
+		Marker:    params.Marker,
+		MaxKeys:   StorageInst.normListLimit(params.Limit),
+	})
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	// 目录 - CommonPrefixes 形如 AIDE/media/users/
+	for _, item := range result.CommonPrefixes {
+		name := pathpkg.Base(strings.TrimSuffix(item, "/"))
+		if !utils.Is.Empty(params.Prefix) && !strings.HasPrefix(name, params.Prefix) {
+			continue
+		}
+		response.List = append(response.List, StorageEntry{
+			Name:  name,
+			Path:  "/" + strings.TrimSuffix(item, "/"),
+			IsDir: true,
+		})
+	}
+	// 文件 - 跳过目录占位对象
+	for _, item := range result.Contents {
+		if item.Key == prefix || strings.HasSuffix(item.Key, "/") {
+			continue
+		}
+		name := pathpkg.Base(item.Key)
+		if !utils.Is.Empty(params.Prefix) && !strings.HasPrefix(name, params.Prefix) {
+			continue
+		}
+		// 修改时间 - RFC3339 格式
+		modTime, _ := time.Parse(time.RFC3339, item.LastModified)
+		response.List = append(response.List, StorageEntry{
+			Name:    name,
+			Path:    "/" + item.Key,
+			Url:     this.manageDomain() + "/" + item.Key,
+			Size:    item.Size,
+			ModTime: modTime.UnixMilli(),
+		})
+	}
+
+	if result.IsTruncated {
+		response.NextMarker = result.NextMarker
+	}
+	return
+}
+
+// collectKeys - 收集指定路径对应的全部对象 Key（文件返回自身，目录返回前缀下全部对象）
+func (this *CosClass) collectKeys(client *cos.Client, key string) (keys []string, err error) {
+
+	// 目录场景 - 前缀下全部对象
+	marker := ""
+	for {
+		result, _, item := client.Bucket.Get(context.Background(), &cos.BucketGetOptions{
+			Prefix:  key + "/",
+			Marker:  marker,
+			MaxKeys: 1000,
+		})
+		if item != nil {
+			return nil, item
+		}
+		for _, object := range result.Contents {
+			keys = append(keys, object.Key)
+		}
+		if !result.IsTruncated {
+			break
+		}
+		marker = result.NextMarker
+	}
+	if len(keys) > 0 {
+		return keys, nil
+	}
+
+	// 单文件场景
+	exist, item := client.Object.IsExist(context.Background(), key)
+	if item != nil {
+		return nil, item
+	}
+	if exist {
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+// deleteKeys - 分批删除对象（单次最多 1000 个）
+func (this *CosClass) deleteKeys(client *cos.Client, keys []string) error {
+	for len(keys) > 0 {
+		batch := keys
+		if len(batch) > 1000 {
+			batch = keys[:1000]
+		}
+		objects := make([]cos.Object, len(batch))
+		for i, key := range batch {
+			objects[i] = cos.Object{Key: key}
+		}
+		if _, _, err := client.Object.DeleteMulti(context.Background(), &cos.ObjectDeleteMultiOptions{
+			Objects: objects,
+			Quiet:   true,
+		}); err != nil {
+			return err
+		}
+		keys = keys[len(batch):]
+	}
+	return nil
+}
+
+// MakeDir - 创建目录
+func (this *CosClass) MakeDir(dir string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	rel, ok := StorageInst.splitPublicPath(this.manageRoot(), dir)
+	if !ok || rel == "" {
+		response.Error = fmt.Errorf("目录路径不合法")
+		return
+	}
+
+	client, err := this.manageClient()
+	if err != nil {
+		response.Error = err
+		return
+	}
+	// 目录占位对象 - 以 / 结尾的空对象
+	if _, err = client.Object.Put(context.Background(), this.manageKey(rel)+"/", strings.NewReader(""), nil); err != nil {
+		response.Error = err
+		return
+	}
+
+	response.Path = StorageInst.joinPublicPath(this.manageRoot(), rel)
+	response.Name = pathpkg.Base(rel)
+	return
+}
+
+// Remove - 删除文件或目录（目录递归删除）
+func (this *CosClass) Remove(paths ...string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	client, err := this.manageClient()
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	for _, item := range paths {
+		rel, ok := StorageInst.splitPublicPath(this.manageRoot(), item)
+		if !ok || rel == "" {
+			response.Error = fmt.Errorf("路径不合法或越出存储根：%s", item)
+			return
+		}
+		keys, err := this.collectKeys(client, this.manageKey(rel))
+		if err != nil {
+			response.Error = err
+			return
+		}
+		if err = this.deleteKeys(client, keys); err != nil {
+			response.Error = err
+			return
+		}
+	}
+	return
+}
+
+// Move - 移动或重命名文件/目录
+func (this *CosClass) Move(src, dst string) (response *StorageResp) {
+
+	response = &StorageResp{}
+
+	srcRel, ok := StorageInst.splitPublicPath(this.manageRoot(), src)
+	if !ok || srcRel == "" {
+		response.Error = fmt.Errorf("源路径不合法或越出存储根")
+		return
+	}
+	dstRel, ok := StorageInst.splitPublicPath(this.manageRoot(), dst)
+	if !ok || dstRel == "" {
+		response.Error = fmt.Errorf("目标路径不合法或越出存储根")
+		return
+	}
+	// 禁止移动到自身内部
+	if dstRel == srcRel || strings.HasPrefix(dstRel, srcRel+"/") {
+		response.Error = fmt.Errorf("不能移动到自身内部")
+		return
+	}
+
+	client, err := this.manageClient()
+	if err != nil {
+		response.Error = err
+		return
+	}
+
+	srcKey := this.manageKey(srcRel)
+	dstKey := this.manageKey(dstRel)
+	keys, err := this.collectKeys(client, srcKey)
+	if err != nil {
+		response.Error = err
+		return
+	}
+	if len(keys) == 0 {
+		response.Error = fmt.Errorf("源路径不存在")
+		return
+	}
+
+	// 逐对象复制到新路径
+	for _, key := range keys {
+		// 复制源地址 - Key 需分段 URL 编码
+		source := fmt.Sprintf("%s-%s.cos.%s.myqcloud.com/%s", this.Config.COS.Bucket, this.Config.COS.AppId, this.Config.COS.Region, encodeUriKey(key))
+		if _, _, err = client.Object.Copy(context.Background(), dstKey+strings.TrimPrefix(key, srcKey), source, nil); err != nil {
+			response.Error = err
+			return
+		}
+	}
+	// 复制成功后删除源对象
+	if err = this.deleteKeys(client, keys); err != nil {
+		response.Error = err
+		return
+	}
+
+	response.Path = StorageInst.joinPublicPath(this.manageRoot(), dstRel)
+	response.Name = pathpkg.Base(dstRel)
+	return
+}
+
+// encodeUriKey - 对象 Key 分段 URL 编码（保留 / 分隔符）
+func encodeUriKey(key string) string {
+	parts := strings.Split(key, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
 }
