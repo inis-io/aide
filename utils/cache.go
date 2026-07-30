@@ -172,7 +172,7 @@ func (this *FileCacheClient) SetE(key any, value []byte, expire int64) (err erro
 	defer this.mutex.Unlock()
 
 	// 检查缓存目录是否存在
-	if exist := File().Exist(this.dir); !exist {
+	if exist := NewFile().Exist(this.dir); !exist {
 		err = os.MkdirAll(this.dir, 0755)
 		if err != nil {
 			return fmt.Errorf("create cache dir error: %v", err)

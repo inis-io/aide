@@ -24,7 +24,7 @@ type LangClass struct {
 func (this *LangClass) Value(key any, args ...any) (result any) {
 
 	// 读取语言包
-	bytes := File().Byte(this.Directory + this.Lang + "." + this.Mode)
+	bytes := NewFile().Byte(this.Directory + this.Lang + "." + this.Mode)
 
 	if bytes.Error != nil { return }
 

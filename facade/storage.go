@@ -357,7 +357,7 @@ func (this *LocalStorageClass) Upload(reader io.Reader) (response *StorageResp) 
 	response = &StorageResp{}
 
 	path := this.Path()
-	item := utils.File().Save(reader, path)
+	item := utils.NewFile().Save(reader, path)
 
 	if item.Error != nil {
 		response.Error = item.Error

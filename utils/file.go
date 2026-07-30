@@ -26,7 +26,7 @@ import (
 var fileHTTPRegexp = regexp.MustCompile(`^https?://`)
 
 // ============================================================
-// FileClass 基础操作（FileV2 单例，基于 afero）
+// FileClass 基础操作（File 单例，基于 afero）
 // ============================================================
 
 // FileClass - 文件系统类
@@ -34,12 +34,12 @@ type FileClass struct {
 	Fs afero.Fs
 }
 
-// FileV2 - 文件系统单例（基于操作系统文件系统）
-var FileV2 *FileClass
+// File - 文件系统单例（基于操作系统文件系统）
+var File *FileClass
 
 func init() {
 	// 初始化文件实例
-	FileV2 = &FileClass{
+	File = &FileClass{
 		Fs: afero.NewOsFs(),
 	}
 }
@@ -585,7 +585,7 @@ func (this *FileClass) Watcher(filePath string, callback func(event fsnotify.Eve
 // ============================================================
 
 // File - 文件系统
-func File(request ...FileRequest) *FileStruct {
+func NewFile(request ...FileRequest) *FileStruct {
 
 	if len(request) == 0 {
 		request = append(request, FileRequest{})
@@ -685,8 +685,8 @@ func (this *FileStruct) Save(reader io.Reader, path ...string) (result *FileResp
 		return this.response
 	}
 
-	// 委托 FileV2 流式写入磁盘
-	if err := FileV2.WriteReader(this.request.Path, reader); err != nil {
+	// 委托 File 流式写入磁盘
+	if err := File.WriteReader(this.request.Path, reader); err != nil {
 		this.response.Error = err
 		return this.response
 	}
@@ -706,8 +706,8 @@ func (this *FileStruct) Remove(path ...any) (result *FileResponse) {
 		return this.response
 	}
 
-	// 委托 FileV2 删除（文件和目录均适用）
-	if err := FileV2.Delete(this.request.Path); err != nil {
+	// 委托 File 删除（文件和目录均适用）
+	if err := File.Delete(this.request.Path); err != nil {
 		this.response.Error = err
 		return this.response
 	}
@@ -721,9 +721,9 @@ func (this *FileStruct) Remove(path ...any) (result *FileResponse) {
  * @param path2 本地文件路径（保存路径，包含文件名）
  * @return *FileResponse
  * @example：
- * 1. item := utils.File().Download("https://inis.cn/name.zip", "public/test.zip")
- * 2. item := utils.File().Dir("public").Name("test.zip").Download("https://inis.cn/name.zip")
- * 3. item := utils.File(utils.FileRequest{
+ * 1. item := utils.NewFile().Download("https://inis.cn/name.zip", "public/test.zip")
+ * 2. item := utils.NewFile().Dir("public").Name("test.zip").Download("https://inis.cn/name.zip")
+ * 3. item := utils.NewFile(utils.FileRequest{
 	Path: "https://inis.cn/name.zip",
 	Name: "test.zip",
 	Dir: "public",
@@ -803,8 +803,8 @@ func (this *FileStruct) Byte(path ...any) (result *FileResponse) {
 		return this.response
 	}
 
-	// 委托 FileV2 一次性读取完整内容（顺带修复小于50MB分支单次 Read 的短读问题）
-	bytes, err := FileV2.Read(this.request.Path)
+	// 委托 File 一次性读取完整内容（顺带修复小于50MB分支单次 Read 的短读问题）
+	bytes, err := File.Read(this.request.Path)
 	if err != nil {
 		this.response.Error = err
 		return this.response
@@ -899,8 +899,8 @@ func (this *FileStruct) Exist(path ...any) (ok bool) {
 		return false
 	}
 
-	// 委托 FileV2 判断文件或目录是否存在
-	return FileV2.Exist(target)
+	// 委托 File 判断文件或目录是否存在
+	return File.Exist(target)
 }
 
 // Line 按行读取文件
@@ -1019,9 +1019,9 @@ func (this *FileStruct) DirInfo(dir ...any) (result *FileResponse) {
 /**
  * @return *FileResponse
  * @example：
- * 1. item := utils.File().Dir("public").Name("name.zip").EnZip()
- * 2. item := utils.File().Dir("public").Path("public/name.zip").EnZip()
- * 3. item := utils.File(utils.FileRequest{
+ * 1. item := utils.NewFile().Dir("public").Name("name.zip").EnZip()
+ * 2. item := utils.NewFile().Dir("public").Path("public/name.zip").EnZip()
+ * 3. item := utils.NewFile(utils.FileRequest{
 	Path: "public/name.zip",
 	Dir: "public",
 }).EnZip()
@@ -1149,9 +1149,9 @@ func (this *FileStruct) EnZip() (result *FileResponse) {
 /**
  * @return *FileResponse
  * @example：
- * 1. item := utils.File().Dir("public").Name("name.zip").UnZip()
- * 2. item := utils.File().Dir("public").Path("public/name.zip").UnZip()
- * 3. item := utils.File(utils.FileRequest{
+ * 1. item := utils.NewFile().Dir("public").Name("name.zip").UnZip()
+ * 2. item := utils.NewFile().Dir("public").Path("public/name.zip").UnZip()
+ * 3. item := utils.NewFile(utils.FileRequest{
 	Path: "public/name.zip",
 	Dir: "public",
 }).UnZip()
