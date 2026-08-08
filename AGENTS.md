@@ -24,11 +24,12 @@
 
 ```
 ├── main.go      # 空占位 main，无实际逻辑
-├── dto/         # 数据传输对象：各服务的配置与响应结构体（StorageConfig、LogConfig、JwtBody 等），纯 struct，无行为
-├── facade/      # 门面层：全局单例服务（存储 / 日志），面向调用方的统一入口
+├── dto/         # 数据传输对象：各服务的配置与响应结构体（LogConfig、JwtBody 等），纯 struct，无行为
+├── facade/      # 门面层：全局单例服务（日志），面向调用方的统一入口
 ├── pushx/       # 消息推送：以接口模式封装短信 / 邮件验证码推送，注册表 + 链式调用，可扩展服务商
 ├── cachex/      # 缓存：以接口模式封装文件 / Redis 缓存，注册表 + 链式调用，可扩展后端
-├── licence/     # 许可证签发与验签：Ed25519 签名信封，纯函数层，不依赖数据库与配置
+├── storagex/    # 存储：以接口模式封装本地 / OSS / COS 文件存储，注册表 + 链式调用，可扩展后端
+├── licence/     # 授权平台 Go SDK：运行面客户端（激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储）+ 在线更新 + SaaS 租户 + 管理面 AdminClient（登录态/项目/实例/许可证/资格/密钥/发布物/版本）
 └── utils/       # 工具函数集合（36 个文件）：校验、加解密、JWT、日期、HTTP、文件、数组、掩码等
 ```
 
@@ -41,9 +42,8 @@
 
 ### facade 包约定
 
-- 每个服务有一对入口：**配置控制器单例**（`StorageInst` / `LogInst`）+ **全局活动实例**（如 `facade.Storage`、`facade.Log`）。
+- 每个服务有一对入口：**配置控制器单例**（`LogInst`）+ **全局活动实例**（`facade.Log`）。
 - 统一生命周期：包 `init()` 时以默认配置初始化；调用方通过 `XxxInst.Init(dto.XxxConfig{...})` 注入配置；`ReloadIfChanged()` 依据配置 Hash 判断是否需要热重载。`normConfig()` 负责补齐默认值，保证不同接入方行为一致。
-- 存储（`facade/storage.go`）支持 `local` / `oss` / `cos` 三种引擎，通过 `StorageAPI` 接口抽象；`Dir(...).Name(...).Ext(...).Upload(...)` 链式调用通过 clone 实现，链式参数与共享配置/客户端隔离。本地存储写入 `public/storage/` 目录。
 - 日志（`facade/log.go`）基于 zap + lumberjack 滚动切割，默认值：`Size=2MB`、`Age=7天`、`Backups=20`。
 
 ### cachex 包约定（缓存）
@@ -66,10 +66,28 @@
 - 全局门面与 facade 层同构：控制器单例 `pushx.Inst`（`Init` / `ReloadIfChanged`，`sync.RWMutex` 保护）+ 全局实例 `pushx.Push`（链式智能路由）、`pushx.Email` / `pushx.SMS`（当前驱动）。驱动初始化失败时全局位用 `senderError` 占位，`Send` 时返回原始初始化错误。
 - 内置驱动文件：`email.go`（gomail 邮件）、`aliyun.go`、`tencent.go`、`smsbao.go`；邮件 HTML 模板常量在 `template.go`（`TempEmailCode`）。
 
-### licence 包约定
+### licence 包约定（licen-hub 授权平台 Go SDK）
 
-- 纯函数层：`Issue`（签发）、`VerifyEnvelope`（验签）、`Parse`（解析）、`GenerateKeyPair`、`Nonce`。
-- 信封格式（`Envelope`/`Payload`，`envelope.go`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**
+> 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
+
+- **纯函数层**（`envelope.go` / `sign.go` / `licence.go`）：`Issue`（签发）、`VerifyEnvelope`/`VerifyRaw`（验签）、`Parse`/`ParseEnvelope`（解析）、`GenerateKeyPair`、`Nonce`。信封格式（`Envelope`/`Payload`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**
+- **验签首选原文模式**：`ParseEnvelope` 返回载荷原始字节，`VerifyRaw` 基于原文验签——平台只追加新字段时重序列化会丢字段导致验签失败，原文验签天然兼容。
+- **运行面客户端**（`client.go` / `transport.go`）：`licence.New(Options)` 创建、`Start/Stop` 管理后台滑动刷新循环；`Options.ServerURL` 是平台 URI 唯一入口；内部完成激活、token 与客户端密钥对管理、逐请求 Ed25519 签名（契约 §2.4）、信封缓存与离线宽限降级、用量合并上报；业务侧只感知 `Status()` / `HasFeature()` / `GetLimit()` / `CheckVersion()` / `ReportUsage()`。
+- **在线更新**（`manifest.go` / `update.go`）：`CheckUpdate`（清单 release-key 验签 + 发布物签名复核）、`DownloadArtifact`（大小 + SHA-256 校验，原子落盘）、`ReportUpgrade` / `ReportUpgradeLog`（升级轨迹）、`VerifyManifest`（离线包清单验签入口）；release 公钥经 `Options.ReleasePublicKeys` 内置。清单/发布物载荷（`ManifestPayload`/`ArtifactPayload`）与平台 `app/common/sign/manifest.go`/`artifact.go` 字节级镜像。
+- **SaaS 租户**（`tenant.go` / `saas.go`）：`TenantSync`（水位线增量 + 信封验签缓存）/`TenantValidate`/`TenantCurrent`/`TenantStatus`/`TenantFeature`；租户载荷（`TenantPayload`）与平台 `app/common/sign/tenant.go` 字节级镜像，license-key 验签（用 `Options.PublicKeys`）。
+- **状态码**（`status.go`）与平台 `app/common/license-status.go` 逐一对应；`localStatus` 是离线本地时间维度判定（服务端判定的镜像）。
+- **版本范围**（`version-range.go`）与平台 `app/common/version-range.go` 语义逐一对应，改动必须双侧同步。
+- **实例指纹**（`fingerprint*.go`）：机器 ID + 系统 UUID + 主板序列号多因子加盐 SHA-256，按平台分文件采集（build tags），禁止单用 IP/MAC；`FingerprintProvider` 与 `Options.Fingerprint` 为注入/覆盖入口。
+- **安全存储**（`store.go`）：`Store` 接口 + 默认 AES-256-GCM 加密文件（密钥派生自 盐+指纹，权限 0600）；token、客户端私钥、信封缓存只允许经 `Store` 持久化。
+- **测试**：`golden_test.go` 的 canonical/签名向量由平台签发端原样生成，是双仓库字节兼容的验收线——改 `Payload` 或序列化语义后必须重新生成向量（方法见 licen-hub `docs/md/开发者SDK设计方案.md`）；`client_test.go` 用 httptest 假平台做端到端（含请求验签镜像），禁止联网测试。
+
+#### 管理面（AdminClient，二期并入本包）
+
+- **定位**：面向商户自有运维系统/CI 的管理面 typed client（`admin.go`/`admin-response.go`/`admin-types.go`），与运行面（同包 `Client`）协议完全不同——管理面是后台登录态接口，统一 `{code,msg,data}` 信封（HTTP 状态码恒为 200，业务结果看 code），路由统一 `/api/{table}/{key}`（GET 走 query，POST/PUT/DELETE 走 JSON body），与 licen-hub/backend 的 `GenRoute` 逐一对齐，禁止发明平台没有的路由。
+- **登录态**（`admin.go`）：`licence.NewAdmin(AdminOptions)` 创建；`AdminOptions.ServerURL` 是平台 URI 唯一入口；账密登录（`POST /api/comm/sign-in`）换取 JWT，以 `Authorization: Bearer <token.value>` 携带；token 仅内存保管（`Token()`/`SetToken()` 供 CI 复用会话）；首次请求自动登录、令牌过期（毫秒）预判重登、业务 401 自动重登并重试一次。登录账密按平台现状以明文 JSON 上送（平台的 AES 加密上送通道未实现），依赖 HTTPS 保护；平台若开启「API 签名验证」（safety.api.sign）管理面客户端不支持。
+- **错误分层**（`admin-response.go`）：传输层（非 200 状态码）返回 `*HTTPError`，业务 code != 200 返回 `*APIError`（含 Code/Msg/Data，登录 2FA 闸门触发时 `Require2FA=true`），网络错误原样包装；分页结果用泛型 `Page[T]`（对应信封 data 内的 `{data,count,page}`）。
+- **资源分文件**：`projects.go` / `instances.go` / `licenses.go` / `qualification.go` / `signingkeys.go` / `artifacts.go` / `versions.go`，以 `client.Projects.Rows(ctx, ...)` 形式挂在 AdminClient 的资源组字段上；DTO（`admin-types.go`）的 json tag 与平台模型/请求结构体逐一对齐（camelCase），查询数组参数按平台约定序列化为 `key[]=v` 重复键。
+- **测试**：httptest 假平台（`utils.Resp` 写信封保证结构一致），覆盖登录、自动带 token、过期/401 重登、错误分层、分页解析、公钥导出、发布物代验与 multipart 上传，禁止联网测试。
 
 ## 构建与测试命令
 
@@ -82,7 +100,7 @@ go test ./...     # 运行全部测试
 go test ./licence/ -v   # 单独跑 licence 包测试
 ```
 
-当前有测试的包：`licence`（签发/验签/防篡改，表驱动风格）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）与 `cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
+当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）与 `cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
 
 ## 代码风格指南
 
