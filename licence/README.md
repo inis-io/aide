@@ -24,7 +24,7 @@
 ## 2. 安装
 
 ```bash
-go get github.com/inis-io/aide
+go get github.com/inis-io/aide/licence
 ```
 
 ```go
@@ -196,7 +196,7 @@ pub, _ := admin.SigningKeys.Public(ctx, "license", "")   // 导出验签公钥
 verify, _ := admin.Artifacts.VerifyWithFile(ctx, 3, "app.tar.gz", file) // 服务端代验
 ```
 
-资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）。
+资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）、`Modules`（项目功能模块）、`SaasMenus`（菜单清单草稿/发布/归档）、`SaasFeatures`（功能字典登记/禁用/删除）、`SaasPlans`（套餐定义/状态流转）、`SaasTenants`（租户开通/变更/状态机/重签/批量续期/用量/留痕）、`SaasReview`（租户申请单审批）。
 
 注意：管理面账密按明文 JSON 上送，**必须走 HTTPS**。
 

@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inis-io/aide/utils"
 )
 
 // ============================= 管理面假平台 =============================
@@ -169,11 +168,18 @@ func (this *fakeHub) writeError(writer http.ResponseWriter, code int, msg string
 	this.writeEnvelope(writer, code, msg, data)
 }
 
-// writeEnvelope - 按平台 utils.Resp 结构写信封
+// respEnvelope - 平台响应信封（与平台 utils.Resp 结构一致；licence 为独立模块，测试内联不复依赖 aide/utils）
+type respEnvelope struct {
+	Msg  string `json:"msg"`
+	Code int    `json:"code"`
+	Data any    `json:"data"`
+}
+
+// writeEnvelope - 按平台响应信封结构写响应
 func (this *fakeHub) writeEnvelope(writer http.ResponseWriter, code int, msg string, data any) {
 
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	raw, _ := json.Marshal(utils.Resp{Msg: msg, Code: code, Data: data})
+	raw, _ := json.Marshal(respEnvelope{Msg: msg, Code: code, Data: data})
 	_, _ = writer.Write(raw)
 }
 
