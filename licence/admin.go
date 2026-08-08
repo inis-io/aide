@@ -79,6 +79,18 @@ type AdminClient struct {
 	Artifacts *ArtifactsResource
 	// Versions - 项目版本（/api/project-versions/*）
 	Versions *VersionsResource
+	// Modules - 项目功能模块（/api/project-modules/*）
+	Modules *ProjectModulesResource
+	// SaasMenus - SaaS 菜单清单（/api/saas-menus/*）
+	SaasMenus *SaasMenusResource
+	// SaasFeatures - SaaS 功能字典（/api/saas-features/*）
+	SaasFeatures *SaasFeaturesResource
+	// SaasPlans - SaaS 套餐模板（/api/saas-plans/*）
+	SaasPlans *SaasPlansResource
+	// SaasTenants - SaaS 租户（/api/saas-tenants/*）
+	SaasTenants *SaasTenantsResource
+	// SaasReview - SaaS 租户申请审批（/api/saas-review/*）
+	SaasReview *SaasReviewResource
 }
 
 // New - 创建管理面客户端（归一化配置，不发起网络请求）
@@ -107,6 +119,12 @@ func NewAdmin(options AdminOptions) (*AdminClient, error) {
 	client.SigningKeys = &SigningKeysResource{client: client}
 	client.Artifacts = &ArtifactsResource{client: client}
 	client.Versions = &VersionsResource{client: client}
+	client.Modules = &ProjectModulesResource{client: client}
+	client.SaasMenus = &SaasMenusResource{client: client}
+	client.SaasFeatures = &SaasFeaturesResource{client: client}
+	client.SaasPlans = &SaasPlansResource{client: client}
+	client.SaasTenants = &SaasTenantsResource{client: client}
+	client.SaasReview = &SaasReviewResource{client: client}
 	return client, nil
 }
 

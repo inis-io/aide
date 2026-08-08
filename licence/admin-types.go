@@ -1006,3 +1006,742 @@ type ReleaseResult struct {
 	// Version - 语义版本号
 	Version string `json:"version"`
 }
+
+// ============================= SaaS 菜单清单 =============================
+
+// SaasMenuManifest - SaaS 应用菜单清单（平台 models/basic.SaasMenuManifest）
+// 项目级版本化清单：projectId + version 联合唯一；每个项目同一时刻仅一条 published。
+type SaasMenuManifest struct {
+	// Id - 清单ID
+	Id int `json:"id"`
+	// ProjectId - 所属项目ID
+	ProjectId int `json:"projectId"`
+	// UserId - 归属用户ID（冗余自项目）
+	UserId int `json:"userId"`
+	// Version - 清单版本号（项目内递增）
+	Version int `json:"version"`
+	// Manifest - 清单原文（JSON 字符串，结构见平台 types.SaasManifest）
+	Manifest string `json:"manifest"`
+	// Status - 状态（draft/published/archived）
+	Status string `json:"status"`
+	// PublishedAt - 发布时间（毫秒）
+	PublishedAt int64 `json:"publishedAt"`
+	// Uid - 操作人用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// SaasMenuFindParams - 菜单清单分页查询参数（平台 types.SaasMenuManifestFind）
+type SaasMenuFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId,omitempty"`
+	// Status - 清单状态（draft/published/archived）
+	Status string `json:"status,omitempty"`
+}
+
+// SaasMenuSaveInput - 保存菜单清单草稿参数（平台 types.SaasMenuManifestSave）
+// Id=0 新建递增版本草稿；否则更新既有 draft 行（published/archived 不可改）。
+type SaasMenuSaveInput struct {
+	// Id - 清单ID（0=新建版本草稿）
+	Id int `json:"id,omitempty"`
+	// ProjectId - 项目ID（必填）
+	ProjectId int `json:"projectId"`
+	// Manifest - 清单原文（JSON，草稿允许半成品，发布时才做完整结构校验）
+	Manifest string `json:"manifest"`
+	// Remark - 备注
+	Remark string `json:"remark,omitempty"`
+}
+
+// SaasMenuSaveResult - 清单保存/发布结果（save/publish 接口的 data）
+type SaasMenuSaveResult struct {
+	// Id - 清单ID
+	Id int `json:"id"`
+	// Version - 清单版本号
+	Version int `json:"version"`
+}
+
+// ============================= SaaS 功能字典 =============================
+
+// SaasFeatureDict - 项目功能字典（平台 models/basic.SaasFeatureDict）
+// 功能编码项目内唯一；disabled 后套餐不可再引用，存量已签发信封不受影响。
+type SaasFeatureDict struct {
+	// Id - 字典ID
+	Id int `json:"id"`
+	// ProjectId - 所属项目ID
+	ProjectId int `json:"projectId"`
+	// UserId - 归属用户ID（冗余自项目）
+	UserId int `json:"userId"`
+	// FeatureCode - 功能编码（登记后不可改）
+	FeatureCode string `json:"featureCode"`
+	// FeatureName - 功能名称
+	FeatureName string `json:"featureName"`
+	// Description - 功能说明
+	Description string `json:"description"`
+	// Status - 状态（enabled/disabled）
+	Status string `json:"status"`
+	// Uid - 操作人用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// SaasFeatureFindParams - 功能字典分页查询参数（平台 types.SaasFeatureFind）
+type SaasFeatureFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId,omitempty"`
+	// Status - 状态（enabled/disabled）
+	Status string `json:"status,omitempty"`
+}
+
+// SaasFeatureSaveInput - 功能字典登记/修改参数（平台 types.SaasFeatureSave）
+// Id=0 登记；修改时 featureCode 必须与现值一致（登记后不可改，仅名称/说明可改）。
+type SaasFeatureSaveInput struct {
+	// Id - 字典ID（0=登记）
+	Id int `json:"id,omitempty"`
+	// ProjectId - 项目ID（必填）
+	ProjectId int `json:"projectId"`
+	// FeatureCode - 功能编码（必填，小写字母/数字开头，段间可含 . _ -）
+	FeatureCode string `json:"featureCode"`
+	// FeatureName - 功能名称（必填）
+	FeatureName string `json:"featureName"`
+	// Description - 功能说明
+	Description string `json:"description,omitempty"`
+}
+
+// ============================= SaaS 套餐 =============================
+
+// SaasPlan - 套餐模板（平台 models/basic.SaasPlan）
+// features/limits/menuCodes 在模型层为 JSON 文本，读取时按原文返回（可自行 unmarshal）。
+type SaasPlan struct {
+	// Id - 套餐ID
+	Id int `json:"id"`
+	// PlanNo - 套餐编号（PLN-{年}-%06d）
+	PlanNo string `json:"planNo"`
+	// ProjectId - 所属项目ID
+	ProjectId int `json:"projectId"`
+	// UserId - 归属用户ID
+	UserId int `json:"userId"`
+	// PlanCode - 套餐编码（签发入载荷，创建后不可改）
+	PlanCode string `json:"planCode"`
+	// PlanName - 套餐名称
+	PlanName string `json:"planName"`
+	// Description - 套餐描述
+	Description string `json:"description"`
+	// Features - 功能权益（JSON map[string]bool 原文）
+	Features string `json:"features"`
+	// Limits - 额度（JSON map[string]int64 原文）
+	Limits string `json:"limits"`
+	// MenuCodes - 菜单编码数组（JSON 原文，当前 published 清单 code 子集）
+	MenuCodes string `json:"menuCodes"`
+	// ManifestVersion - 选单依据的清单版本（溯源用）
+	ManifestVersion int `json:"manifestVersion"`
+	// Status - 状态（draft/enabled/disabled；仅 enabled 可被订阅）
+	Status string `json:"status"`
+	// Sort - 排序
+	Sort int `json:"sort"`
+	// Uid - 操作人用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// SaasPlanFindParams - 套餐分页查询参数（平台 types.SaasPlanFind）
+type SaasPlanFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId,omitempty"`
+	// Status - 套餐状态（draft/enabled/disabled）
+	Status string `json:"status,omitempty"`
+}
+
+// SaasPlanSaveInput - 套餐新建/修改参数（平台 types.SaasPlanSave）
+// Create 时 Id 留空；Update 时 Id 必填且 planCode 须与现值一致；
+// 保存即做功能字典引用与菜单子集校验（menuCodes 须为当前 published 清单 code 子集）。
+type SaasPlanSaveInput struct {
+	// Id - 套餐ID（Update 必填，Create 留空）
+	Id int `json:"id,omitempty"`
+	// ProjectId - 项目ID（必填）
+	ProjectId int `json:"projectId"`
+	// PlanCode - 套餐编码（必填，创建后不可改）
+	PlanCode string `json:"planCode"`
+	// PlanName - 套餐名称（必填）
+	PlanName string `json:"planName"`
+	// Description - 套餐描述
+	Description string `json:"description,omitempty"`
+	// Features - 功能权益（每个 key 须命中功能字典 enabled）
+	Features map[string]bool `json:"features,omitempty"`
+	// Limits - 额度
+	Limits map[string]int64 `json:"limits,omitempty"`
+	// MenuCodes - 菜单编码数组（当前 published 清单 code 子集）
+	MenuCodes []string `json:"menuCodes,omitempty"`
+	// Sort - 排序
+	Sort int `json:"sort,omitempty"`
+	// Remark - 备注
+	Remark string `json:"remark,omitempty"`
+}
+
+// PlanNoResult - 套餐新建结果（create 接口的 data）
+type PlanNoResult struct {
+	// Id - 套餐ID
+	Id int `json:"id"`
+	// PlanNo - 套餐编号
+	PlanNo string `json:"planNo"`
+}
+
+// ============================= SaaS 租户 =============================
+
+// SaasTenant - SaaS 租户（平台 models/basic.SaasTenant）
+// 主状态机：pending → active ↔ suspended → revoked（不可逆）；
+// 时间派生态由 validUntil + graceDays 调用时即时判定，不入库。
+type SaasTenant struct {
+	// Id - 租户ID
+	Id int `json:"id"`
+	// TenantNo - 租户编号（TEN-{年}-%06d）
+	TenantNo string `json:"tenantNo"`
+	// ProjectId - 所属项目ID
+	ProjectId int `json:"projectId"`
+	// UserId - 归属用户ID
+	UserId int `json:"userId"`
+	// TenantCode - 租户编码（SaaS 应用上送，项目内唯一）
+	TenantCode string `json:"tenantCode"`
+	// TenantName - 租户名称（非权益字段，直改生效）
+	TenantName string `json:"tenantName"`
+	// Contact - 联系人信息（JSON 原文：name/phone/email，仅备案）
+	Contact string `json:"contact"`
+	// SubscriptionType - 订阅类型（trial/official）
+	SubscriptionType string `json:"subscriptionType"`
+	// PlanId - 当前订阅套餐ID
+	PlanId int `json:"planId"`
+	// Overrides - 个性化覆盖（JSON 原文，增量合并到套餐基线）
+	Overrides string `json:"overrides"`
+	// Environment - 环境
+	Environment string `json:"environment"`
+	// ValidFrom - 生效时间（毫秒）
+	ValidFrom int64 `json:"validFrom"`
+	// ValidUntil - 到期时间（毫秒，0=永久）
+	ValidUntil int64 `json:"validUntil"`
+	// GraceDays - 宽限期（天）
+	GraceDays int `json:"graceDays"`
+	// VersionRange - 允许的 SaaS 应用版本范围
+	VersionRange string `json:"versionRange"`
+	// Status - 状态（pending/active/suspended/revoked）
+	Status string `json:"status"`
+	// Payload - 最近签发的载荷快照（JSON 原文，仅归属人/平台可见）
+	Payload string `json:"payload"`
+	// Signature - 载荷签名（hex）
+	Signature string `json:"signature"`
+	// KeyVersion - 签名密钥版本
+	KeyVersion string `json:"keyVersion"`
+	// Version - 乐观锁版本
+	Version int `json:"version"`
+	// Uid - 操作人用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// SaasTenantFindParams - 租户分页查询参数（平台 types.SaasTenantFind；userId 仅平台视角生效）
+type SaasTenantFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId,omitempty"`
+	// UserId - 归属用户ID（仅平台视角筛选生效）
+	UserId int `json:"userId,omitempty"`
+	// Status - 租户状态（pending/active/suspended/revoked）
+	Status string `json:"status,omitempty"`
+	// Environment - 环境（dev/test/staging/production/dr）
+	Environment string `json:"environment,omitempty"`
+}
+
+// SaasTenantPayloadView - 租户授权原文视图（take-payload 接口的 data）
+type SaasTenantPayloadView struct {
+	// TenantNo - 租户编号
+	TenantNo string `json:"tenantNo"`
+	// Payload - 载荷快照（JSON 原文，可用本包 TenantPayload 解析并验签）
+	Payload string `json:"payload"`
+	// Signature - 载荷签名（hex）
+	Signature string `json:"signature"`
+	// KeyVersion - 签名密钥版本
+	KeyVersion string `json:"keyVersion"`
+}
+
+// SaasOverrideMenus - 个性化覆盖的菜单增删结构（平台 types.SaasOverrideMenus）
+type SaasOverrideMenus struct {
+	// Add - 新增菜单编码
+	Add []string `json:"add,omitempty"`
+	// Remove - 移除菜单编码
+	Remove []string `json:"remove,omitempty"`
+}
+
+// SaasOverrides - 租户个性化覆盖（套餐基线的增量，平台 types.SaasOverrides）
+type SaasOverrides struct {
+	// Features - 功能开关覆盖（true 加购 / false 裁剪，key 须命中功能字典）
+	Features map[string]bool `json:"features,omitempty"`
+	// Limits - 额度覆盖
+	Limits map[string]int64 `json:"limits,omitempty"`
+	// Menus - 菜单增删（在套餐 menuCodes 基础上）
+	Menus SaasOverrideMenus `json:"menus,omitempty"`
+}
+
+// SaasTenantContact - 租户联系人（仅备案，非权益字段，平台 types.SaasTenantContact）
+type SaasTenantContact struct {
+	// Name - 联系人姓名
+	Name string `json:"name,omitempty"`
+	// Phone - 联系电话
+	Phone string `json:"phone,omitempty"`
+	// Email - 联系邮箱
+	Email string `json:"email,omitempty"`
+}
+
+// SaasTenantSubscribeInput - 租户开通申请参数（平台 types.SaasTenantSubscribe）
+// member 走申请单（命中自动过单则即时生效）；platform 直通生效不产生申请单。
+type SaasTenantSubscribeInput struct {
+	// ProjectId - 项目ID（必填，delivery_mode=saas 且归当前用户可写范围）
+	ProjectId int `json:"projectId"`
+	// PlanId - 套餐ID（必填，须属于该项目且 enabled）
+	PlanId int `json:"planId"`
+	// TenantCode - 租户编码（必填，项目内唯一）
+	TenantCode string `json:"tenantCode"`
+	// TenantName - 租户名称（必填）
+	TenantName string `json:"tenantName"`
+	// Contact - 联系人信息（可选）
+	Contact *SaasTenantContact `json:"contact,omitempty"`
+	// SubscriptionType - 订阅类型（trial/official，必填）
+	SubscriptionType string `json:"subscriptionType"`
+	// Overrides - 个性化覆盖（可选）
+	Overrides *SaasOverrides `json:"overrides,omitempty"`
+	// Environment - 环境（dev/test/staging/production/dr，必填）
+	Environment string `json:"environment"`
+	// ValidFrom - 生效时间（毫秒，0=立即）
+	ValidFrom int64 `json:"validFrom,omitempty"`
+	// ValidUntil - 到期时间（毫秒，0=永久）
+	ValidUntil int64 `json:"validUntil,omitempty"`
+	// GraceDays - 宽限期（天）
+	GraceDays int `json:"graceDays,omitempty"`
+	// VersionRange - 允许的版本范围
+	VersionRange string `json:"versionRange,omitempty"`
+	// Reason - 申请说明（必填）
+	Reason string `json:"reason"`
+}
+
+// SaasTenantSubscribeResult - 租户开通结果（subscribe 接口的 data）
+// 三种形态：member 待审 {id=申请单ID, applyNo, tenantId}；命中自动过单 {id=租户ID, tenantNo, applyNo, autoApproved=true}；
+// platform 直通 {id=租户ID, tenantNo}。
+type SaasTenantSubscribeResult struct {
+	// Id - 记录ID（待审为申请单ID，生效为租户ID）
+	Id int `json:"id"`
+	// TenantId - 新建的 pending 租户ID（member 待审时返回）
+	TenantId int `json:"tenantId"`
+	// TenantNo - 租户编号（生效时返回）
+	TenantNo string `json:"tenantNo"`
+	// ApplyNo - 申请编号（member 路径返回）
+	ApplyNo string `json:"applyNo"`
+	// AutoApproved - 是否命中自动过单即时生效
+	AutoApproved bool `json:"autoApproved"`
+}
+
+// SaasTenantChangeInput - 租户权益变更申请参数（平台 types.SaasTenantChange）
+// 仅 active 租户可发起（一律人工审批）；pending 租户为驳回后重新提审；platform 直通生效。
+type SaasTenantChangeInput struct {
+	// TenantId - 租户ID（必填）
+	TenantId int `json:"tenantId"`
+	// PlanId - 新套餐ID（必填，须属于该项目且 enabled）
+	PlanId int `json:"planId"`
+	// SubscriptionType - 订阅类型（trial/official，必填）
+	SubscriptionType string `json:"subscriptionType"`
+	// Overrides - 个性化覆盖（可选）
+	Overrides *SaasOverrides `json:"overrides,omitempty"`
+	// Environment - 环境（必填）
+	Environment string `json:"environment"`
+	// ValidFrom - 生效时间（毫秒，0=立即）
+	ValidFrom int64 `json:"validFrom,omitempty"`
+	// ValidUntil - 到期时间（毫秒，0=永久）
+	ValidUntil int64 `json:"validUntil,omitempty"`
+	// GraceDays - 宽限期（天）
+	GraceDays int `json:"graceDays,omitempty"`
+	// VersionRange - 允许的版本范围
+	VersionRange string `json:"versionRange,omitempty"`
+	// Reason - 申请说明（必填）
+	Reason string `json:"reason"`
+}
+
+// SaasTenantChangeResult - 租户变更结果（change 接口的 data）
+// member 待审 {id=申请单ID, applyNo}；platform 直通 {id=租户ID, tenantNo}；重新提审命中自动过单时同 subscribe。
+type SaasTenantChangeResult struct {
+	// Id - 记录ID（待审为申请单ID，生效为租户ID）
+	Id int `json:"id"`
+	// TenantNo - 租户编号（生效时返回）
+	TenantNo string `json:"tenantNo"`
+	// ApplyNo - 申请编号（member 路径返回）
+	ApplyNo string `json:"applyNo"`
+	// AutoApproved - 是否命中自动过单即时生效（重新提审场景）
+	AutoApproved bool `json:"autoApproved"`
+}
+
+// SaasTenantInfoUpdateInput - 租户非权益字段直改参数（平台 types.SaasTenantInfoUpdate，即时生效 + 审计）
+type SaasTenantInfoUpdateInput struct {
+	// Id - 租户ID（必填）
+	Id int `json:"id"`
+	// TenantName - 租户名称（必填）
+	TenantName string `json:"tenantName"`
+	// Contact - 联系人信息
+	Contact *SaasTenantContact `json:"contact,omitempty"`
+}
+
+// SaasTenantActionInput - 租户状态机操作参数（平台 types.SaasTenantAction，suspend/resume/revoke 共用）
+type SaasTenantActionInput struct {
+	// Id - 租户ID（必填）
+	Id int `json:"id"`
+	// Reason - 操作原因（必填）
+	Reason string `json:"reason"`
+}
+
+// SaasTenantReissueInput - 租户重签参数（平台 types.SaasTenantReissue）
+// 平台纠错通道：以现载荷为基础按入参覆盖重签，空值沿用现载荷；直通不产生申请单。
+type SaasTenantReissueInput struct {
+	// Id - 租户ID（必填）
+	Id int `json:"id"`
+	// Reason - 操作原因
+	Reason string `json:"reason,omitempty"`
+	// Environment - 环境（非空覆盖）
+	Environment string `json:"environment,omitempty"`
+	// ValidFrom - 生效时间（毫秒，0=保留原值）
+	ValidFrom int64 `json:"validFrom,omitempty"`
+	// ValidUntil - 到期时间（毫秒，0=保留原值）
+	ValidUntil int64 `json:"validUntil,omitempty"`
+	// GraceDays - 宽限期（天，0=保留原值）
+	GraceDays int `json:"graceDays,omitempty"`
+	// VersionRange - 允许的版本范围（非空覆盖）
+	VersionRange string `json:"versionRange,omitempty"`
+	// Features - 功能权益（非空覆盖）
+	Features map[string]bool `json:"features,omitempty"`
+	// Limits - 额度（非空覆盖）
+	Limits map[string]int64 `json:"limits,omitempty"`
+	// MenuCodes - 菜单编码（非空覆盖）
+	MenuCodes []string `json:"menuCodes,omitempty"`
+}
+
+// SaasTenantNoResult - 租户编号结果（reissue/直通开通等接口的 data）
+type SaasTenantNoResult struct {
+	// Id - 租户ID
+	Id int `json:"id"`
+	// TenantNo - 租户编号
+	TenantNo string `json:"tenantNo"`
+}
+
+// ============================= SaaS 租户申请单 / 审批 =============================
+
+// SaasTenantApplication - 租户开通/变更申请单（平台 models/basic.SaasTenantApplication）
+// 状态机：pending → approved / rejected / cancelled；同一租户同时只允许一条 pending。
+type SaasTenantApplication struct {
+	// Id - 申请单ID
+	Id int `json:"id"`
+	// ApplyNo - 申请编号（SCA-{年}-%06d）
+	ApplyNo string `json:"applyNo"`
+	// BizType - 业务类型（subscribe/change）
+	BizType string `json:"bizType"`
+	// TenantId - 目标租户ID
+	TenantId int `json:"tenantId"`
+	// ProjectId - 所属项目ID
+	ProjectId int `json:"projectId"`
+	// UserId - 申请人用户ID
+	UserId int `json:"userId"`
+	// RequestPayload - 权益提案快照（JSON 原文：套餐快照+overrides+期限/环境）
+	RequestPayload string `json:"requestPayload"`
+	// MergedPreview - 合并后权益预览（JSON 原文：features/limits/menuCodes 拍平）
+	MergedPreview string `json:"mergedPreview"`
+	// Reason - 申请说明
+	Reason string `json:"reason"`
+	// Status - 状态（pending/approved/rejected/cancelled）
+	Status string `json:"status"`
+	// ReviewNote - 审批意见（自动过单记录命中的护栏规则）
+	ReviewNote string `json:"reviewNote"`
+	// ReviewerId - 审批人用户ID（自动过单为 0=系统）
+	ReviewerId int `json:"reviewerId"`
+	// ReviewedAt - 审批时间（毫秒）
+	ReviewedAt int64 `json:"reviewedAt"`
+	// Version - 乐观锁版本
+	Version int `json:"version"`
+	// Uid - 操作人用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// SaasTenantApplicationFindParams - 租户申请单分页查询参数（平台 types.SaasTenantApplicationFind；
+// 我的申请与审批队列共用，userId 仅审批视角生效）
+type SaasTenantApplicationFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId,omitempty"`
+	// UserId - 申请人用户ID（审批视角筛选）
+	UserId int `json:"userId,omitempty"`
+	// BizType - 业务类型（subscribe/change）
+	BizType string `json:"bizType,omitempty"`
+	// Status - 申请状态（pending/approved/rejected/cancelled）
+	Status string `json:"status,omitempty"`
+}
+
+// SaasReviewInput - 租户申请审批参数（平台 types.SaasReviewAction，需 saas.review 权限）
+type SaasReviewInput struct {
+	// Id - 申请单ID（必填）
+	Id int `json:"id"`
+	// Action - 审批动作（approve/reject，必填；approve 单事务生效并签发）
+	Action string `json:"action"`
+	// ReviewNote - 审批意见（reject 时必填）
+	ReviewNote string `json:"reviewNote,omitempty"`
+}
+
+// SaasReviewResult - 租户申请审批结果（review 接口的 data）
+type SaasReviewResult struct {
+	// Id - 申请单ID（approve 时为目标租户ID）
+	Id int `json:"id"`
+	// TenantNo - 生效租户编号（仅 approve 返回）
+	TenantNo string `json:"tenantNo"`
+	// Action - 审批动作
+	Action string `json:"action"`
+}
+
+// ============================= SaaS 租户用量与留痕 =============================
+
+// SaasTenantUsageRow - 租户用量历史行（usage/find 接口 data 内行，含租户编号/编码冗余）
+type SaasTenantUsageRow struct {
+	// Id - 用量记录ID
+	Id int `json:"id"`
+	// TenantId - 租户ID
+	TenantId int `json:"tenantId"`
+	// ProjectId - 所属项目ID
+	ProjectId int `json:"projectId"`
+	// TenantNo - 租户编号
+	TenantNo string `json:"tenantNo"`
+	// TenantCode - 租户编码
+	TenantCode string `json:"tenantCode"`
+	// LimitKey - 额度项（与载荷 limits key 对齐）
+	LimitKey string `json:"limitKey"`
+	// LimitValue - 上报用量值
+	LimitValue int64 `json:"limitValue"`
+	// ReportedAt - 上报时间（毫秒）
+	ReportedAt int64 `json:"reportedAt"`
+	// HourBucket - 小时水位（reportedAt 截断到整点）
+	HourBucket int64 `json:"hourBucket"`
+}
+
+// SaasTenantUsageFindParams - 租户用量历史分页查询参数（平台 types.SaasTenantUsageFind）
+type SaasTenantUsageFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// TenantId - 租户ID
+	TenantId int `json:"tenantId,omitempty"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId,omitempty"`
+	// LimitKey - 额度项
+	LimitKey string `json:"limitKey,omitempty"`
+	// StartTime - 上报时间起（毫秒）
+	StartTime int64 `json:"startTime,omitempty"`
+	// EndTime - 上报时间止（毫秒）
+	EndTime int64 `json:"endTime,omitempty"`
+}
+
+// SaasTenantUsageItem - 用量水位项（额度项取载荷 limits 与已上报 key 的并集，nil 表示无该维度）
+type SaasTenantUsageItem struct {
+	// LimitKey - 额度项
+	LimitKey string `json:"limitKey"`
+	// Limit - 载荷 limits 上限（nil=载荷未定义该项）
+	Limit *int64 `json:"limit"`
+	// Value - 最新上报值（nil=未上报过）
+	Value *int64 `json:"value"`
+	// ReportedAt - 最新上报时间（毫秒，nil=未上报过）
+	ReportedAt *int64 `json:"reportedAt"`
+}
+
+// SaasTenantUsageSummary - 租户用量水位（usage/summary 接口的 data）
+type SaasTenantUsageSummary struct {
+	// TenantId - 租户ID
+	TenantId int `json:"tenantId"`
+	// TenantNo - 租户编号
+	TenantNo string `json:"tenantNo"`
+	// Items - 用量水位项列表
+	Items []SaasTenantUsageItem `json:"items"`
+}
+
+// SaasTenantBatchRenewInput - 租户批量续期参数（平台 types.SaasTenantBatchRenew）
+// 仅 active/suspended 可续；member 逐租户生成 change 申请单走审批；platform 直通生效重签。
+type SaasTenantBatchRenewInput struct {
+	// Ids - 租户ID列表（必填，须全部处于写数据范围内，否则整体拒绝）
+	Ids []int `json:"ids"`
+	// ValidUntil - 新到期时间（毫秒，必填且须晚于当前时间）
+	ValidUntil int64 `json:"validUntil"`
+	// Reason - 续期说明
+	Reason string `json:"reason,omitempty"`
+}
+
+// SaasTenantBatchRenewItem - 批量续期单租户结果
+type SaasTenantBatchRenewItem struct {
+	// TenantId - 租户ID
+	TenantId int `json:"tenantId"`
+	// TenantNo - 租户编号
+	TenantNo string `json:"tenantNo"`
+	// Result - 处理结果（applied/submitted/skipped/failed）
+	Result string `json:"result"`
+	// Message - 结果说明
+	Message string `json:"message"`
+	// ApplyNo - 续期申请编号（member 提交审批时返回）
+	ApplyNo string `json:"applyNo"`
+}
+
+// SaasTenantBatchRenewSummary - 批量续期汇总
+type SaasTenantBatchRenewSummary struct {
+	// Applied - 直通生效数
+	Applied int `json:"applied"`
+	// Submitted - 已提交审批数
+	Submitted int `json:"submitted"`
+	// Skipped - 跳过数
+	Skipped int `json:"skipped"`
+	// Failed - 失败数
+	Failed int `json:"failed"`
+}
+
+// SaasTenantBatchRenewResult - 批量续期结果（batch-renew 接口的 data）
+type SaasTenantBatchRenewResult struct {
+	// Results - 逐租户结果
+	Results []SaasTenantBatchRenewItem `json:"results"`
+	// Summary - 汇总
+	Summary SaasTenantBatchRenewSummary `json:"summary"`
+}
+
+// SaasTenantHistoryExport - 租户留痕导出结果（history/export 接口的 data，CSV 文本包裹在 JSON 内）
+type SaasTenantHistoryExport struct {
+	// FileName - 建议文件名
+	FileName string `json:"fileName"`
+	// Content - CSV 内容（带 BOM）
+	Content string `json:"content"`
+}
+
+// ============================= 项目功能模块 =============================
+
+// ProjectModule - 项目功能模块（平台 models/basic.ProjectModule）
+type ProjectModule struct {
+	// Id - 模块ID
+	Id int `json:"id"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId"`
+	// ModuleCode - 模块编码（项目内唯一）
+	ModuleCode string `json:"moduleCode"`
+	// ModuleName - 模块名称
+	ModuleName string `json:"moduleName"`
+	// ParentCode - 父模块编码
+	ParentCode string `json:"parentCode"`
+	// Sort - 排序
+	Sort int `json:"sort"`
+	// Description - 描述
+	Description string `json:"description"`
+	// Uid - 操作人用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// ProjectModuleInput - 项目功能模块新增/修改参数（平台 types.ProjectModule；
+// Create 时 Id 留空，Update 时 Id 必填；moduleCode 项目内唯一）
+type ProjectModuleInput struct {
+	// Id - 模块ID（Update 必填）
+	Id int `json:"id,omitempty"`
+	// ProjectId - 项目ID（必填）
+	ProjectId int `json:"projectId,omitempty"`
+	// ModuleCode - 模块编码（必填）
+	ModuleCode string `json:"moduleCode,omitempty"`
+	// ModuleName - 模块名称（必填）
+	ModuleName string `json:"moduleName,omitempty"`
+	// ParentCode - 父模块编码
+	ParentCode string `json:"parentCode,omitempty"`
+	// Sort - 排序
+	Sort int `json:"sort,omitempty"`
+	// Description - 描述
+	Description string `json:"description,omitempty"`
+	// Remark - 备注
+	Remark string `json:"remark,omitempty"`
+}
+
+// ProjectModuleFindParams - 项目功能模块查询参数（平台 types.ProjectModuleFind + 控制器 In/Like/Between 清单）
+type ProjectModuleFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// Order - 排序（如 "sort asc, create_at desc"）
+	Order string `json:"order,omitempty"`
+	// ProjectId - 项目ID（IN）
+	ProjectId []int `json:"projectId,omitempty"`
+	// ModuleCode - 模块编码（模糊）
+	ModuleCode string `json:"moduleCode,omitempty"`
+	// ModuleName - 模块名称（模糊）
+	ModuleName string `json:"moduleName,omitempty"`
+	// ParentCode - 父模块编码（IN）
+	ParentCode []string `json:"parentCode,omitempty"`
+	// Description - 描述（模糊）
+	Description string `json:"description,omitempty"`
+	// CreateTime - 创建时间区间（毫秒 [起,止]，0=开口；Between）
+	CreateTime []int64 `json:"createTime,omitempty"`
+	// UpdateTime - 更新时间区间（毫秒，Between）
+	UpdateTime []int64 `json:"updateTime,omitempty"`
+	// OnlyTrashed - 仅回收站数据（仅管理员生效）
+	OnlyTrashed bool `json:"onlyTrashed,omitempty"`
+	// WithTrashed - 包含回收站数据（仅管理员生效）
+	WithTrashed bool `json:"withTrashed,omitempty"`
+}
