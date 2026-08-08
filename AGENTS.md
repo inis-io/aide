@@ -66,6 +66,17 @@
 - 全局门面与 facade 层同构：控制器单例 `pushx.Inst`（`Init` / `ReloadIfChanged`，`sync.RWMutex` 保护）+ 全局实例 `pushx.Push`（链式智能路由）、`pushx.Email` / `pushx.SMS`（当前驱动）。驱动初始化失败时全局位用 `senderError` 占位，`Send` 时返回原始初始化错误。
 - 内置驱动文件：`email.go`（gomail 邮件）、`aliyun.go`、`tencent.go`、`smsbao.go`；邮件 HTML 模板常量在 `template.go`（`TempEmailCode`）。
 
+### storagex 包约定（存储）
+
+- 接口模式封装本地 / OSS / COS 文件存储。**`Store` 接口是唯一扩展点**：只含 `Root` / `Domain` / `Put` / `List` / `MakeDir` / `Remove` / `Move` 七个方法，均带 `context.Context`。内置驱动在 `storagex.go` 的 `registry` **变量初始化时登记**（不依赖文件 init 顺序）；外部驱动在自己包内 `init()` 中 `Register("名称", 工厂)` 注册，同名注册会覆盖先注册者。仓库内新增内置驱动：新建一个文件实现 `Store`，并在 `registry` 中登记一行。
+- `Store` 契约：所有方法的 key / dir / src / dst 均为**相对存储根**的路径（不含根目录名），由 Driver 层完成公开路径换算与路径穿越校验后传入，驱动按原名直接使用；`List` 返回条目只需填 `Name` / `IsDir` / `Size` / `ModTime`，`Path` / `Url` 由 Driver 层组装。
+- `Driver` 是 `Store` 之上的链式包装（`Ctx` / `Dir` / `Name` / `Ext` / `Put` / `List` / `MakeDir` / `Remove` / `Move` / `Root`），**值语义**：每次链式调用返回副本，天然隔离上下文。**对象命名统一收敛在 Driver 层**（缺省目录 `年-月/日/`、缺省文件名 `毫秒时间戳-随机后缀` 防同毫秒撞名）；`Name` 统一 `path.Base` 去目录成分。`storagex.New("oss", config)` 创建独立实例，`Driver.Store()` 可取底层驱动做类型断言。
+- 公开路径语义：根为 `store.Root()`（local 取根目录最后一段，如 `public/storage` → `/storage`；OSS/COS 为配置的 `Path`，如 `/AIDE`），`Put` 响应与 `List` 条目的 `Path` 带前导 `/`，`Url = Domain + Path`；`List` 的 `Prefix` 为 Driver 层页内过滤（云端分页场景命中数量可能少于 Limit）。
+- **云驱动不自动建桶**：OSS/COS 的 Bucket 需预先创建，配置不完整（缺 AK/SK/Bucket 等）在工厂阶段直接报错，不做静默降级；初始化失败时全局位用 `storeError` 占位，所有操作返回原始初始化错误。
+- 配置自包含在包内：`storagex.Config`（含 `local` / `oss` / `cos` 三组内置驱动配置，外部扩展驱动的自定义配置放 `Config.Options`）；`normConfig()` 补齐默认值（引擎名未注册时回退 `local`，本地根目录默认 `public/storage`、域名默认 `http://localhost:2000`）。
+- 全局门面与 facade 层同构：控制器单例 `storagex.Inst`（`Init` / `ReloadIfChanged`，`sync.RWMutex` 保护）+ 全局实例 `storagex.Storage`。
+- 内置驱动文件：`local.go`（os 落盘，`List` 内存分页 Marker 为偏移量）、`oss.go`（aliyun-oss-go-sdk，云端 Marker 分页，目录为 `/` 结尾占位对象，Move 为复制后删源）、`cos.go`（cos-go-sdk-v5，同 OSS 语义）。
+
 ### licence 包约定（licen-hub 授权平台 Go SDK）
 
 > 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
@@ -100,7 +111,7 @@ go test ./...     # 运行全部测试
 go test ./licence/ -v   # 单独跑 licence 包测试
 ```
 
-当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）与 `cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
+当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）与 `storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
 
 ## 代码风格指南
 
@@ -125,12 +136,12 @@ go test ./licence/ -v   # 单独跑 licence 包测试
 ## 测试说明
 
 - 测试与源码同包、同目录，文件名 `*_test.go`，使用标准库 `testing`，无第三方断言框架。
-- 目前测试覆盖 `licence`、`pushx` 与 `cachex` 包。在 `facade`、`utils`、`pushx`、`cachex` 中新增逻辑时，如逻辑可脱离外部服务（云存储、Redis、短信网关）运行，应补充同类单元测试；依赖外部凭据的能力不要做联网测试。
+- 目前测试覆盖 `licence`、`pushx`、`cachex` 与 `storagex` 包。在 `facade`、`utils`、`pushx`、`cachex`、`storagex` 中新增逻辑时，如逻辑可脱离外部服务（云存储、Redis、短信网关）运行，应补充同类单元测试；依赖外部凭据的能力不要做联网测试。
 
 ## 安全注意事项
 
-- **凭据不入库**：OSS/COS 的 AccessKey、Secret 通过 `dto.*Config` 注入，Redis 凭据通过 `cachex.Config` 注入，短信/邮件推送凭据通过 `pushx.Config` 注入，全部在运行时由调用方传入，仓库中不得硬编码任何真实密钥。
-- **路径穿越防护**：存储层的公开路径必须经过 `cleanDir` / `splitPublicPath` 清理（拒绝 `..` 越出存储根），文件名用 `path.Base` 去除目录成分。改动存储路径逻辑时不得绕过这两处校验。
+- **凭据不入库**：OSS/COS 的 AccessKey、Secret 通过 `storagex.Config` 注入，Redis 凭据通过 `cachex.Config` 注入，短信/邮件推送凭据通过 `pushx.Config` 注入，全部在运行时由调用方传入，仓库中不得硬编码任何真实密钥。
+- **路径穿越防护**：存储层的公开路径必须经过 `storagex` 包内 `cleanDir` / `splitPublicPath` 清理（`cleanDir` 显式拒绝 `..` 段，`splitPublicPath` 拒绝越出存储根），文件名用 `path.Base` 去除目录成分；三类校验统一收敛在 Driver 层，改动存储路径逻辑时不得绕过。
 - **许可证签名兼容**：见上文 licence 包约定——`Payload` 字段只许追加，签名算法固定 Ed25519，信封版本号 `EnvelopeVersion = 1`。
 - **日志脱敏**：`utils.Mask` 提供手机号/邮箱/身份证等脱敏能力，输出含个人信息的内容到日志前应使用它。
 - 本地存储默认落在 `public/storage/`、文件缓存落在 `./runtime/cache/`，这些是运行时产物目录，不要把用户文件提交进仓库。
