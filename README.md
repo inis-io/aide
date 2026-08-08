@@ -9,6 +9,36 @@ go get github.com/inis-io/aide
 ### 使用
 > 详细的使用方法请参考 [文档](./document/README.md)
 
+### Task 快速使用
+
+```go
+package main
+
+import (
+	"context"
+	"time"
+
+	"github.com/inis-io/aide/taskx"
+)
+
+func main() {
+	taskx.Inst.Init(taskx.Config{Engine: "file"})
+	taskx.Queue.Handle("mail:send", taskx.HandlerFunc(func(ctx context.Context, msg *taskx.Message) error {
+		return nil
+	}))
+
+	_, _ = taskx.Queue.New("mail:send", map[string]any{"userId": 1001}).
+		MaxRetry(3).
+		Timeout(30 * time.Second).
+		TaskID("mail:1001").
+		Enqueue(context.Background())
+
+	_ = taskx.Queue.Run(context.Background())
+}
+```
+
+> `taskx` 提供 file / redis 双后端，完整配置、可靠性语义、Scheduler 与 Inspect/Manage 用法见 [taskx 文档](./taskx/README.md)。
+
 ### Storage 快速使用
 
 ```go
