@@ -17,25 +17,24 @@ package main
 import (
 	"os"
 
-	"github.com/inis-io/aide/dto"
-	"github.com/inis-io/aide/facade"
+	"github.com/inis-io/aide/storagex"
 )
 
 func main() {
 	// 1) 初始化全局存储（推荐在应用启动时执行一次）
-	facade.StorageInst.Init(dto.StorageConfig{
+	storagex.Inst.Init(storagex.Config{
 		Engine: "local",
-		Local: dto.LocalStorageConfig{Domain: "http://localhost:2000"},
+		Local:  storagex.LocalConfig{Domain: "http://localhost:2000"},
 	})
 
 	// 2) 使用全局实例
 	file, _ := os.Open("./avatar.png")
 	defer file.Close()
-	resp := facade.Storage.Dir("avatar").Ext("png").Upload(file)
-	_ = resp
+	resp := storagex.Storage.Dir("avatar").Ext("png").Put(file)
+	_ = resp // resp.Url 为完整访问地址
 
 	// 3) 按配置创建独立实例（适合多租户或临时切换引擎）
-	custom := facade.Storage.NewStorage(dto.StorageConfig{Engine: "local"})
+	custom, _ := storagex.New("local", storagex.Config{})
 	_ = custom
 }
 ```
@@ -46,28 +45,33 @@ func main() {
 package main
 
 import (
-	"github.com/inis-io/aide/dto"
-	"github.com/inis-io/aide/facade"
+	"github.com/inis-io/aide/logx"
 )
 
 func main() {
 	// 1) 初始化全局日志（推荐在应用启动时执行一次）
-	facade.LogInst.Init(dto.LogConfig{
-		Enable:  true,
-		Size:    10, // 单个日志文件大小（MB）
-		Age:     15, // 日志保留天数
-		Backups: 30, // 最大备份数量
+	logx.Inst.Init(logx.Config{
+		Level:   "info", // 最低写入级别
+		Size:    10,     // 单个日志文件大小（MB）
+		Age:     15,     // 日志保留天数
+		Backups: 30,     // 最大备份数量
+		Console: true,   // 同时输出到控制台（开发调试）
 	})
 
-	// 2) 使用全局实例（两种方式都支持）
-	facade.Log.Info(map[string]any{"module": "user", "id": 1001}, "create user")
-	facade.Log.Warn(map[string]any{"module": "user", "id": 1001}, "slow query")
+	// 2) 使用全局实例（按级别分文件精确收录：根目录/日期/级别.log）
+	logx.Log.Info("create user", map[string]any{"module": "user", "id": 1001})
+	logx.Log.Warn("slow query", map[string]any{"module": "user", "id": 1001})
 
-	// 3) 按配置创建独立实例（适合临时调试、多租户）
-	custom := facade.Log.NewLog(dto.LogConfig{Enable: true, Size: 5, Age: 3, Backups: 5})
-	custom.Debug(map[string]any{"traceId": "T-10086"}, "debug once")
+	// 3) 派生带固定字段的子实例（原实例不受影响）
+	reqLog := logx.Log.With(map[string]any{"traceId": "T-10086"})
+	reqLog.Error("pay failed", map[string]any{"orderId": "O-1"})
+
+	// 4) 按配置创建独立实例（适合临时调试、多租户）
+	custom := logx.New(logx.Config{Root: "runtime/logs", Size: 5, Age: 3, Backups: 5})
+	defer custom.Close()
+	custom.Debug("debug once", map[string]any{"traceId": "T-10086"})
 }
 ```
 
-> `dto.LogConfig` 默认值：`Enable=true`、`Size=2`、`Age=7`、`Backups=20`。
+> `logx.Config` 默认值：启用（`Disable=false`）、`Root=runtime/logs`、`Level=debug`、`Size=10`、`Age=7`、`Backups=20`、`Console=false`。
 
