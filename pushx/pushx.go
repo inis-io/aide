@@ -24,8 +24,11 @@ import (
 // ================================== 接口与注册表 - 开始 ==================================
 
 // Sender - 推送驱动接口：短信、邮件及未来接入的服务商统一实现该接口
+//
+// 约定：经 Driver 链式入口发送的消息体已统一归一化（长度、有效期、空验证码自动生成），
+// 驱动直接使用即可；调用方绕过 Driver 直接持有 Sender 时，归一化由驱动自行保证（内置驱动已兜底）。
 type Sender interface {
-	// Send - 按消息体发送（实现方需校验目标合法性，并调用 normMessage 补齐默认值与验证码）
+	// Send - 按消息体发送（实现方需校验目标合法性）
 	Send(message Message) (*Response, error)
 }
 
@@ -195,7 +198,7 @@ func (this Driver) SetMessage(message Message) Driver {
 	return this
 }
 
-// Send - 发送验证码
+// Send - 发送验证码（消息体在此统一归一化：长度、有效期、空验证码自动生成）
 /**
  * @param target ...any - 目标手机号或邮箱（可选，优先级最高）
  * @example：
@@ -209,7 +212,7 @@ func (this Driver) Send(target ...any) (*Response, error) {
 	if len(target) > 0 {
 		this.message.Target = cast.ToString(target[0])
 	}
-	return this.sender.Send(this.message)
+	return this.sender.Send(normMessage(this.message))
 }
 
 // ================================== 链式推送实例 - 结束 ==================================

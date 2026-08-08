@@ -70,7 +70,7 @@ func mergeMessage(current Message, override Message) Message {
 	return current
 }
 
-// normMessage - 统一消息体默认值，验证码为空时自动生成（驱动发送前必须调用）
+// normMessage - 统一消息体默认值，验证码为空时自动生成（链式入口由 Driver.Send 统一调用；内置驱动各自兜底，保证直接使用 Sender 的场景同样归一）
 func normMessage(message Message) Message {
 	if message.Length <= 0 {
 		message.Length = 6
