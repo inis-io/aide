@@ -101,8 +101,18 @@ type GRPCOptions struct {
 
 ### 2.4 回调事件常量（`callback.go`）
 
+与平台 `backend/app/common/callback/event.go` 的 `supportedEvents` 一一对应；对未收录的新事件族，可用 `OnEvent` 前缀通配（如 `saas.*`）匹配。
+
 | 常量 | 值 | 说明 |
 |---|---|---|
+| `EventSaasPlanCreated` | `saas.plan.created` | SaaS 套餐已创建，回调 `data` 含 `{planId, planCode, manifestVersion}` |
+| `EventSaasPlanUpdated` | `saas.plan.updated` | SaaS 套餐内容已修改，回调 `data` 含 `{planId, planCode, manifestVersion}` |
+| `EventSaasPlanEnabled` | `saas.plan.enabled` | SaaS 套餐已启用，回调 `data` 含 `{planId, planCode, manifestVersion}` |
+| `EventSaasPlanDisabled` | `saas.plan.disabled` | SaaS 套餐已停用，回调 `data` 含 `{planId, planCode, manifestVersion}` |
+| `EventSaasMenuPublished` | `saas.menu.published` | SaaS 菜单清单已发布，回调 `data` 含 `{manifestId, version}` |
+| `EventSaasMenuArchived` | `saas.menu.archived` | SaaS 菜单清单已归档，回调 `data` 含 `{manifestId, version}` |
+| `EventProjectConfigUpdated` | `project.config.updated` | 项目配置已更新（新建或保存），回调 `data` 含 `{configKey, version}` |
+| `EventProjectConfigDeleted` | `project.config.deleted` | 项目配置已删除，回调 `data` 含 `{configKey, version}` |
 | `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值（规则）已更新，回调 `data` 含 `{configKey, projectId}` |
 | `EventPlatformConfigDefinitionChanged` | `platform.config.definition.changed` | 平台配置项定义已变更，回调 `data` 含 `{configKey, version}` |
 
@@ -444,7 +454,7 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 > 前置闸门：实例许可证非放行态时 `TenantSync` 直接返回错误（fail-closed 总闸）；`TenantValidate` 不设总闸，把校验状态码原样返回（放行态附带缓存信封）。fail-open / fail-closed 的租户级策略由服务商按 `TenantStatus` 自行决策。
 
-### 9.3 回调通知
+### 9.3 回调通知（事件订阅 · 事件推送）
 
 `NewCallbackHandler(CallbackOptions)` 返回标准 `http.Handler`，可挂载到标准库、Gin 或其他 HTTP 框架。`PublicKeys` 与运行面 `Options.PublicKeys` 使用同一组 license-key 信任链。
 
@@ -475,7 +485,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
 | `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
 
-事件名常量见 §2.4；`project.config.*`、`saas.*` 等平台下发的其它前缀事件用 `OnEvent` 前缀通配（如 `saas.plan.*`）匹配。
+已知事件名常量见 §2.4（`EventSaasPlanUpdated`、`EventProjectConfigUpdated` 等，均可直接传入 `OnEvent`）；按事件族订阅可用前缀通配（如 `saas.plan.*`、`project.config.*`、`saas.*`）一次捕获该族全部动作。
 
 平台登记位置：「项目管理 → 部署实例 → 回调地址（`notify_url`）」。
 

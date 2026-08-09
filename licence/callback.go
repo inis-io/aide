@@ -76,7 +76,25 @@ const (
 	AckRejected Ack = "rejected"
 )
 
+// 回调事件常量，与平台 `licen-hub/backend/app/common/callback/event.go` 的 supportedEvents 一一对应。
+// 已知事件可直接引用常量注册；对未收录的新事件族，用 OnEvent 前缀通配（如 "saas.*"）兜底匹配。
 const (
+	// EventSaasPlanCreated - SaaS 套餐已创建，data: {planId, planCode, manifestVersion}
+	EventSaasPlanCreated = "saas.plan.created"
+	// EventSaasPlanUpdated - SaaS 套餐内容已修改，data: {planId, planCode, manifestVersion}
+	EventSaasPlanUpdated = "saas.plan.updated"
+	// EventSaasPlanEnabled - SaaS 套餐已启用，data: {planId, planCode, manifestVersion}
+	EventSaasPlanEnabled = "saas.plan.enabled"
+	// EventSaasPlanDisabled - SaaS 套餐已停用，data: {planId, planCode, manifestVersion}
+	EventSaasPlanDisabled = "saas.plan.disabled"
+	// EventSaasMenuPublished - SaaS 菜单清单已发布，data: {manifestId, version}
+	EventSaasMenuPublished = "saas.menu.published"
+	// EventSaasMenuArchived - SaaS 菜单清单已归档，data: {manifestId, version}
+	EventSaasMenuArchived = "saas.menu.archived"
+	// EventProjectConfigUpdated - 项目配置已更新（新建或保存），data: {configKey, version}
+	EventProjectConfigUpdated = "project.config.updated"
+	// EventProjectConfigDeleted - 项目配置已删除，data: {configKey, version}
+	EventProjectConfigDeleted = "project.config.deleted"
 	// EventPlatformConfigUpdated - 平台配置值（规则）已更新，data: {configKey, projectId}
 	EventPlatformConfigUpdated = "platform.config.updated"
 	// EventPlatformConfigDefinitionChanged - 平台配置项定义已变更，data: {configKey, version}

@@ -238,7 +238,7 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 fail-open / fail-closed 由你按业务决策（建议写进你自己的集成文档）。
 
-### 6.1 回调通知与项目配置同步
+### 6.1 回调通知与项目配置同步（事件订阅 · 事件推送）
 
 先在平台的「项目管理 → 部署实例」为每个实例登记 `notify_url`（建议 `POST /licence/callback`），然后在项目中挂载同一个回调接收器：
 
@@ -734,7 +734,7 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 > 前置闸门：实例许可证非放行态时 `TenantSync` 直接返回错误（fail-closed 总闸）；`TenantValidate` 不设总闸，把校验状态码原样返回（放行态附带缓存信封）。fail-open / fail-closed 的租户级策略由服务商按 `TenantStatus` 自行决策。
 
-### 19.3 回调通知
+### 19.3 回调通知（事件订阅 · 事件推送）
 
 `NewCallbackHandler(CallbackOptions)` 返回标准 `http.Handler`，可挂载到标准库、Gin 或其他 HTTP 框架。`PublicKeys` 与运行面 `Options.PublicKeys` 使用同一组 license-key 信任链。
 
@@ -765,7 +765,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
 | `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
 
-事件名常量：`EventPlatformConfigUpdated`（`platform.config.updated`）、`EventPlatformConfigDefinitionChanged`（`platform.config.definition.changed`）；`project.config.*`、`saas.*` 等平台下发的其它前缀事件用 `OnEvent` 前缀通配（如 `saas.plan.*`）匹配。
+事件名常量：SaaS 套餐 / 菜单清单 / 项目配置 / 平台配置全部 10 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasPlanUpdated`、`EventSaasMenuPublished`、`EventProjectConfigUpdated`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`project.config.*`、`saas.*`）一次捕获该族全部动作。
 
 ### 19.4 项目配置同步
 
