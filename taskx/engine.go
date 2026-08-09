@@ -139,6 +139,10 @@ func (this *Engine) process(msg *Message) {
 	}
 	if archiveErr := this.broker.Archive(context.Background(), msg, err); archiveErr != nil {
 		this.logError("任务归档失败", archiveErr, msg)
+		return
+	}
+	if this.config.ArchiveHandler != nil {
+		this.config.ArchiveHandler(context.Background(), cloneMessage(msg), err)
 	}
 }
 

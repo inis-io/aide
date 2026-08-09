@@ -499,3 +499,54 @@ func TestInspectAndManageValidation(t *testing.T) {
 	}
 	_ = fmt.Sprintf("%v", driver)
 }
+
+// TestEngineArchiveHook - 验证归档（死信）钩子仅在归档成功后触发一次
+func TestEngineArchiveHook(t *testing.T) {
+	driver, broker := testFileDriver(t)
+	type archiveRecord struct {
+		msg   *Message
+		cause error
+	}
+	archived := make(chan archiveRecord, 4)
+	var failures atomic.Int32
+	driver.config.ErrorHandler = func(context.Context, *Message, error) { failures.Add(1) }
+	driver.engine.config.ErrorHandler = driver.config.ErrorHandler
+	driver.config.ArchiveHandler = func(_ context.Context, msg *Message, cause error) {
+		archived <- archiveRecord{msg: msg, cause: cause}
+	}
+	driver.engine.config.ArchiveHandler = driver.config.ArchiveHandler
+	driver.Handle("dead", HandlerFunc(func(context.Context, *Message) error { return errors.New("始终失败") }))
+	driver.Handle("ok", HandlerFunc(func(context.Context, *Message) error { return nil }))
+	id, err := driver.New("dead", nil).MaxRetry(0).Enqueue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = driver.New("ok", nil).Enqueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- driver.Run(ctx) }()
+	select {
+	case record := <-archived:
+		if record.msg.Id != id || record.cause == nil || record.cause.Error() != "始终失败" {
+			t.Fatalf("归档钩子内容不正确: msg=%+v cause=%v", record.msg, record.cause)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("归档钩子未在预期时间内触发")
+	}
+	cancel()
+	if err = <-runDone; err != nil {
+		t.Fatalf("引擎退出失败: %v", err)
+	}
+	if len(archived) != 0 {
+		t.Fatal("成功任务不应触发归档钩子")
+	}
+	if failures.Load() != 1 {
+		t.Fatalf("失败钩子次数不正确: %d", failures.Load())
+	}
+	result, _ := broker.Inspect(context.Background(), InspectQuery{Queue: "default", State: stateArchived})
+	if result.Total != 1 {
+		t.Fatalf("任务未归档: %+v", result)
+	}
+}

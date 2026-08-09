@@ -31,8 +31,10 @@ type Config struct {
 	JanitorInterval time.Duration `json:"janitorInterval"`
 	// RetryDelay - 重试退避函数
 	RetryDelay func(attempts int, err error) time.Duration `json:"-"`
-	// ErrorHandler - 任务失败钩子
+	// ErrorHandler - 任务失败钩子（每次失败都会触发，含重试中的失败）
 	ErrorHandler func(ctx context.Context, msg *Message, err error) `json:"-"`
+	// ArchiveHandler - 任务归档（死信）钩子，仅在归档成功后触发一次
+	ArchiveHandler func(ctx context.Context, msg *Message, cause error) `json:"-"`
 	// Logger - 日志接口
 	Logger Logger `json:"-"`
 	// File - file 驱动配置
@@ -146,10 +148,11 @@ func configHash(config Config) string {
 	for _, name := range names {
 		queues = append(queues, fmt.Sprintf("%s=%d", name, config.Queues[name]))
 	}
-	value := fmt.Sprintf("%s|%d|%s|%d|%d|%d|%d|%+v|%+v|%v|%x|%x|%s",
+	value := fmt.Sprintf("%s|%d|%s|%d|%d|%d|%d|%+v|%+v|%v|%x|%x|%x|%s",
 		config.Engine, config.Concurrency, strings.Join(queues, ","), config.PollInterval,
 		config.LeaseTTL, config.ShutdownTimeout, config.JanitorInterval, config.File, config.Redis,
-		config.Options, functionPointer(config.RetryDelay), functionPointer(config.ErrorHandler), loggerIdentity(config.Logger))
+		config.Options, functionPointer(config.RetryDelay), functionPointer(config.ErrorHandler),
+		functionPointer(config.ArchiveHandler), loggerIdentity(config.Logger))
 	return utils.Hash.Sum32(value)
 }
 

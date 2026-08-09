@@ -89,7 +89,7 @@
 
 - `Broker` 是唯一扩展点，内置 `file` / `redis`，只提供原子存储原语；worker、加权队列、重试退避、超时、租约续期与回收、优雅退出均由唯一 `Engine` 编排，禁止在后端复制消费语义。
 - `Driver` 提供值语义链式入队（`New` / `Queue` / `In` / `At` / `MaxRetry` / `Timeout` / `Deadline` / `Retention` / `Unique` / `TaskID` / `Enqueue`）与消费生命周期（`Handle` / `Use` / `Run` / `Shutdown`）。包级 `Queue` 是可调用函数门面，同时支持 `taskx.Queue("low")` 选项和 `taskx.Queue.New(...)` 链式入口。
-- 投递保证为 at-least-once：认领即加租约，成功才 Ack，租约过期自动重投；Handler 必须业务幂等。TaskID 冲突返回 `ErrTaskIdConflict`，内容去重冲突返回 `ErrDuplicateTask`。
+- 投递保证为 at-least-once：认领即加租约，成功才 Ack，租约过期自动重投；Handler 必须业务幂等。TaskID 冲突返回 `ErrTaskIdConflict`，内容去重冲突返回 `ErrDuplicateTask`。失败钩子 `ErrorHandler` 在每次失败时触发（含重试中的失败），死信钩子 `ArchiveHandler` 仅在归档（重试耗尽进死信）成功后触发一次。
 - file 后端用 afero 六状态目录、`O_EXCL` 锁与原子 Rename，默认根目录 `./runtime/queue`，推荐单进程且单队列千级以内；redis 后端用 LIST/ZSET/HASH + Lua 原子迁移，建议独立逻辑库，连接失败不静默降级。
 - `Inspect` / `Manage` 提供计数、分页、重跑、删除与终态清空；`Scheduler` 只内置 `Every` 与 `NextFunc`，不自行解析 cron。全局门面为 `taskx.Inst` + `taskx.Queue`，热重载保留已注册 Handler/Middleware，并在替换前优雅关闭旧引擎。
 
@@ -127,7 +127,7 @@ go test ./...     # 运行全部测试
 cd licence && go build ./... && go vet ./... && go test ./...   # licence 模块单独执行
 ```
 
-当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
+当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
 
 ## 代码风格指南
 
@@ -165,6 +165,7 @@ cd licence && go build ./... && go vet ./... && go test ./...   # licence 模块
 ## 其他说明
 
 - `README.md` 引用的 `./document/README.md` 文档目录当前**不存在**于仓库中，属已知的文档缺失。
+- **发布 tag 必须保持 `v1.9.x` 线**（如 `v1.9.24`）：模块路径为 `github.com/inis-io/aide`、无 `/v2` 后缀，`v2.x` tag 与 Go 模块语义化导入版本规则不兼容；仓库中残留的 `v2` / `v2.0.0` / `v2.0.1` tag 不可使用，不要在 `v2.x` 上继续递增。
 - `.gitignore` 已忽略 IDE 目录（`.idea`、`.vscode`）与编译产物；项目无 vendor 目录，依赖由 Go modules 管理。
 
 ## AI 编程规范
