@@ -26,14 +26,15 @@ import (
 
 // grpcRuntimeTransport - gRPC 运行面传输。
 type grpcRuntimeTransport struct {
-	client    *Client
-	conn      *grpc.ClientConn
-	license   licencev1.LicenseRuntimeServiceClient
-	update    licencev1.UpdateRuntimeServiceClient
-	saas      licencev1.SaasRuntimeServiceClient
-	config    licencev1.ProjectConfigRuntimeServiceClient
-	closeOnce sync.Once
-	closeErr  error
+	client         *Client
+	conn           *grpc.ClientConn
+	license        licencev1.LicenseRuntimeServiceClient
+	update         licencev1.UpdateRuntimeServiceClient
+	saas           licencev1.SaasRuntimeServiceClient
+	config         licencev1.ProjectConfigRuntimeServiceClient
+	platformConfig licencev1.PlatformConfigRuntimeServiceClient
+	closeOnce      sync.Once
+	closeErr       error
 }
 
 func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
@@ -43,10 +44,11 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 	}
 	return &grpcRuntimeTransport{
 		client: client, conn: conn,
-		license: licencev1.NewLicenseRuntimeServiceClient(conn),
-		update:  licencev1.NewUpdateRuntimeServiceClient(conn),
-		saas:    licencev1.NewSaasRuntimeServiceClient(conn),
-		config:  licencev1.NewProjectConfigRuntimeServiceClient(conn),
+		license:        licencev1.NewLicenseRuntimeServiceClient(conn),
+		update:         licencev1.NewUpdateRuntimeServiceClient(conn),
+		saas:           licencev1.NewSaasRuntimeServiceClient(conn),
+		config:         licencev1.NewProjectConfigRuntimeServiceClient(conn),
+		platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn),
 	}, nil
 }
 

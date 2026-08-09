@@ -30,6 +30,11 @@ service ProjectConfigRuntimeService {
   rpc Sync(ProjectConfigSyncRequest) returns (ProjectConfigSyncResponse);
 }
 
+// PlatformConfigRuntimeService - 平台配置运行面。
+service PlatformConfigRuntimeService {
+  rpc Sync(PlatformConfigSyncRequest) returns (PlatformConfigSyncResponse);
+}
+
 message ActivateRequest {
   string license_no = 1;
   string instance_no = 2;
@@ -154,6 +159,19 @@ message ProjectConfigSyncRequest {
 }
 
 message ProjectConfigSyncResponse {
+  string status = 1;
+  int64 server_time = 2;
+  bytes envelope_json = 3;
+  string message = 4;
+}
+
+message PlatformConfigSyncRequest {
+  string license_no = 1;
+  int32 project_id = 2;
+  int32 since_version = 3;
+}
+
+message PlatformConfigSyncResponse {
   string status = 1;
   int64 server_time = 2;
   bytes envelope_json = 3;

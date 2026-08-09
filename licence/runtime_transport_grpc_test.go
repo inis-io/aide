@@ -81,6 +81,14 @@ func (runtimeConfigServer) Sync(context.Context, *licencev1.ProjectConfigSyncReq
 	return &licencev1.ProjectConfigSyncResponse{Status: StatusValid}, nil
 }
 
+type runtimePlatformConfigServer struct {
+	licencev1.UnimplementedPlatformConfigRuntimeServiceServer
+}
+
+func (runtimePlatformConfigServer) Sync(context.Context, *licencev1.PlatformConfigSyncRequest) (*licencev1.PlatformConfigSyncResponse, error) {
+	return &licencev1.PlatformConfigSyncResponse{Status: StatusValid}, nil
+}
+
 func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {
 	listener := bufconn.Listen(1 << 20)
 	server := grpc.NewServer()
@@ -88,6 +96,7 @@ func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {
 	licencev1.RegisterUpdateRuntimeServiceServer(server, runtimeUpdateServer{})
 	licencev1.RegisterSaasRuntimeServiceServer(server, runtimeSaasServer{})
 	licencev1.RegisterProjectConfigRuntimeServiceServer(server, runtimeConfigServer{})
+	licencev1.RegisterPlatformConfigRuntimeServiceServer(server, runtimePlatformConfigServer{})
 	go func() { _ = server.Serve(listener) }()
 	defer server.Stop()
 	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
@@ -100,14 +109,14 @@ func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
-	transport := &grpcRuntimeTransport{client: client, conn: conn, license: licencev1.NewLicenseRuntimeServiceClient(conn), update: licencev1.NewUpdateRuntimeServiceClient(conn), saas: licencev1.NewSaasRuntimeServiceClient(conn), config: licencev1.NewProjectConfigRuntimeServiceClient(conn)}
+	transport := &grpcRuntimeTransport{client: client, conn: conn, license: licencev1.NewLicenseRuntimeServiceClient(conn), update: licencev1.NewUpdateRuntimeServiceClient(conn), saas: licencev1.NewSaasRuntimeServiceClient(conn), config: licencev1.NewProjectConfigRuntimeServiceClient(conn), platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn)}
 	cases := []struct {
 		name, method, uri, body string
 		signed                  bool
 	}{
 		{"activate", http.MethodPost, "/api/v1/licenses/activate", `{"licenseNo":"LIC-1"}`, false}, {"validate", http.MethodPost, "/api/v1/licenses/validate", `{"licenseNo":"LIC-1"}`, true}, {"current", http.MethodGet, "/api/v1/licenses/current?licenseNo=LIC-1", "", true},
 		{"update-check", http.MethodPost, "/api/v1/updates/check", `{"licenseNo":"LIC-1"}`, true}, {"update-report", http.MethodPost, "/api/v1/updates/report", `{"licenseNo":"LIC-1"}`, true}, {"update-logs", http.MethodPost, "/api/v1/updates/logs", `{"licenseNo":"LIC-1"}`, true},
-		{"tenant-sync", http.MethodPost, "/api/v1/saas/tenants/sync", `{"licenseNo":"LIC-1"}`, true}, {"tenant-validate", http.MethodPost, "/api/v1/saas/tenants/validate", `{"licenseNo":"LIC-1","tenantCode":"t1"}`, true}, {"tenant-current", http.MethodGet, "/api/v1/saas/tenants/current?licenseNo=LIC-1&tenantCode=t1", "", true}, {"config-sync", http.MethodPost, "/api/v1/projects/configs/sync", `{"licenseNo":"LIC-1"}`, true},
+		{"tenant-sync", http.MethodPost, "/api/v1/saas/tenants/sync", `{"licenseNo":"LIC-1"}`, true}, {"tenant-validate", http.MethodPost, "/api/v1/saas/tenants/validate", `{"licenseNo":"LIC-1","tenantCode":"t1"}`, true}, {"tenant-current", http.MethodGet, "/api/v1/saas/tenants/current?licenseNo=LIC-1&tenantCode=t1", "", true}, {"config-sync", http.MethodPost, "/api/v1/projects/configs/sync", `{"licenseNo":"LIC-1"}`, true}, {"platform-config-sync", http.MethodPost, "/api/v1/platform/configs/sync", `{"licenseNo":"LIC-1"}`, true},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {

@@ -88,6 +88,10 @@ type runtimeState struct {
 	Configs map[string]ConfigItem `json:"configs,omitempty"`
 	// ConfigSyncVersion - 项目配置增量同步水位
 	ConfigSyncVersion int `json:"configSyncVersion,omitempty"`
+	// PlatformConfigs - 已验签的平台配置快照（按 Key）
+	PlatformConfigs map[string]PlatformConfigItem `json:"platformConfigs,omitempty"`
+	// PlatformConfigSyncVersion - 平台配置增量同步水位
+	PlatformConfigSyncVersion int `json:"platformConfigSyncVersion,omitempty"`
 }
 
 // Client - 运行面客户端（激活/校验/验签/缓存/降级一体化）
@@ -173,7 +177,10 @@ func New(options Options) (*Client, error) {
 	client := &Client{
 		options: options,
 		store:   store, fingerprint: fingerprint,
-		state:        runtimeState{Configs: make(map[string]ConfigItem)},
+		state: runtimeState{
+			Configs:         make(map[string]ConfigItem),
+			PlatformConfigs: make(map[string]PlatformConfigItem),
+		},
 		pendingUsage: make(map[string]int64),
 		tenantCache:  make(map[string]tenantCacheItem),
 	}
@@ -420,6 +427,9 @@ func (this *Client) restore() error {
 	this.mu.Lock()
 	if state.Configs == nil {
 		state.Configs = make(map[string]ConfigItem)
+	}
+	if state.PlatformConfigs == nil {
+		state.PlatformConfigs = make(map[string]PlatformConfigItem)
 	}
 	this.state = state
 	this.envelope = envelope

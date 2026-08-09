@@ -76,6 +76,13 @@ const (
 	AckRejected Ack = "rejected"
 )
 
+const (
+	// EventPlatformConfigUpdated - 平台配置值（规则）已更新，data: {configKey, projectId}
+	EventPlatformConfigUpdated = "platform.config.updated"
+	// EventPlatformConfigDefinitionChanged - 平台配置项定义已变更，data: {configKey, version}
+	EventPlatformConfigDefinitionChanged = "platform.config.definition.changed"
+)
+
 // CallbackEvent - 分发给业务回调的事件对象
 type CallbackEvent struct {
 	// Payload - 完整回调载荷

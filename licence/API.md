@@ -99,6 +99,13 @@ type GRPCOptions struct {
 | `UpgradeFailed` | `failed` | 升级失败 |
 | `UpgradeRolledBack` | `rolled_back` | 已回滚 |
 
+### 2.4 回调事件常量（`callback.go`）
+
+| 常量 | 值 | 说明 |
+|---|---|---|
+| `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值（规则）已更新，回调 `data` 含 `{configKey, projectId}` |
+| `EventPlatformConfigDefinitionChanged` | `platform.config.definition.changed` | 平台配置项定义已变更，回调 `data` 含 `{configKey, version}` |
+
 ---
 
 ## 3. 纯函数层：签名与信封
@@ -272,7 +279,7 @@ type Options struct {
 | 方法 | 签名 | 说明 |
 |---|---|---|
 | `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt` / `PublicKeys` |
-| `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可用缓存（验签通过且在宽限内）时平台不可达也能降级启动；无缓存且激活失败时返回错误 |
+| `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可验签的本地缓存信封时，平台不可达也能降级启动（按本地时间维度给出 `GRACE` / `EXPIRED` 状态）；无缓存且激活失败时返回错误 |
 | `Stop` | `func (this *Client) Stop()` | 停止后台刷新循环 |
 | `Close` | `func (this *Client) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
 
@@ -417,7 +424,7 @@ func ParseTenantEnvelope(data []byte) (envelope TenantEnvelope, rawPayload []byt
 | `TenantSync` | `func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *TenantManifest, error)` | 租户授权全量/增量同步（每小时 + 启动时调用）。`sinceTime` 为增量水位线（毫秒，0 = 全量），返回本次同步时间（下次传入）与项目菜单清单（无则 nil）。放行租户的信封验签后写入本地缓存；平台不可达时返回错误，本地缓存继续可用 |
 | `TenantValidate` | `func (this *Client) TenantValidate(ctx context.Context, tenantCode string, options TenantValidateOptions) (string, error)` | 单租户实时校验（租户用户登录/访问受控功能时调用）。放行返回状态码并把信封写入本地缓存；非放行只返回状态码 |
 | `TenantCurrent` | `func (this *Client) TenantCurrent(ctx context.Context, tenantCode string) (*TenantEnvelope, error)` | 取租户当前生效信封（不更新缓存水位，仅按需拉取） |
-| `TenantStatus` | `func (this *Client) TenantStatus(tenantCode string) string` | 租户本地状态：优先返回缓存的服务端判定，再按缓存信封做时间维度本地判定（平台不可达时的降级判定依据；无缓存返回空串） |
+| `TenantStatus` | `func (this *Client) TenantStatus(tenantCode string) string` | 租户本地状态：有缓存信封时按信封做时间维度本地判定，无信封时返回缓存的服务端判定（平台不可达时的降级判定依据；无缓存返回空串） |
 | `TenantFeature` | `func (this *Client) TenantFeature(tenantCode string, code string) bool` | 租户功能权益本地判定：缓存信封放行且 `features[code]` 为 true |
 
 ```go
@@ -435,7 +442,7 @@ status = client.TenantStatus("tenant-a")
 ok := client.TenantFeature("tenant-a", "report.advanced")
 ```
 
-> 前置闸门：实例许可证非放行态时 `TenantSync` / `TenantValidate` 直接返回错误（fail-closed 总闸）。fail-open / fail-closed 的租户级策略由服务商按 `TenantStatus` 自行决策。
+> 前置闸门：实例许可证非放行态时 `TenantSync` 直接返回错误（fail-closed 总闸）；`TenantValidate` 不设总闸，把校验状态码原样返回（放行态附带缓存信封）。fail-open / fail-closed 的租户级策略由服务商按 `TenantStatus` 自行决策。
 
 ### 9.3 回调通知
 
@@ -457,6 +464,19 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 
 分发顺序为精确事件 → 逐级前缀通配（例如 `saas.plan.*` 、`saas.*`）→ `OnAny` → 自动 `ignored`。应答词是 `AckSuccess` / `AckOk` / `AckIgnored` / `AckRetry` / `AckRejected`；回调返回 error 等价于 `AckRetry`，panic 由 SDK 恢复为 HTTP 500。`deliveryNo` 是业务幂等键，相同 nonce 的原请求重放会被 HTTP 401 拒绝。
 
+**类型参考**（`callback.go`，信封与平台签发端字节级镜像，字段顺序即签名内容，只许追加）：
+
+| 类型 | 说明 |
+|---|---|
+| `CallbackPayload` | 回调事件载荷：`EventNo` / `DeliveryNo` / `Event` / `ProjectId` / `InstanceId` / `OccurredAt` / `Nonce` / `KeyVersion` / `Data`（`json.RawMessage`） |
+| `CallbackEnvelope` | 回调签名信封（与许可证信封同构：`Version` / `Algorithm` / `Payload` / `Signature`） |
+| `Ack` | 应答词类型（`type Ack string`），合法值：`AckSuccess` / `AckOk` / `AckIgnored` / `AckRetry` / `AckRejected` |
+| `CallbackFunc` | `func(ctx context.Context, event *CallbackEvent) (Ack, error)` 业务回调；返回 error 等价于 `AckRetry` |
+| `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
+| `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
+
+事件名常量见 §2.4；`project.config.*`、`saas.*` 等平台下发的其它前缀事件用 `OnEvent` 前缀通配（如 `saas.plan.*`）匹配。
+
 平台登记位置：「项目管理 → 部署实例 → 回调地址（`notify_url`）」。
 
 ### 9.4 项目配置同步
@@ -467,7 +487,36 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `Config` | `func (this *Client) Config(key string) (json.RawMessage, bool)` | 返回本地配置原文的副本 |
 | `ConfigMust` | `func (this *Client) ConfigMust(key string) json.RawMessage` | 配置不存在时 panic |
 
-`ConfigPayload` / `ConfigEnvelope` 与平台 `app/common/sign/config.go` 字节级镜像，验签必须使用 `ParseConfigEnvelope` 返回的 payload 原文。回调事件 `project.config.*` 只是失效信号，客户端收到后应调用 `ConfigSync`，并以周期性同步兜底。
+**数据结构**（与平台 `app/common/sign/config.go` 字节级镜像，字段顺序即签名内容，只许追加）：
+
+| 类型 | 说明 |
+|---|---|
+| `ConfigItem` | 项目配置下发条目：`ConfigKey` / `Name` / `Content`（`json.RawMessage` 原文）/ `Version`（增量版本号） |
+| `ConfigPayload` | 同步载荷：`ProjectId` / `SyncVersion` / `Keys`（全量 key 清单，本地据此删除失效项）/ `Configs` / `IssuedAt` / `KeyVersion` / `Nonce` |
+| `ConfigEnvelope` | 签名信封（与许可证信封同构） |
+| `ParseConfigEnvelope` | `func ParseConfigEnvelope(data []byte) (ConfigEnvelope, []byte, error)` 解析并返回 payload 原文 |
+
+`ConfigPayload` / `ConfigEnvelope` 与平台字节级镜像，验签必须使用 `ParseConfigEnvelope` 返回的 payload 原文。回调事件 `project.config.*` 只是失效信号，客户端收到后应调用 `ConfigSync`，并以周期性同步兜底。
+
+### 9.5 平台配置同步
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `PlatformConfigSync` | `func (this *Client) PlatformConfigSync(ctx context.Context) (*PlatformConfigEnvelope, error)` | 使用持久化水位增量拉取，验签后按服务端下发全量条目覆盖本地快照并持久化 |
+| `PlatformConfig` | `func (this *Client) PlatformConfig(key string) (PlatformConfigItem, bool)` | 返回本地平台配置条目副本 |
+| `PlatformConfigMust` | `func (this *Client) PlatformConfigMust(key string) PlatformConfigItem` | 配置不存在时 panic |
+
+**数据结构**（与平台 `app/common/sign/platform-config.go` 字节级镜像，字段顺序即签名内容，只许追加）：
+
+| 类型 | 说明 |
+|---|---|
+| `PlatformConfigItem` | 平台配置下发条目（服务端已完成维度匹配，`Value` 为最终值）：`Key` / `Label` / `Type` / `Value` / `DefaultValue` / `Options`（`json.RawMessage`）/ `Rules`（`json.RawMessage`）/ `Placeholder` / `Remark` / `Sensitive`（bool）/ `Version` |
+| `PlatformConfigGroup` | 平台配置分组（树形，扁平输出 + `Children` 嵌套）：`Id` / `Pid` / `Name` / `Label` / `Icon` / `Sort` / `Children` |
+| `PlatformConfigPayload` | 同步载荷：`ProjectId` / `SyncVersion` / `Groups` / `Configs` / `IssuedAt` / `KeyVersion` / `Nonce` |
+| `PlatformConfigEnvelope` | 签名信封（与许可证信封同构） |
+| `ParsePlatformConfigEnvelope` | `func ParsePlatformConfigEnvelope(data []byte) (PlatformConfigEnvelope, []byte, error)` 解析并返回 payload 原文 |
+
+`PlatformConfigPayload` / `PlatformConfigEnvelope` 与平台字节级镜像，验签必须使用 `ParsePlatformConfigEnvelope` 返回的 payload 原文。回调事件 `platform.config.updated`（值变更）、`platform.config.definition.changed`（定义变更）只是失效信号，客户端收到后应调用 `PlatformConfigSync` 拉取全量收敛，并以周期性同步兜底。
 
 ---
 
@@ -756,6 +805,24 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `SaasTenantUsageFindParams` | `TenantId` / `ProjectId` / `LimitKey`、`StartTime` / `EndTime`（毫秒） |
 | `QualificationFindParams` / `SaasMenuFindParams` / `SaasFeatureFindParams` / `SaasPlanFindParams` | `Status` 等常规筛选 |
 
+**其它输入 / 结果辅助结构**（§10.5 签名中出现，本节补充定义）：
+
+| 结构 | 说明 |
+|---|---|
+| `LicenseBindingInput` | 签发载荷绑定信息（`Type` / `Value`，供 `LicenseIssuePayload.Binding` 使用） |
+| `LicenseApplicationFindParams` | 授权申请筛选（`Status` / `UserId`（审批视角生效）/ `Page` / `Limit`） |
+| `ArtifactUpdateInput` | 发布物元数据更新（`Id` 必填、`ScanStatus` / `Remark`；已锁定记录仅放行扫描状态） |
+| `SaasMenuSaveResult` | 菜单保存 / 发布结果（`Id` / `Version`） |
+| `PlanNoResult` | 套餐编号结果（`Id` / `PlanNo`） |
+| `SaasTenantPayloadView` | 租户授权原文视图（`TenantNo` / `Payload` / `Signature` / `KeyVersion`，可用运行面包 `TenantPayload` 解析验签） |
+| `SaasTenantContact` | 租户联系人（`Name` / `Phone` / `Email`，仅备案非权益字段） |
+| `SaasTenantInfoUpdateInput` | 非权益字段直改（`Id` / `TenantName` 必填、`Contact`） |
+| `SaasTenantNoResult` | 租户编号结果（`Id` / `TenantNo`） |
+| `SaasReviewResult` | SaaS 申请审批结果（`Id`（approve 时为目标租户 ID）/ `TenantNo` / `Action`） |
+| `SaasTenantUsageItem` | 用量水位单项（`LimitKey`；`Limit` / `Value` / `ReportedAt` 为 `*int64`，nil = 未定义 / 未上报） |
+| `SaasTenantBatchRenewItem` / `SaasTenantBatchRenewSummary` / `SaasTenantBatchRenewResult` | 批量续期：单租户结果（`TenantId` / `TenantNo` / `Result`（applied/submitted/skipped/failed）/ `Message` / `ApplyNo`）、汇总计数（`Applied` / `Submitted` / `Skipped` / `Failed`）、外层结果 |
+| `SaasOverrideMenus` / `SaasOverrides` | 菜单增删（`Add` / `Remove`）；租户个性化覆盖（`Features` 加购/裁剪、`Limits`、`Menus`），供 `SaasTenantSubscribeInput.Overrides` 使用 |
+
 **输出结构**（对齐平台 models/basic 各模型 json tag；时间戳除注明外均为毫秒）：
 
 | 结构 | 说明 |
@@ -784,7 +851,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 2. **验签首选原文模式**：`ParseEnvelope` / `ParseManifest` / `ParseTenantEnvelope` 均返回载荷原始字节，`VerifyRaw` 基于原文验签。平台只追加新字段时重序列化会丢字段导致验签失败，原文验签天然兼容。
 3. **签名算法与密钥**：固定 Ed25519，签名 hex 编码；验签公钥按载荷 `KeyVersion` 从 `PublicKeys` / `ReleasePublicKeys` 选取（支持新旧公钥并存轮换过渡）。你永远拿不到平台的签名私钥，签发只在平台进行。
 4. **时间戳约定**：运行面信封与租户载荷的期限字段为 RFC3339 字符串（空串 = 不限制）；管理面 DTO 与请求参数的时间戳均为**毫秒**；`Token.Expired` 为毫秒时间戳（平台注释误标为秒，以毫秒为准）。
-5. **运行面请求签名**：每个请求自动携带 `X-License-Token` / `X-License-Timestamp` / `X-License-Nonce` / `X-License-Sign` 四头，签名内容 = `method\nuri\ntimestamp\nnonce\nsha256hex(body)`，时间戳用服务端校时（±5 分钟时间窗），nonce 防重放，开发者零感知。
+5. **运行面请求签名**：每个请求自动携带 `X-License-Token` / `X-License-Timestamp` / `X-License-Nonce` / `X-License-Sign` 四头，签名内容 = `method\nuri\ntimestamp\nnonce\nsha256hex(body)`；gRPC 传输额外携带第 5 个头 `X-License-Sign-Version`（签名版本），签名内容 = `GRPC\nfullMethod\ntimestamp\nnonce\nsha256hex(确定性 protobuf 字节)`。时间戳用服务端校时（±5 分钟时间窗），nonce 防重放，开发者零感知。
 6. **管理面协议**：HTTP 状态码恒为 200，业务结果看 `code`（200=成功；400 参数错误；401 未登录/登录失效；403 无权限；404 不存在；409 状态冲突）；GET 走 query，POST/PUT/DELETE 走 JSON body；数组查询参数序列化为 `key[]=v` 重复键；自动登录、令牌过期预判重登、业务 401 自动重登并重试一次。账密明文上送，必须 HTTPS；平台开启「API 签名验证」时管理面客户端不支持。
 7. **降级策略**：运行面断网/服务端故障时按本地缓存信封 + 本地时间判定（`GRACE` → `EXPIRED`）；`CLOCK_TAMPERED` 只告警不停服务。SaaS 租户的 fail-open/fail-closed 由服务商依据 `TenantStatus` 自行决策。
 8. **安全存储**：token、客户端私钥、信封缓存只允许经 `Store` 持久化（默认 AES-256-GCM 加密文件，密钥派生自 项目盐 + 实例指纹，权限 0600）；token 仅 activate 返回一次，丢失只能重新激活。
@@ -804,5 +871,6 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
 | `callback.go` / `config.go` | 回调验签、防重放与幂等分发；项目配置签名同步与本地快照 |
+| `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |
 | `qualification.go` / `projects.go` / `instances.go` / `licenses.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go` | 管理面 13 个资源组 |

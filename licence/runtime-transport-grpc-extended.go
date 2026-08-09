@@ -71,6 +71,33 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 		}
 		return marshalMap(result)
 
+	case http.MethodPost + " /api/v1/platform/configs/sync":
+		var input platformConfigSyncBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.PlatformConfigSyncRequest{
+			LicenseNo: input.LicenseNo, ProjectId: int32(input.ProjectId), SinceVersion: int32(input.SinceVersion),
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlatformConfigRuntimeService_Sync_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.platformConfig.Sync(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		result := map[string]any{"status": response.GetStatus(), "serverTime": response.GetServerTime()}
+		if len(response.GetEnvelopeJson()) > 0 {
+			result["envelope"] = json.RawMessage(response.GetEnvelopeJson())
+		}
+		if response.GetMessage() != "" {
+			result["message"] = response.GetMessage()
+		}
+		return marshalMap(result)
+
 	case http.MethodPost + " /api/v1/updates/check":
 		var input checkUpdateBody
 		if err := json.Unmarshal(body, &input); err != nil {

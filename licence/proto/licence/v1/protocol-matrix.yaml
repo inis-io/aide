@@ -14,6 +14,7 @@ runtime:
   - [Client.ValidateTenant, POST, /api/v1/saas/tenants/validate, SaasRuntimeService/Validate, activation-sign-v1, "", saas_tenant, write, normal, true]
   - [Client.CurrentTenant, GET, /api/v1/saas/tenants/current, SaasRuntimeService/Current, activation-sign-v1, "", saas_tenant, read, normal, true]
   - [Client.SyncConfigs, POST, /api/v1/projects/configs/sync, ProjectConfigRuntimeService/Sync, activation-sign-v1, "", project, read, normal, true]
+  - [Client.PlatformConfigSync, POST, /api/v1/platform/configs/sync, PlatformConfigRuntimeService/Sync, activation-sign-v1, "", platform_config, read, normal, true]
 admin:
   AdminAuthService:
     - [SignIn, POST, /api/comm/sign-in, public, "", normal]

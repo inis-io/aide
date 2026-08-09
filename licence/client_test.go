@@ -55,6 +55,10 @@ type fakePlatform struct {
 	configs map[string]ConfigItem
 	// configSyncVersion - 项目配置全局增量水位
 	configSyncVersion int
+	// platformConfigs - 平台配置
+	platformConfigs map[string]PlatformConfigItem
+	// platformConfigSyncVersion - 平台配置全局增量水位
+	platformConfigSyncVersion int
 	// tamperManifest - 测试开关：签发后篡改清单签名
 	tamperManifest bool
 	// reportSeq - 升级记录编号序列
@@ -100,8 +104,9 @@ func newFakePlatform(t *testing.T) *fakePlatform {
 		validUntil: "", graceDays: 7, version: 1,
 		features: map[string]bool{"report.advanced": true, "ai.chat": false},
 		limits:   map[string]int64{"max_users": 100},
-		tenants:  make(map[string]fakeTenant),
-		configs:  make(map[string]ConfigItem),
+		tenants:        make(map[string]fakeTenant),
+		configs:        make(map[string]ConfigItem),
+		platformConfigs: make(map[string]PlatformConfigItem),
 	}
 	releaseSeed, releasePublicKey, err := generateKeyPair()
 	if err != nil {
@@ -135,6 +140,8 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleTenantSync(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/projects/configs/sync":
 		this.handleConfigSync(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/platform/configs/sync":
+		this.handlePlatformConfigSync(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/saas/tenants/validate":
 		this.handleTenantValidate(writer, request, body)
 	case request.Method == http.MethodGet && request.URL.Path == "/api/v1/saas/tenants/current":

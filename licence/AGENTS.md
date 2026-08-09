@@ -6,9 +6,9 @@
 ## 模块定位与当前状态
 
 - 本目录是 Licen Hub 的 Go SDK，包含运行面 `Client`、管理面 `AdminClient`、在线更新、
-  SaaS 租户、项目配置、回调接收、签名/验签与本地安全存储。
+  SaaS 租户、项目配置、平台配置、回调接收、签名/验签与本地安全存储。
 - 本目录有独立 `go.mod`，不参与 aide 根模块的 `go build ./...`，必须在本目录单独构建测试。
-- **截至 2026-08-09，运行面 10 个 RPC 与管理面现有全资源均已实现 HTTP + gRPC。**
+- **截至 2026-08-09，运行面 11 个 RPC 与管理面现有全资源均已实现 HTTP + gRPC。**
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`；服务端共同消费该契约，
   禁止在 Licen Hub 仓库复制第二份 proto。
