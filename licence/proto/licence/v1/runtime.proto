@@ -35,6 +35,11 @@ service PlatformConfigRuntimeService {
   rpc Sync(PlatformConfigSyncRequest) returns (PlatformConfigSyncResponse);
 }
 
+// EventRuntimeService - 运行面事件订阅（项目级 callback_events 长轮询 / 服务端流）。
+service EventRuntimeService {
+  rpc Subscribe(EventSubscribeRequest) returns (stream EventMessage);
+}
+
 message ActivateRequest {
   string license_no = 1;
   string instance_no = 2;
@@ -176,4 +181,20 @@ message PlatformConfigSyncResponse {
   int64 server_time = 2;
   bytes envelope_json = 3;
   string message = 4;
+}
+
+// EventSubscribeRequest - 事件订阅请求。
+// since_event_id 为已消费水位（callback_events.id，0 = 从头）；
+// timeout_ms 为长轮询 hold 时长（0 = 服务端默认 10000，硬上限 30000）。
+message EventSubscribeRequest {
+  string license_no = 1;
+  int64 since_event_id = 2;
+  int32 timeout_ms = 3;
+}
+
+// EventMessage - 单条订阅事件。
+// envelope_json 必须是平台现场重签的 CallbackEnvelope JSON 原文，客户端基于其中 payload 原文验签。
+message EventMessage {
+  int64 event_id = 1;
+  bytes envelope_json = 2;
 }

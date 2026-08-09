@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -33,6 +34,7 @@ type grpcRuntimeTransport struct {
 	saas           licencev1.SaasRuntimeServiceClient
 	config         licencev1.ProjectConfigRuntimeServiceClient
 	platformConfig licencev1.PlatformConfigRuntimeServiceClient
+	event          licencev1.EventRuntimeServiceClient
 	closeOnce      sync.Once
 	closeErr       error
 }
@@ -49,6 +51,7 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 		saas:           licencev1.NewSaasRuntimeServiceClient(conn),
 		config:         licencev1.NewProjectConfigRuntimeServiceClient(conn),
 		platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn),
+		event:          licencev1.NewEventRuntimeServiceClient(conn),
 	}, nil
 }
 
@@ -167,6 +170,68 @@ func runtimeMap(response *licencev1.RuntimeResponse) map[string]any {
 		result["message"] = response.GetMessage()
 	}
 	return result
+}
+
+// SubscribeEvents - 事件订阅 gRPC 服务端流实现：
+// 带独立 deadline（hold + 10s，下限默认调用超时）打开流，Recv 到 EOF 收集成 slice。
+func (this *grpcRuntimeTransport) SubscribeEvents(ctx context.Context, licenseNo string, sinceEventId int64, hold time.Duration) (subscribeResult, error) {
+	timeout := this.client.options.HTTPTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	if hold <= 0 {
+		hold = 15 * time.Second
+	}
+	// 服务端对 timeout_ms 有 30000ms 硬上限，把 hold 收敛到 30s（deadline=hold+10s 随之收敛）
+	if hold > 30*time.Second {
+		hold = 30 * time.Second
+	}
+	deadline := hold + 10*time.Second
+	if deadline < timeout {
+		deadline = timeout
+	}
+	streamCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	request := &licencev1.EventSubscribeRequest{
+		LicenseNo: licenseNo, SinceEventId: sinceEventId, TimeoutMs: int32(hold.Milliseconds()),
+	}
+	signed, err := this.signedContext(streamCtx, licencev1.EventRuntimeService_Subscribe_FullMethodName, request)
+	if err != nil {
+		return subscribeResult{}, err
+	}
+	stream, err := this.event.Subscribe(signed, request)
+	if err != nil {
+		return subscribeResult{}, this.mapSubscribeError(err)
+	}
+	// 服务端流正常结束即放行态（非放行态服务端直接报错，不会进流）
+	result := subscribeResult{Status: StatusValid}
+	for {
+		message, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			return subscribeResult{}, this.mapSubscribeError(recvErr)
+		}
+		result.Events = append(result.Events, SubscribedEvent{EventId: message.GetEventId(), Envelope: message.GetEnvelopeJson()})
+	}
+	return result, nil
+}
+
+// mapSubscribeError - 订阅流错误映射到业务错误文本（与 HTTP 侧归一，保证公共方法跨协议一致）。
+func (this *grpcRuntimeTransport) mapSubscribeError(err error) error {
+	grpcStatus, _ := status.FromError(err)
+	switch grpcStatus.Code() {
+	case codes.NotFound:
+		return errors.New("许可证或项目信息无效")
+	case codes.FailedPrecondition:
+		// 服务端消息已带"许可证非放行态：{status}"，直接透传保持双协议一致
+		return errors.New(grpcStatus.Message())
+	case codes.Internal:
+		return errors.New("服务端故障，请稍后重试")
+	default:
+		return err
+	}
 }
 
 func (this *grpcRuntimeTransport) invokeContext(ctx context.Context, fullMethod string, request proto.Message, withSign bool) (context.Context, context.CancelFunc, error) {

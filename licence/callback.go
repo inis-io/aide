@@ -87,6 +87,8 @@ const (
 	EventSaasPlanEnabled = "saas.plan.enabled"
 	// EventSaasPlanDisabled - SaaS 套餐已停用，data: {planId, planCode, manifestVersion}
 	EventSaasPlanDisabled = "saas.plan.disabled"
+	// EventSaasTenantCreated - SaaS 租户已诞生（首次生效），data: {tenantNo, tenantCode, planCode, subscriptionType, environment}
+	EventSaasTenantCreated = "saas.tenant.created"
 	// EventSaasMenuPublished - SaaS 菜单清单已发布，data: {manifestId, version}
 	EventSaasMenuPublished = "saas.menu.published"
 	// EventSaasMenuArchived - SaaS 菜单清单已归档，data: {manifestId, version}
@@ -187,18 +189,91 @@ func (this *CallbackHandler) OnAny(fn CallbackFunc) *CallbackHandler {
 	return this
 }
 
-// ServeHTTP - 验签、防重放并分发回调事件
+// validateCallbackEnvelope - 校验信封版本/算法与必填载荷字段（ServeHTTP 的 400 分支；订阅也先调用）。
+func validateCallbackEnvelope(envelope CallbackEnvelope) error {
+	if envelope.Version != EnvelopeVersion || envelope.Algorithm != Algorithm {
+		return errors.New("invalid callback envelope")
+	}
+	if envelope.Payload.Event == "" || envelope.Payload.DeliveryNo == "" || envelope.Payload.Nonce == "" ||
+		envelope.Payload.KeyVersion == "" {
+		return errors.New("invalid callback payload")
+	}
+	return nil
+}
+
+// dispatchEnvelope - 验签、防重放并分发单个事件信封；ServeHTTP 与 EventSubscriber 共用。
+// 返回 ack = 已接收（重复投递时重放已记录的应答，不重复执行业务回调）；
+// 返回 error = 验签/防重放失败，未投递。业务回调 panic 时清理 deliveryNo 去重项并重新抛出，
+// 由调用方（ServeHTTP 的 500 / 订阅器的 error）兜底。
+func (this *CallbackHandler) dispatchEnvelope(ctx context.Context, envelope CallbackEnvelope, rawPayload []byte) (ack Ack, err error) {
+	deliveryNo := envelope.Payload.DeliveryNo
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			this.mu.Lock()
+			delete(this.deliveries, deliveryNo)
+			this.mu.Unlock()
+			panic(recovered)
+		}
+	}()
+
+	publicKey, exists := this.options.PublicKeys[envelope.Payload.KeyVersion]
+	if !exists || !verifyPayload(rawPayload, envelope.Signature, publicKey) {
+		return "", errors.New("callback signature verification failed")
+	}
+	occurredAt, err := time.Parse(time.RFC3339, envelope.Payload.OccurredAt)
+	if err != nil || durationAbs(time.Since(occurredAt)) > this.options.TimeWindow {
+		return "", errors.New("callback occurredAt expired")
+	}
+
+	now := time.Now()
+	this.mu.Lock()
+	this.cleanupLocked(now)
+	if item, exists := this.nonces[envelope.Payload.Nonce]; exists && item.expiresAt.After(now) {
+		this.mu.Unlock()
+		return "", errors.New("callback nonce replayed")
+	}
+	this.nonces[envelope.Payload.Nonce] = callbackDedupItem{expiresAt: now.Add(this.options.DedupTTL)}
+	this.scheduleCleanup(envelope.Payload.Nonce, false, now.Add(this.options.DedupTTL))
+	if item, exists := this.deliveries[deliveryNo]; exists && item.expiresAt.After(now) {
+		this.mu.Unlock()
+		if item.ready {
+			return item.ack, nil
+		}
+		return AckRetry, nil
+	}
+	deliveryExpiresAt := now.Add(this.options.DedupTTL)
+	this.deliveries[deliveryNo] = callbackDedupItem{expiresAt: deliveryExpiresAt}
+	this.scheduleCleanup(deliveryNo, true, deliveryExpiresAt)
+	fn := this.matchLocked(envelope.Payload.Event)
+	this.mu.Unlock()
+
+	ack = AckIgnored
+	if fn != nil {
+		ack, err = fn(ctx, &CallbackEvent{
+			Payload: envelope.Payload, Data: envelope.Payload.Data,
+		})
+		if err != nil {
+			ack = AckRetry
+		}
+	}
+	if !validAck(ack) {
+		ack = AckRetry
+	}
+	this.mu.Lock()
+	deliveryExpiresAt = time.Now().Add(this.options.DedupTTL)
+	this.deliveries[deliveryNo] = callbackDedupItem{
+		expiresAt: deliveryExpiresAt, ack: ack, ready: true,
+	}
+	this.mu.Unlock()
+	this.scheduleCleanup(deliveryNo, true, deliveryExpiresAt)
+	return ack, nil
+}
+
+// ServeHTTP - 验签、防重放并分发回调事件（webhook 接收端，平台 → 客户）。
 func (this *CallbackHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	deliveryNo := ""
-	completed := false
 	defer func() {
 		if recover() != nil {
-			if deliveryNo != "" && !completed {
-				this.mu.Lock()
-				delete(this.deliveries, deliveryNo)
-				this.mu.Unlock()
-			}
 			http.Error(writer, "callback handler panic", http.StatusInternalServerError)
 		}
 	}()
@@ -219,73 +294,19 @@ func (this *CallbackHandler) ServeHTTP(writer http.ResponseWriter, request *http
 		return
 	}
 	envelope, rawPayload, err := ParseCallbackEnvelope(body)
-	if err != nil || envelope.Version != EnvelopeVersion || envelope.Algorithm != Algorithm {
+	if err != nil {
 		http.Error(writer, "invalid callback envelope", http.StatusBadRequest)
 		return
 	}
-	if envelope.Payload.Event == "" || envelope.Payload.DeliveryNo == "" || envelope.Payload.Nonce == "" ||
-		envelope.Payload.KeyVersion == "" {
-		http.Error(writer, "invalid callback payload", http.StatusBadRequest)
+	if err = validateCallbackEnvelope(envelope); err != nil {
+		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
-	publicKey, exists := this.options.PublicKeys[envelope.Payload.KeyVersion]
-	if !exists || !verifyPayload(rawPayload, envelope.Signature, publicKey) {
-		http.Error(writer, "callback signature verification failed", http.StatusUnauthorized)
+	ack, err := this.dispatchEnvelope(request.Context(), envelope, rawPayload)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	occurredAt, err := time.Parse(time.RFC3339, envelope.Payload.OccurredAt)
-	if err != nil || durationAbs(time.Since(occurredAt)) > this.options.TimeWindow {
-		http.Error(writer, "callback occurredAt expired", http.StatusUnauthorized)
-		return
-	}
-
-	now := time.Now()
-	this.mu.Lock()
-	this.cleanupLocked(now)
-	if item, exists := this.nonces[envelope.Payload.Nonce]; exists && item.expiresAt.After(now) {
-		this.mu.Unlock()
-		http.Error(writer, "callback nonce replayed", http.StatusUnauthorized)
-		return
-	}
-	this.nonces[envelope.Payload.Nonce] = callbackDedupItem{expiresAt: now.Add(this.options.DedupTTL)}
-	this.scheduleCleanup(envelope.Payload.Nonce, false, now.Add(this.options.DedupTTL))
-	if item, exists := this.deliveries[envelope.Payload.DeliveryNo]; exists && item.expiresAt.After(now) {
-		this.mu.Unlock()
-		writer.WriteHeader(http.StatusOK)
-		if item.ready {
-			_, _ = writer.Write([]byte(item.ack))
-		} else {
-			_, _ = writer.Write([]byte(AckRetry))
-		}
-		return
-	}
-	deliveryNo = envelope.Payload.DeliveryNo
-	deliveryExpiresAt := now.Add(this.options.DedupTTL)
-	this.deliveries[deliveryNo] = callbackDedupItem{expiresAt: deliveryExpiresAt}
-	this.scheduleCleanup(deliveryNo, true, deliveryExpiresAt)
-	fn := this.matchLocked(envelope.Payload.Event)
-	this.mu.Unlock()
-
-	ack := AckIgnored
-	if fn != nil {
-		ack, err = fn(request.Context(), &CallbackEvent{
-			Payload: envelope.Payload, Data: envelope.Payload.Data,
-		})
-		if err != nil {
-			ack = AckRetry
-		}
-	}
-	if !validAck(ack) {
-		ack = AckRetry
-	}
-	this.mu.Lock()
-	deliveryExpiresAt = time.Now().Add(this.options.DedupTTL)
-	this.deliveries[deliveryNo] = callbackDedupItem{
-		expiresAt: deliveryExpiresAt, ack: ack, ready: true,
-	}
-	this.mu.Unlock()
-	this.scheduleCleanup(deliveryNo, true, deliveryExpiresAt)
-	completed = true
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write([]byte(ack))
 }

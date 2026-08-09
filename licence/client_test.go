@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -66,6 +67,9 @@ type fakePlatform struct {
 	// 调用计数
 	activateCalls int
 	validateCalls int
+	// events - 项目事件订阅队列（callback_events 简化镜像，eventId 单调递增）
+	events   []fakeEvent
+	eventSeq int64
 	// server - httptest 实例
 	server *httptest.Server
 }
@@ -89,6 +93,57 @@ type fakeTenant struct {
 	validUntil string
 	graceDays  int
 	features   map[string]bool
+}
+
+// fakeEvent - 假订阅事件（eventId 即客户端水位，data 为事件摘要）
+type fakeEvent struct {
+	eventId int64
+	eventNo string
+	event   string
+	data    json.RawMessage
+}
+
+// pushEvent - 推送一条订阅事件（eventId 单调递增，等价平台 callback_events 落库）
+func (this *fakePlatform) pushEvent(event string, data map[string]any) (int64, error) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	this.eventSeq++
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return 0, err
+	}
+	this.events = append(this.events, fakeEvent{
+		eventId: this.eventSeq,
+		eventNo: fmt.Sprintf("EVT-2026-%06d", this.eventSeq),
+		event:   event, data: raw,
+	})
+	return this.eventSeq, nil
+}
+
+// signCallbackEnvelope - 用平台 seed 现场重签一条订阅事件信封：
+// nonce 每次新鲜、occurredAt 为当下、deliveryNo 稳定 SUB-{eventNo}（镜像平台订阅端点行为）
+func signCallbackEnvelope(seed []byte, event fakeEvent) (json.RawMessage, error) {
+
+	payload := CallbackPayload{
+		EventNo: event.eventNo, DeliveryNo: "SUB-" + event.eventNo, Event: event.event,
+		ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
+		OccurredAt: time.Now().UTC().Format(time.RFC3339),
+		Nonce:      Licence.Nonce(), KeyVersion: "license-key-2026-01",
+		Data: event.data,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	signature, err := signPayload(raw, seed)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(CallbackEnvelope{
+		Version: EnvelopeVersion, Algorithm: Algorithm, Payload: payload, Signature: signature,
+	})
 }
 
 // newFakePlatform - 创建假平台（默认：永久授权、基础权益）
@@ -146,11 +201,53 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleTenantValidate(writer, request, body)
 	case request.Method == http.MethodGet && request.URL.Path == "/api/v1/saas/tenants/current":
 		this.handleTenantCurrent(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/events/subscribe":
+		this.handleSubscribe(writer, request, body)
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/files/"):
 		this.handleFileDownload(writer, request)
 	default:
 		writer.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// handleSubscribe - 事件订阅：凭证校验 → 放行态判定 → 按 sinceEventId 过滤并现场重签（nonce 每次新鲜）
+func (this *fakePlatform) handleSubscribe(writer http.ResponseWriter, request *http.Request, body []byte) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	if !this.credential(writer, request, body) {
+		return
+	}
+	var params struct {
+		LicenseNo    string `json:"licenseNo"`
+		SinceEventId int64  `json:"sinceEventId"`
+		TimeoutMs    int32  `json:"timeoutMs"`
+	}
+	if err := json.Unmarshal(body, &params); err != nil {
+		writeNotFound(writer)
+		return
+	}
+	status := this.status()
+	if !passThrough(status) {
+		writeJson(writer, map[string]any{"status": status, "serverTime": time.Now().UnixMilli()})
+		return
+	}
+	items := make([]map[string]any, 0, len(this.events))
+	for _, event := range this.events {
+		if event.eventId <= params.SinceEventId {
+			continue
+		}
+		envelope, err := signCallbackEnvelope(this.seed, event)
+		if err != nil {
+			writeJson(writer, map[string]any{"status": StatusError, "serverTime": time.Now().UnixMilli()})
+			return
+		}
+		items = append(items, map[string]any{"eventId": event.eventId, "envelope": envelope})
+	}
+	writeJson(writer, map[string]any{
+		"status": status, "serverTime": time.Now().UnixMilli(), "events": items,
+	})
 }
 
 // handleActivate - 激活：注册客户端公钥与指纹，签发信封 + 一次性令牌

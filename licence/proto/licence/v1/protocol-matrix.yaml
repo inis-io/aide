@@ -15,6 +15,7 @@ runtime:
   - [Client.CurrentTenant, GET, /api/v1/saas/tenants/current, SaasRuntimeService/Current, activation-sign-v1, "", saas_tenant, read, normal, true]
   - [Client.SyncConfigs, POST, /api/v1/projects/configs/sync, ProjectConfigRuntimeService/Sync, activation-sign-v1, "", project, read, normal, true]
   - [Client.PlatformConfigSync, POST, /api/v1/platform/configs/sync, PlatformConfigRuntimeService/Sync, activation-sign-v1, "", platform_config, read, normal, true]
+  - [Client.Subscribe, POST, /api/v1/events/subscribe, EventRuntimeService/Subscribe, activation-sign-v1, "", callback_event, read, normal, true]
 admin:
   AdminAuthService:
     - [SignIn, POST, /api/comm/sign-in, public, "", normal]

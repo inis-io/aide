@@ -263,6 +263,29 @@ http.Handle("/licence/callback", handler)
 
 回调会先做原文验签、正负 5 分钟时间窗检查、nonce 防重放和 `deliveryNo` 幂等去重。业务回调应快速返回：`success`/`ok` 表示成功，`ignored` 表示无需处理，`retry` 要求平台重试，`rejected` 表示永久拒绝。未注册的事件自动返回 `ignored`。
 
+**没有 `notify_url`（或想内网直连）也能收到事件**：用 `Client.Subscribe` 主动订阅项目事件（HTTP 长轮询 / gRPC 服务端流，双传输任选）。订阅信封由平台现场重签，复用与回调完全相同的验签与去重管线；收到 `saas.tenant.created` 等事件后同样调 `TenantSync` / `ConfigSync` 拉全量：
+
+```go
+sub := client.Subscribe(licence.CallbackOptions{}).
+    OnEvent("saas.*", func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+        var data struct {
+            TenantNo string `json:"tenantNo"`
+            PlanCode string `json:"planCode"`
+        }
+        _ = event.MustData(&data)
+        _, _, _ = client.TenantSync(context.Background(), 0) // 推送即失效信号：收到后拉完整租户信封
+        return licence.AckSuccess, nil
+    }).
+    OnEvent(licence.EventProjectConfigUpdated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+        _, _ = client.ConfigSync(context.Background())
+        return licence.AckSuccess, nil
+    })
+sub.SetWatermark(lastEventId) // 可选：跳过已消费的历史事件
+n, err := sub.Poll(ctx)       // 一轮长轮询拉取并分发，返回条数；或 _ = sub.Run(ctx) 后台循环
+```
+
+订阅器按 `eventId` 单调推进水位，`deliveryNo` 稳定为 `SUB-{eventNo}` 跨轮去重；非放行态统一返回 `许可证非放行态：{status}`。接口明细见 §19.6。
+
 回调只是「变更信号」，全量事实仍通过拉取收敛。项目配置同步后可直接读本地快照：
 
 ```go
@@ -765,7 +788,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
 | `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
 
-事件名常量：SaaS 套餐 / 菜单清单 / 项目配置 / 平台配置全部 10 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasPlanUpdated`、`EventSaasMenuPublished`、`EventProjectConfigUpdated`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`project.config.*`、`saas.*`）一次捕获该族全部动作。
+事件名常量：SaaS 套餐 / 租户 / 菜单清单 / 项目配置 / 平台配置全部 11 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasTenantCreated`、`EventSaasMenuPublished`、`EventProjectConfigUpdated`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`project.config.*`、`saas.*`）一次捕获该族全部动作。
 
 ### 19.4 项目配置同步
 
@@ -805,6 +828,44 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `ParsePlatformConfigEnvelope` | `func ParsePlatformConfigEnvelope(data []byte) (PlatformConfigEnvelope, []byte, error)` 解析并返回 payload 原文 |
 
 `PlatformConfigPayload` / `PlatformConfigEnvelope` 与平台字节级镜像，验签必须使用 `ParsePlatformConfigEnvelope` 返回的 payload 原文。回调事件 `platform.config.updated`（值变更）、`platform.config.definition.changed`（定义变更）只是失效信号，客户端收到后应调用 `PlatformConfigSync` 拉取全量收敛，并以周期性同步兜底。
+
+### 19.6 运行面事件订阅（EventSubscriber）
+
+`Client.Subscribe(CallbackOptions)` 创建**项目级事件订阅器**，拉取平台 `callback_events` 增量（HTTP 长轮询 + gRPC 服务端流双传输），把订阅信封喂给与 §19.3 `CallbackHandler` 完全相同的验签 / 防重放 / 分发管线。**无需登记 `notify_url`**；事件由平台现场重签（`occurredAt` 重新盖戳、`nonce` 新鲜、`deliveryNo` 稳定 `SUB-{eventNo}`），客户端以 `eventId` 单调推进水位。
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `Client.Subscribe` | `func (this *Client) Subscribe(options CallbackOptions) *EventSubscriber` | 创建订阅器（默认复用 `client.PublicKeys`，options 可覆盖 `TimeWindow` / `DedupTTL` 等） |
+| `OnEvent` | `func (this *EventSubscriber) OnEvent(event string, fn CallbackFunc) *EventSubscriber` | 注册精确事件或前缀通配处理器（如 `saas.*`，链式） |
+| `OnAny` | `func (this *EventSubscriber) OnAny(fn CallbackFunc) *EventSubscriber` | 注册未匹配事件的兜底处理器 |
+| `Poll` | `func (this *EventSubscriber) Poll(ctx context.Context) (int, error)` | 一轮长轮询/流式拉取并分发，返回已成功分发条数 |
+| `Run` | `func (this *EventSubscriber) Run(ctx context.Context) error` | 循环 `Poll` 直到 `ctx` 取消 |
+| `Watermark` | `func (this *EventSubscriber) Watermark() int64` | 当前已消费水位（`callback_events.id`） |
+| `SetWatermark` | `func (this *EventSubscriber) SetWatermark(id int64)` | 设置初始水位（跳过头历史事件，需在首轮 `Poll` 前调用） |
+
+**语义**：
+
+- 事件按 `eventId` 升序消费：`success/ok/ignored` 推进水位；`retry/rejected` 或验签失败停在该事件不推进（下轮重拉，`deliveryNo` 去重 TTL 内不重复分发）。`Poll` 不持有 `client.opMu`，长轮询 hold 不阻塞 validate/activate 刷新循环。
+- 单轮 hold 默认 15s；HTTP 传输用专用更长超时的 http.Client（`HTTPTimeout+30s`），gRPC 传输 `context.WithTimeout(hold+10s)`。
+- 非放行态归一：HTTP 200 body 的 `status` 与 gRPC `FailedPrecondition` 均归一为 `许可证非放行态：{status}`；`ERROR` 返回 `服务端故障：{message}`（镜像 `TenantSync`）。
+- 未注册事件自动 `AckIgnored` 计入水位，不进入重试风暴。事件常量与 `data` 字段见 API.md §2.4（含 `EventSaasTenantCreated`）。
+
+```go
+sub := client.Subscribe(licence.CallbackOptions{}).
+    OnEvent(licence.EventSaasTenantCreated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+        var data struct {
+            TenantNo string `json:"tenantNo"`
+            PlanCode string `json:"planCode"`
+        }
+        _ = event.MustData(&data)
+        _, _, _ = client.TenantSync(ctx, 0) // 推送即失效信号：收到后拉完整租户信封
+        return licence.AckSuccess, nil
+    })
+sub.SetWatermark(lastEventId)
+n, err := sub.Poll(ctx) // 或 _ = sub.Run(ctx) 后台循环
+```
+
+平台侧契约（`POST /api/v1/events/subscribe`、gRPC `EventRuntimeService/Subscribe`、请求签名、水位与状态码）见 `licen-hub/docs/md/许可证运行面接口契约.md` §10「运行面事件订阅」。
 
 ## 20. 管理面客户端 AdminClient
 
@@ -1135,6 +1196,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
 | `callback.go` / `config.go` | 回调接收：验签、防重放、幂等分发；项目配置签名同步与本地快照 |
+| `events.go` | 事件订阅：`EventSubscriber` 增量拉取、水位推进、HTTP/gRPC 双传输 |
 | `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |
 | `qualification.go` / `projects.go` / `instances.go` / `licenses.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go` | 管理面 13 个资源组 |

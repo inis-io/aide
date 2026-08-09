@@ -3,6 +3,7 @@ package licence
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"net/http"
 	"testing"
@@ -11,8 +12,10 @@ import (
 	licencev1 "github.com/inis-io/aide/licence/proto/licence/v1"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -87,6 +90,120 @@ type runtimePlatformConfigServer struct {
 
 func (runtimePlatformConfigServer) Sync(context.Context, *licencev1.PlatformConfigSyncRequest) (*licencev1.PlatformConfigSyncResponse, error) {
 	return &licencev1.PlatformConfigSyncResponse{Status: StatusValid}, nil
+}
+
+// runtimeEventServer - 事件订阅 gRPC 服务端流假实现：
+// 校验签名 metadata 齐全；按 sinceEventId 过滤并现场重签；failCode 非零时直接报错（非放行态模拟）
+type runtimeEventServer struct {
+	licencev1.UnimplementedEventRuntimeServiceServer
+	t        *testing.T
+	seed     []byte
+	events   []fakeEvent
+	failCode codes.Code
+}
+
+func (s runtimeEventServer) Subscribe(request *licencev1.EventSubscribeRequest, stream licencev1.EventRuntimeService_SubscribeServer) error {
+	s.t.Helper()
+	md, _ := metadata.FromIncomingContext(stream.Context())
+	for _, key := range []string{LicenceProtocol.MetadataToken, LicenceProtocol.MetadataTimestamp, LicenceProtocol.MetadataNonce, LicenceProtocol.MetadataSignature, LicenceProtocol.MetadataSignVersion} {
+		if len(md.Get(key)) == 0 {
+			s.t.Fatalf("缺少签名 metadata %s", key)
+		}
+	}
+	if s.failCode != codes.OK {
+		return status.Error(s.failCode, "许可证非放行态：SUSPENDED")
+	}
+	for _, event := range s.events {
+		if event.eventId <= request.GetSinceEventId() {
+			continue
+		}
+		envelope, err := signCallbackEnvelope(s.seed, event)
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&licencev1.EventMessage{EventId: event.eventId, EnvelopeJson: envelope}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func newTestEventTransport(t *testing.T, eventServer licencev1.EventRuntimeServiceServer) (*grpcRuntimeTransport, error) {
+	t.Helper()
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	licencev1.RegisterEventRuntimeServiceServer(server, eventServer)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	seed, _, err := generateKeyPair()
+	if err != nil {
+		return nil, err
+	}
+	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
+	return &grpcRuntimeTransport{client: client, conn: conn, event: licencev1.NewEventRuntimeServiceClient(conn)}, nil
+}
+
+// TestGRPCRuntimeTransportSubscribeEvents - gRPC 服务端流订阅：收集事件 + metadata 签名齐全 + 非放行态错误归一
+func TestGRPCRuntimeTransportSubscribeEvents(t *testing.T) {
+
+	seed, _, err := generateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := runtimeEventServer{t: t, seed: seed, events: []fakeEvent{
+		{eventId: 1, eventNo: "EVT-2026-000001", event: EventSaasTenantCreated, data: json.RawMessage(`{"tenantNo":"T1"}`)},
+		{eventId: 2, eventNo: "EVT-2026-000002", event: EventSaasPlanUpdated, data: json.RawMessage(`{"planCode":"pro"}`)},
+	}}
+	transport, err := newTestEventTransport(t, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := transport.SubscribeEvents(context.Background(), "LIC-2026-000123", 0, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 2 {
+		t.Fatalf("应收集 2 条事件，实际 %d", len(result.Events))
+	}
+	if result.Events[0].EventId != 1 || result.Events[1].EventId != 2 {
+		t.Fatalf("事件顺序错误: %d %d", result.Events[0].EventId, result.Events[1].EventId)
+	}
+	envelope, _, err := ParseCallbackEnvelope(result.Events[1].Envelope)
+	if err != nil || envelope.Payload.Event != EventSaasPlanUpdated {
+		t.Fatalf("信封解析失败: %v %v", envelope.Payload.Event, err)
+	}
+
+	// sinceEventId 过滤：只返回 > since 的事件
+	result, err = transport.SubscribeEvents(context.Background(), "LIC-2026-000123", 1, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || result.Events[0].EventId != 2 {
+		t.Fatalf("sinceEventId 过滤错误: %d 条 %+v", len(result.Events), result.Events)
+	}
+}
+
+// TestGRPCRuntimeTransportSubscribeNonPassThrough - 非放行态 gRPC 服务端流报错 → 归一为同一错误文本
+func TestGRPCRuntimeTransportSubscribeNonPassThrough(t *testing.T) {
+
+	seed, _, err := generateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, err := newTestEventTransport(t, runtimeEventServer{t: t, seed: seed, failCode: codes.FailedPrecondition})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = transport.SubscribeEvents(context.Background(), "LIC-2026-000123", 0, 100*time.Millisecond)
+	if err == nil || err.Error() != "许可证非放行态：SUSPENDED" {
+		t.Fatalf("非放行态错误文本应归一为'许可证非放行态：SUSPENDED'，实际 %v", err)
+	}
 }
 
 func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {

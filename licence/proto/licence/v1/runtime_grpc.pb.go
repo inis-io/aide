@@ -777,3 +777,112 @@ var PlatformConfigRuntimeService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "licence/v1/runtime.proto",
 }
+
+const (
+	EventRuntimeService_Subscribe_FullMethodName = "/licenhub.licence.v1.EventRuntimeService/Subscribe"
+)
+
+// EventRuntimeServiceClient is the client API for EventRuntimeService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// EventRuntimeService - 运行面事件订阅（项目级 callback_events 长轮询 / 服务端流）。
+type EventRuntimeServiceClient interface {
+	Subscribe(ctx context.Context, in *EventSubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EventMessage], error)
+}
+
+type eventRuntimeServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewEventRuntimeServiceClient(cc grpc.ClientConnInterface) EventRuntimeServiceClient {
+	return &eventRuntimeServiceClient{cc}
+}
+
+func (c *eventRuntimeServiceClient) Subscribe(ctx context.Context, in *EventSubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[EventMessage], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EventRuntimeService_ServiceDesc.Streams[0], EventRuntimeService_Subscribe_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[EventSubscribeRequest, EventMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EventRuntimeService_SubscribeClient = grpc.ServerStreamingClient[EventMessage]
+
+// EventRuntimeServiceServer is the server API for EventRuntimeService service.
+// All implementations must embed UnimplementedEventRuntimeServiceServer
+// for forward compatibility.
+//
+// EventRuntimeService - 运行面事件订阅（项目级 callback_events 长轮询 / 服务端流）。
+type EventRuntimeServiceServer interface {
+	Subscribe(*EventSubscribeRequest, grpc.ServerStreamingServer[EventMessage]) error
+	mustEmbedUnimplementedEventRuntimeServiceServer()
+}
+
+// UnimplementedEventRuntimeServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedEventRuntimeServiceServer struct{}
+
+func (UnimplementedEventRuntimeServiceServer) Subscribe(*EventSubscribeRequest, grpc.ServerStreamingServer[EventMessage]) error {
+	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
+}
+func (UnimplementedEventRuntimeServiceServer) mustEmbedUnimplementedEventRuntimeServiceServer() {}
+func (UnimplementedEventRuntimeServiceServer) testEmbeddedByValue()                             {}
+
+// UnsafeEventRuntimeServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to EventRuntimeServiceServer will
+// result in compilation errors.
+type UnsafeEventRuntimeServiceServer interface {
+	mustEmbedUnimplementedEventRuntimeServiceServer()
+}
+
+func RegisterEventRuntimeServiceServer(s grpc.ServiceRegistrar, srv EventRuntimeServiceServer) {
+	// If the following call pancis, it indicates UnimplementedEventRuntimeServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&EventRuntimeService_ServiceDesc, srv)
+}
+
+func _EventRuntimeService_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(EventSubscribeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(EventRuntimeServiceServer).Subscribe(m, &grpc.GenericServerStream[EventSubscribeRequest, EventMessage]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EventRuntimeService_SubscribeServer = grpc.ServerStreamingServer[EventMessage]
+
+// EventRuntimeService_ServiceDesc is the grpc.ServiceDesc for EventRuntimeService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var EventRuntimeService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "licenhub.licence.v1.EventRuntimeService",
+	HandlerType: (*EventRuntimeServiceServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Subscribe",
+			Handler:       _EventRuntimeService_Subscribe_Handler,
+			ServerStreams: true,
+		},
+	},
+	Metadata: "licence/v1/runtime.proto",
+}
