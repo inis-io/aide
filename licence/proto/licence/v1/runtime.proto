@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package licenhub.licence.v1;
+
+option go_package = "github.com/inis-io/aide/licence/proto/licence/v1;licencev1";
+
+// LicenseRuntimeService - 许可证实例运行面。
+service LicenseRuntimeService {
+  rpc Activate(ActivateRequest) returns (RuntimeResponse);
+  rpc Validate(ValidateRequest) returns (RuntimeResponse);
+  rpc Current(CurrentLicenseRequest) returns (RuntimeResponse);
+}
+
+// UpdateRuntimeService - 在线更新运行面。
+service UpdateRuntimeService {
+  rpc Check(UpdateCheckRequest) returns (UpdateCheckResponse);
+  rpc Report(UpdateReportRequest) returns (UpdateReportResponse);
+  rpc AppendLogs(UpdateLogsRequest) returns (UpdateReportResponse);
+}
+
+// SaasRuntimeService - SaaS 租户运行面。
+service SaasRuntimeService {
+  rpc Sync(TenantSyncRequest) returns (TenantSyncResponse);
+  rpc Validate(TenantValidateRequest) returns (TenantResponse);
+  rpc Current(TenantCurrentRequest) returns (TenantResponse);
+}
+
+// ProjectConfigRuntimeService - 项目配置运行面。
+service ProjectConfigRuntimeService {
+  rpc Sync(ProjectConfigSyncRequest) returns (ProjectConfigSyncResponse);
+}
+
+message ActivateRequest {
+  string license_no = 1;
+  string instance_no = 2;
+  string fingerprint_hash = 3;
+  string client_public_key = 4;
+  int64 client_time = 5;
+}
+
+message ValidateRequest {
+  string license_no = 1;
+  string fingerprint_hash = 2;
+  string version = 3;
+  string feature = 4;
+  map<string, int64> usage = 5;
+  int64 client_time = 6;
+}
+
+message CurrentLicenseRequest {
+  string license_no = 1;
+}
+
+// RuntimeResponse - 许可证运行面统一响应。
+// envelope_json 必须是平台签发的 JSON 原文，客户端基于其中 payload 原文验签。
+message RuntimeResponse {
+  string status = 1;
+  int64 server_time = 2;
+  bytes envelope_json = 3;
+  string activation_no = 4;
+  string activation_token = 5;
+  int64 expires_at = 6;
+  string message = 7;
+}
+
+message UpdateCheckRequest {
+  string license_no = 1;
+  string fingerprint_hash = 2;
+  string os_arch = 3;
+  string version = 4;
+  int64 client_time = 5;
+}
+
+message UpdateCheckResponse {
+  string status = 1;
+  int64 server_time = 2;
+  bool update = 3;
+  bytes manifest_json = 4;
+  string message = 5;
+}
+
+message UpdateReportRequest {
+  string license_no = 1;
+  string record_no = 2;
+  string from_version = 3;
+  string target_version = 4;
+  string artifact_no = 5;
+  string status = 6;
+  string message = 7;
+  int64 client_time = 8;
+}
+
+message UpdateLogsRequest {
+  string license_no = 1;
+  string record_no = 2;
+  repeated string lines = 3;
+}
+
+message UpdateReportResponse {
+  string status = 1;
+  int64 server_time = 2;
+  string record_no = 3;
+  string message = 4;
+}
+
+message TenantSyncRequest {
+  string license_no = 1;
+  int64 since_time = 2;
+}
+
+message TenantManifest {
+  int32 version = 1;
+  bytes menus_json = 2;
+}
+
+message TenantSyncItem {
+  string tenant_code = 1;
+  string status = 2;
+  bytes envelope_json = 3;
+}
+
+message TenantSyncResponse {
+  string status = 1;
+  int64 server_time = 2;
+  int64 sync_time = 3;
+  TenantManifest manifest = 4;
+  repeated TenantSyncItem tenants = 5;
+  string message = 6;
+}
+
+message TenantValidateRequest {
+  string license_no = 1;
+  string tenant_code = 2;
+  string version = 3;
+  string feature = 4;
+  map<string, int64> usage = 5;
+}
+
+message TenantCurrentRequest {
+  string license_no = 1;
+  string tenant_code = 2;
+}
+
+message TenantResponse {
+  string status = 1;
+  int64 server_time = 2;
+  bytes envelope_json = 3;
+  string message = 4;
+}
+
+message ProjectConfigSyncRequest {
+  string license_no = 1;
+  int32 since_version = 2;
+}
+
+message ProjectConfigSyncResponse {
+  string status = 1;
+  int64 server_time = 2;
+  bytes envelope_json = 3;
+  string message = 4;
+}

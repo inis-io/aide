@@ -1,17 +1,15 @@
 package licence
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
+
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 )
 
 // activateBody - 激活请求体（契约 §2.1；activate 本身不签名，上送客户端公钥注册）
@@ -28,6 +26,7 @@ type validateBody struct {
 	LicenseNo       string           `json:"licenseNo"`
 	FingerprintHash string           `json:"fingerprintHash"`
 	Version         string           `json:"version,omitempty"`
+	Feature         string           `json:"feature,omitempty"`
 	Usage           map[string]int64 `json:"usage,omitempty"`
 	ClientTime      int64            `json:"clientTime,omitempty"`
 }
@@ -223,43 +222,18 @@ func (this *Client) currentLocked(ctx context.Context) (Envelope, error) {
 // doRequest - 统一请求出口：拼接 ServerURL + requestURI，按需附带请求签名三要素
 // （契约 §2.4：X-License-Timestamp / X-License-Nonce / X-License-Sign）
 func (this *Client) doRequest(ctx context.Context, method string, requestURI string, body []byte, withSign bool) (int, []byte, error) {
-
-	url := strings.TrimRight(this.options.ServerURL, "/") + requestURI
-	request, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, err
+	if this.transport == nil {
+		return 0, nil, errors.New("运行面传输层未初始化")
 	}
-	request.Header.Set("Content-Type", "application/json")
-
-	if withSign {
-		headers, err := this.signHeaders(method, requestURI, body)
-		if err != nil {
-			return 0, nil, err
-		}
-		for key, value := range headers {
-			request.Header.Set(key, value)
-		}
-	}
-
-	response, err := this.http.Do(request)
-	if err != nil {
-		// 请求未达服务端：拉长下轮刷新间隔（退避）
-		this.mu.Lock()
-		this.retryDelay = time.Minute
-		this.mu.Unlock()
-		return 0, nil, err
-	}
-	defer func() { _ = response.Body.Close() }()
-
-	raw, err := io.ReadAll(response.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	// 服务端可达：清除退避
+	code, raw, err := this.transport.RoundTrip(ctx, method, requestURI, body, withSign)
 	this.mu.Lock()
-	this.retryDelay = 0
+	if err != nil {
+		this.retryDelay = time.Minute
+	} else {
+		this.retryDelay = 0
+	}
 	this.mu.Unlock()
-	return response.StatusCode, raw, nil
+	return code, raw, err
 }
 
 // signHeaders - 生成请求签名头部（契约 §2.4）
@@ -282,10 +256,8 @@ func (this *Client) signHeaders(method string, requestURI string, body []byte) (
 
 	timestamp := strconv.FormatInt(this.now(), 10)
 	nonce := Licence.Nonce()
-	sum := sha256.Sum256(body)
-	content := method + "\n" + requestURI + "\n" + timestamp + "\n" + nonce + "\n" + hex.EncodeToString(sum[:])
-
-	signature, err := signPayload([]byte(content), seed)
+	content := LicenceProtocol.HTTPContent(method, requestURI, timestamp, nonce, body)
+	signature, err := signPayload(content, seed)
 	if err != nil {
 		return nil, err
 	}

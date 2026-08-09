@@ -2,13 +2,37 @@ package licence
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"math/rand/v2"
-	"net/http"
 	"sync"
 	"time"
 )
+
+// Transport - SDK 到 Licen Hub 的传输协议。
+type Transport string
+
+const (
+	// TransportHTTP - HTTP JSON 传输，兼容默认值。
+	TransportHTTP Transport = "http"
+	// TransportGRPC - 原生 gRPC 传输。
+	TransportGRPC Transport = "grpc"
+)
+
+// GRPCOptions - gRPC 连接配置。
+type GRPCOptions struct {
+	// AllowInsecure - 允许明文 h2c，仅限开发或受控内网。
+	AllowInsecure bool
+	// TLSConfig - 自定义 TLS 配置；为空时按 ServerURL 主机名构造安全默认值。
+	TLSConfig *tls.Config
+	// Authority - 可选 HTTP/2 authority 覆盖。
+	Authority string
+	// DialTimeout - 首次 RPC/连接超时，默认沿用 HTTPTimeout。
+	DialTimeout time.Duration
+	// MaxReceiveMessageSize - 最大接收消息字节数，默认 16 MiB。
+	MaxReceiveMessageSize int
+}
 
 // Options - 运行面客户端配置（ServerURL 为平台 URI 唯一入口）
 type Options struct {
@@ -38,6 +62,10 @@ type Options struct {
 	RefreshInterval time.Duration
 	// HTTPTimeout - 单次请求超时（默认 15 秒）
 	HTTPTimeout time.Duration
+	// Transport - 传输协议，零值默认 HTTP。
+	Transport Transport
+	// GRPC - gRPC 连接配置，仅 TransportGRPC 时生效。
+	GRPC GRPCOptions
 	// OnStatusChange - 状态变化回调（可选，放行与降级策略在此挂接）
 	OnStatusChange func(oldStatus string, newStatus string)
 }
@@ -67,8 +95,8 @@ type runtimeState struct {
 type Client struct {
 	// options - 归一化后的配置
 	options Options
-	// http - HTTP 传输层
-	http *http.Client
+	// transport - HTTP/gRPC 运行面传输层
+	transport runtimeTransport
 	// store - 安全存储
 	store Store
 	// fingerprint - 实例指纹哈希
@@ -142,13 +170,18 @@ func New(options Options) (*Client, error) {
 		}
 	}
 
-	return &Client{
-		options: options, http: &http.Client{Timeout: options.HTTPTimeout},
-		store: store, fingerprint: fingerprint,
+	client := &Client{
+		options: options,
+		store:   store, fingerprint: fingerprint,
 		state:        runtimeState{Configs: make(map[string]ConfigItem)},
 		pendingUsage: make(map[string]int64),
 		tenantCache:  make(map[string]tenantCacheItem),
-	}, nil
+	}
+	client.transport, err = newRuntimeTransport(client)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // Start - 启动客户端：恢复本地状态或执行首激活，随后进入后台滑动刷新循环
@@ -186,6 +219,15 @@ func (this *Client) Stop() {
 	if this.cancel != nil {
 		this.cancel()
 	}
+}
+
+// Close - 关闭后台刷新与底层 HTTP/gRPC 连接，可重复调用。
+func (this *Client) Close() error {
+	this.Stop()
+	if this.transport == nil {
+		return nil
+	}
+	return this.transport.Close()
 }
 
 // Status - 当前授权状态（VALID/EXPIRING/GRACE/...，见 status.go 常量）

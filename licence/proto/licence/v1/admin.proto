@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package licenhub.licence.v1;
+
+option go_package = "github.com/inis-io/aide/licence/proto/licence/v1;licencev1";
+
+// AdminRequest 保留现有管理面强类型 SDK DTO 的 JSON 编码。
+// RPC 本身按业务动作显式建模，不允许携带 HTTP method/path。
+message AdminRequest {
+  bytes json = 1;
+}
+
+// AdminResponse 对齐管理面 {code,msg,data} 信封；data_json 是 data 的原始 JSON。
+message AdminResponse {
+  int32 code = 1;
+  string message = 2;
+  bytes data_json = 3;
+}
+
+// AdminFileChunk 用于发布物上传和带文件验签。首帧携带 json/file_name，后续帧只携带 chunk。
+message AdminFileChunk {
+  bytes json = 1;
+  string file_name = 2;
+  bytes chunk = 3;
+}
+
+service AdminAuthService {
+  rpc SignIn(AdminRequest) returns (AdminResponse);
+  rpc SignOut(AdminRequest) returns (AdminResponse);
+  rpc CheckToken(AdminRequest) returns (AdminResponse);
+}
+
+service QualificationAdminService {
+  rpc ApplyQualification(AdminRequest) returns (AdminResponse);
+  rpc GetCurrentQualification(AdminRequest) returns (AdminResponse);
+  rpc FindMyQualifications(AdminRequest) returns (AdminResponse);
+  rpc RowsQualifications(AdminRequest) returns (AdminResponse);
+  rpc FindQualifications(AdminRequest) returns (AdminResponse);
+  rpc GetQualification(AdminRequest) returns (AdminResponse);
+  rpc ReviewQualification(AdminRequest) returns (AdminResponse);
+  rpc RevokeQualification(AdminRequest) returns (AdminResponse);
+}
+
+service ProjectAdminService {
+  rpc RowsProjects(AdminRequest) returns (AdminResponse);
+  rpc FindProjects(AdminRequest) returns (AdminResponse);
+  rpc GetProject(AdminRequest) returns (AdminResponse);
+  rpc CreateProject(AdminRequest) returns (AdminResponse);
+  rpc UpdateProject(AdminRequest) returns (AdminResponse);
+  rpc RemoveProjects(AdminRequest) returns (AdminResponse);
+  rpc DeleteProjects(AdminRequest) returns (AdminResponse);
+  rpc RestoreProjects(AdminRequest) returns (AdminResponse);
+}
+
+service InstanceAdminService {
+  rpc RowsInstances(AdminRequest) returns (AdminResponse);
+  rpc FindInstances(AdminRequest) returns (AdminResponse);
+  rpc GetInstance(AdminRequest) returns (AdminResponse);
+  rpc CreateInstance(AdminRequest) returns (AdminResponse);
+  rpc UpdateInstance(AdminRequest) returns (AdminResponse);
+  rpc RemoveInstances(AdminRequest) returns (AdminResponse);
+  rpc DeleteInstances(AdminRequest) returns (AdminResponse);
+  rpc RestoreInstances(AdminRequest) returns (AdminResponse);
+}
+
+service LicenseAdminService {
+  rpc RowsLicenses(AdminRequest) returns (AdminResponse);
+  rpc FindLicenses(AdminRequest) returns (AdminResponse);
+  rpc GetLicense(AdminRequest) returns (AdminResponse);
+  rpc GetLicensePayload(AdminRequest) returns (AdminResponse);
+  rpc GetLicensePublicKey(AdminRequest) returns (AdminResponse);
+  rpc ApplyLicense(AdminRequest) returns (AdminResponse);
+  rpc CancelLicenseApplication(AdminRequest) returns (AdminResponse);
+  rpc RowsLicenseApplications(AdminRequest) returns (AdminResponse);
+  rpc GetLicenseApplication(AdminRequest) returns (AdminResponse);
+  rpc ReviewLicenseApplication(AdminRequest) returns (AdminResponse);
+  rpc RenewLicense(AdminRequest) returns (AdminResponse);
+  rpc SuspendLicense(AdminRequest) returns (AdminResponse);
+  rpc RevokeLicense(AdminRequest) returns (AdminResponse);
+  rpc ReissueLicense(AdminRequest) returns (AdminResponse);
+  rpc RowsLicenseHistory(AdminRequest) returns (AdminResponse);
+  rpc GetLicenseHistory(AdminRequest) returns (AdminResponse);
+  rpc RowsActivations(AdminRequest) returns (AdminResponse);
+  rpc GetActivation(AdminRequest) returns (AdminResponse);
+}
+
+service SigningKeyAdminService {
+  rpc GetSigningPublicKey(AdminRequest) returns (AdminResponse);
+  rpc RotateSigningKey(AdminRequest) returns (AdminResponse);
+}
+
+service ArtifactAdminService {
+  rpc RowsArtifacts(AdminRequest) returns (AdminResponse);
+  rpc FindArtifacts(AdminRequest) returns (AdminResponse);
+  rpc GetArtifact(AdminRequest) returns (AdminResponse);
+  rpc UploadArtifact(stream AdminFileChunk) returns (AdminResponse);
+  rpc UpdateArtifact(AdminRequest) returns (AdminResponse);
+  rpc VerifyArtifact(AdminRequest) returns (AdminResponse);
+  rpc VerifyArtifactFile(stream AdminFileChunk) returns (AdminResponse);
+  rpc RemoveArtifacts(AdminRequest) returns (AdminResponse);
+  rpc DeleteArtifacts(AdminRequest) returns (AdminResponse);
+}
+
+service VersionAdminService {
+  rpc RowsVersions(AdminRequest) returns (AdminResponse);
+  rpc FindVersions(AdminRequest) returns (AdminResponse);
+  rpc GetVersion(AdminRequest) returns (AdminResponse);
+  rpc CreateVersion(AdminRequest) returns (AdminResponse);
+  rpc UpdateVersion(AdminRequest) returns (AdminResponse);
+  rpc ReleaseVersion(AdminRequest) returns (AdminResponse);
+  rpc ArchiveVersion(AdminRequest) returns (AdminResponse);
+  rpc RemoveVersions(AdminRequest) returns (AdminResponse);
+  rpc DeleteVersions(AdminRequest) returns (AdminResponse);
+  rpc RestoreVersions(AdminRequest) returns (AdminResponse);
+}
+
+service ProjectModuleAdminService {
+  rpc RowsProjectModules(AdminRequest) returns (AdminResponse);
+  rpc FindProjectModules(AdminRequest) returns (AdminResponse);
+  rpc GetProjectModule(AdminRequest) returns (AdminResponse);
+  rpc CreateProjectModule(AdminRequest) returns (AdminResponse);
+  rpc UpdateProjectModule(AdminRequest) returns (AdminResponse);
+  rpc SortProjectModules(AdminRequest) returns (AdminResponse);
+  rpc RemoveProjectModules(AdminRequest) returns (AdminResponse);
+  rpc DeleteProjectModules(AdminRequest) returns (AdminResponse);
+  rpc RestoreProjectModules(AdminRequest) returns (AdminResponse);
+}
+
+service SaasMenuAdminService {
+  rpc FindSaasMenus(AdminRequest) returns (AdminResponse);
+  rpc GetSaasMenu(AdminRequest) returns (AdminResponse);
+  rpc SaveSaasMenu(AdminRequest) returns (AdminResponse);
+  rpc PublishSaasMenu(AdminRequest) returns (AdminResponse);
+  rpc ArchiveSaasMenu(AdminRequest) returns (AdminResponse);
+}
+
+service SaasFeatureAdminService {
+  rpc FindSaasFeatures(AdminRequest) returns (AdminResponse);
+  rpc GetSaasFeature(AdminRequest) returns (AdminResponse);
+  rpc SaveSaasFeature(AdminRequest) returns (AdminResponse);
+  rpc DisableSaasFeature(AdminRequest) returns (AdminResponse);
+  rpc DeleteSaasFeature(AdminRequest) returns (AdminResponse);
+}
+
+service SaasPlanAdminService {
+  rpc FindSaasPlans(AdminRequest) returns (AdminResponse);
+  rpc GetSaasPlan(AdminRequest) returns (AdminResponse);
+  rpc CreateSaasPlan(AdminRequest) returns (AdminResponse);
+  rpc UpdateSaasPlan(AdminRequest) returns (AdminResponse);
+  rpc SetSaasPlanStatus(AdminRequest) returns (AdminResponse);
+  rpc DeleteSaasPlan(AdminRequest) returns (AdminResponse);
+}
+
+service SaasTenantAdminService {
+  rpc FindSaasTenants(AdminRequest) returns (AdminResponse);
+  rpc GetSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc GetSaasTenantPayload(AdminRequest) returns (AdminResponse);
+  rpc SubscribeSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc ChangeSaasTenantPlan(AdminRequest) returns (AdminResponse);
+  rpc UpdateSaasTenantInfo(AdminRequest) returns (AdminResponse);
+  rpc CancelSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc DeleteSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc SuspendSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc ResumeSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc RevokeSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc ReissueSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc BatchRenewSaasTenants(AdminRequest) returns (AdminResponse);
+  rpc FindSaasTenantApplications(AdminRequest) returns (AdminResponse);
+  rpc GetSaasTenantApplication(AdminRequest) returns (AdminResponse);
+  rpc FindSaasTenantUsage(AdminRequest) returns (AdminResponse);
+  rpc GetSaasTenantUsageSummary(AdminRequest) returns (AdminResponse);
+  rpc ExportSaasTenantHistory(AdminRequest) returns (AdminResponse);
+}
+
+service SaasReviewAdminService {
+  rpc FindSaasReviews(AdminRequest) returns (AdminResponse);
+  rpc GetSaasReview(AdminRequest) returns (AdminResponse);
+  rpc ReviewSaasTenantApplication(AdminRequest) returns (AdminResponse);
+}

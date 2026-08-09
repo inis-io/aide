@@ -1,7 +1,7 @@
 // 管理面客户端（AdminClient）：Licen Hub 授权平台「管理面」Go SDK（typed client）
 //
-// 管理面是平台后台登录态接口，协议为 {code,msg,data} JSON 信封（HTTP 状态码恒为 200，
-// 业务结果看 code），与运行面（同包 Client，Ed25519 信封）完全不同。
+// 管理面是平台后台登录态接口。HTTP 使用 {code,msg,data} JSON 信封，gRPC 使用显式资源 RPC；
+// 两者统一映射为同一公开返回值/APIError，与运行面（同包 Client，Ed25519 信封）鉴权不同。
 // 使用方是商户自有运维系统/CI：账密登录换取 JWT，随后按资源调用受控接口。
 //
 // 平台事实（与 licen-hub/backend 逐一对齐）：
@@ -15,17 +15,13 @@
 package licence
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
-	"path/filepath"
-	"strings"
+	"os"
 	"sync"
 	"time"
 
@@ -48,6 +44,10 @@ type AdminOptions struct {
 	TOTP string
 	// HTTPTimeout - 单次请求超时（默认 15 秒）
 	HTTPTimeout time.Duration
+	// Transport - 管理面传输协议，零值保持 HTTP；可显式选择 TransportGRPC。
+	Transport Transport
+	// GRPC - gRPC TLS、h2c、authority 与消息大小配置。
+	GRPC GRPCOptions
 }
 
 // AdminClient - 管理面客户端（登录态 + 各资源 typed 入口）
@@ -55,8 +55,8 @@ type AdminOptions struct {
 type AdminClient struct {
 	// options - 归一化后的配置
 	options AdminOptions
-	// http - HTTP 传输层
-	http *http.Client
+	// transport - HTTP 或 gRPC 管理面传输。
+	transport adminTransport
 
 	// loginMu - 登录串行（多协程同时触发登录时只登录一次）
 	loginMu sync.Mutex
@@ -111,7 +111,12 @@ func NewAdmin(options AdminOptions) (*AdminClient, error) {
 		options.HTTPTimeout = 15 * time.Second
 	}
 
-	client := &AdminClient{options: options, http: &http.Client{Timeout: options.HTTPTimeout}}
+	client := &AdminClient{options: options}
+	transport, err := newAdminTransport(client)
+	if err != nil {
+		return nil, err
+	}
+	client.transport = transport
 	client.Qualification = &QualificationResource{client: client}
 	client.Projects = &ProjectsResource{client: client}
 	client.Instances = &InstancesResource{client: client}
@@ -126,6 +131,14 @@ func NewAdmin(options AdminOptions) (*AdminClient, error) {
 	client.SaasTenants = &SaasTenantsResource{client: client}
 	client.SaasReview = &SaasReviewResource{client: client}
 	return client, nil
+}
+
+// Close - 释放管理面传输连接；可重复调用。
+func (this *AdminClient) Close() error {
+	if this == nil || this.transport == nil {
+		return nil
+	}
+	return this.transport.Close()
 }
 
 // ============================= 登录态 =============================
@@ -291,47 +304,10 @@ func (this *AdminClient) doRequest(ctx context.Context, method, path string, que
 
 // round - 单轮 HTTP 请求：拼 URL、带 token、读响应、拆信封
 func (this *AdminClient) round(ctx context.Context, method, path string, query url.Values, body []byte, contentType string) (json.RawMessage, error) {
-
-	addr := strings.TrimRight(this.options.ServerURL, "/") + path
-	if len(query) > 0 {
-		addr += "?" + query.Encode()
-	}
-
-	request, err := http.NewRequestWithContext(ctx, method, addr, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		request.Header.Set("Content-Type", contentType)
-	}
-	// 登录接口为公开接口，不携带 token
-	if token := this.Token().Value; token != "" && path != signInPath {
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	response, err := this.http.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("licence: 请求发送失败: %w", err)
-	}
-	defer func() { _ = response.Body.Close() }()
-
-	raw, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, fmt.Errorf("licence: 响应读取失败: %w", err)
-	}
-	// 平台业务响应恒为 200；非 200 属传输层异常
-	if response.StatusCode != http.StatusOK {
-		return nil, &HTTPError{StatusCode: response.StatusCode, Body: string(raw)}
-	}
-
-	var envelope Response
-	if err = json.Unmarshal(raw, &envelope); err != nil {
-		return nil, fmt.Errorf("licence: 响应信封解析失败（原文：%s）: %w", string(raw), err)
-	}
-	if envelope.Code != 200 {
-		return nil, &APIError{Code: envelope.Code, Msg: envelope.Msg, Data: envelope.Data}
-	}
-	return envelope.Data, nil
+	return this.transport.RoundTrip(ctx, adminCall{
+		Method: method, Path: path, Query: query, Body: body, ContentType: contentType,
+		Token: this.Token().Value,
+	})
 }
 
 // get - GET 请求（参数走 query；数组参数按平台约定序列化为 key[]=v1&key[]=v2）
@@ -389,24 +365,31 @@ func (this *AdminClient) del(ctx context.Context, path string, params any, out a
 // postMultipart - multipart/form-data POST（发布物上传/带文件验签）：
 // 文本字段写入表单，文件写入 fileField 指定的文件字段（平台固定为 "file"）
 func (this *AdminClient) postMultipart(ctx context.Context, path string, fields map[string]string, fileField string, fileName string, content io.Reader, out any) error {
-
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	for key, value := range fields {
-		_ = writer.WriteField(key, value)
+	if err := this.ensureLogin(ctx); err != nil {
+		return err
 	}
-	part, err := writer.CreateFormFile(fileField, filepath.Base(fileName))
+	temporary, err := os.CreateTemp("", "licence-sdk-upload-*")
 	if err != nil {
 		return err
 	}
-	if _, err = io.Copy(part, content); err != nil {
+	defer func() { name := temporary.Name(); _ = temporary.Close(); _ = os.Remove(name) }()
+	if _, err = io.Copy(temporary, content); err != nil {
 		return err
 	}
-	if err = writer.Close(); err != nil {
-		return err
+	upload := func() (json.RawMessage, error) {
+		if _, seekErr := temporary.Seek(0, io.SeekStart); seekErr != nil {
+			return nil, seekErr
+		}
+		return this.transport.Upload(ctx, adminUpload{Path: path, Fields: fields, FileField: fileField, FileName: fileName, Content: temporary, Token: this.Token().Value})
 	}
-
-	data, err := this.doRequest(ctx, http.MethodPost, path, nil, buf.Bytes(), writer.FormDataContentType(), false)
+	data, err := upload()
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized && this.canLogin() {
+		if _, loginErr := this.Login(ctx); loginErr != nil {
+			return loginErr
+		}
+		data, err = upload()
+	}
 	if err != nil {
 		return err
 	}

@@ -27,7 +27,12 @@ type APIError struct {
 	Data json.RawMessage `json:"data,omitempty"`
 	// Require2FA - 登录被拒且平台要求补交 2FA TOTP 验证码时为 true（此时 Code 为 400）
 	Require2FA bool `json:"-"`
+	// Cause - gRPC status 等底层原因；HTTP 业务错误通常为空。
+	Cause error `json:"-"`
 }
+
+// Unwrap 保留传输层 cause，便于 errors.Is/errors.As 继续判断 gRPC status。
+func (this *APIError) Unwrap() error { return this.Cause }
 
 // Error - 错误文案
 func (this *APIError) Error() string {

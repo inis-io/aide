@@ -35,6 +35,28 @@
 - **运行面**：Ed25519 信封 + 逐请求客户端签名（`X-License-*` 头），无登录概念；
 - **管理面**：账密登录换取 JWT（`Authorization: Bearer`），响应统一 `{code, msg, data}` 信封。
 
+这里的“协议不同”指运行面鉴权与管理面鉴权不同；两类客户端自身都可通过 `TransportHTTP` 或
+`TransportGRPC` 连接平台。`Transport` 零值为 HTTP，gRPC 必须显式选择，不存在自动跨协议回退。
+
+```go
+type Transport string
+const (
+    TransportHTTP Transport = "http"
+    TransportGRPC Transport = "grpc"
+)
+
+type GRPCOptions struct {
+    AllowInsecure        bool        // 仅开发/受控内网 h2c
+    TLSConfig            *tls.Config // 自定义 CA、ServerName 等
+    Authority            string
+    DialTimeout          time.Duration
+    MaxReceiveMessageSize int
+}
+```
+
+`https://` / `grpcs://` 使用 TLS；`http://` / `grpc://` 仅在 `AllowInsecure=true` 时允许。
+`Client.Close()` 与 `AdminClient.Close()` 释放 gRPC 连接和 HTTP idle connection，均可重复调用。
+
 ---
 
 ## 2. 常量与状态码
@@ -239,6 +261,8 @@ type Options struct {
     Version            string                 // 当前项目版本（随校验上送）
     RefreshInterval    time.Duration          // 校验刷新间隔（默认 12 小时，建议 12~24 小时）
     HTTPTimeout        time.Duration          // 单次请求超时（默认 15 秒）
+    Transport          Transport              // 零值 HTTP；可选 TransportGRPC
+    GRPC               GRPCOptions
     OnStatusChange     func(oldStatus string, newStatus string) // 状态变化回调（可选）
 }
 ```
@@ -250,6 +274,7 @@ type Options struct {
 | `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt` / `PublicKeys` |
 | `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可用缓存（验签通过且在宽限内）时平台不可达也能降级启动；无缓存且激活失败时返回错误 |
 | `Stop` | `func (this *Client) Stop()` | 停止后台刷新循环 |
+| `Close` | `func (this *Client) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
 
 后台循环行为（开发者零感知）：
 
@@ -448,7 +473,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 
 ## 10. 管理面客户端 AdminClient
 
-> 使用方是商户自有运维系统/CI。协议为 `{code, msg, data}` JSON 信封（HTTP 状态码恒为 200，业务结果看 `code`），路由统一 `/api/{table}/{key}`（GET 走 query，POST/PUT/DELETE 走 JSON body）。账密按明文 JSON 上送，**必须走 HTTPS**；平台开启「API 签名验证」（`safety.api.sign`）时本客户端不支持。
+> 使用方是商户自有运维系统/CI。HTTP 使用 `{code, msg, data}` JSON 信封；gRPC 使用显式业务 RPC 并映射为相同的 `APIError` 语义。账密登录在生产环境必须使用 TLS。HTTP 的 `safety.api.sign` 开关不套用到 gRPC。
 
 ### 10.1 配置与创建
 
@@ -459,6 +484,8 @@ type AdminOptions struct {
     Password    string        // 登录密码（明文上送，依赖 HTTPS）
     TOTP        string        // 2FA 验证码（可选；账号开启双因素认证时必填）
     HTTPTimeout time.Duration // 单次请求超时（默认 15 秒）
+    Transport   Transport     // 零值 HTTP；可选 TransportGRPC
+    GRPC        GRPCOptions
 }
 
 func NewAdmin(options AdminOptions) (*AdminClient, error)
@@ -483,6 +510,7 @@ admin, _ := licence.NewAdmin(licence.AdminOptions{
 | `SignOut` | `func (this *AdminClient) SignOut(ctx context.Context) error` | 退出登录：`DELETE /api/comm/sign-out`（无论平台结果如何都清除本地令牌） |
 | `CheckToken` | `func (this *AdminClient) CheckToken(ctx context.Context, refresh bool) (*SignInResult, error)` | 校验/刷新令牌：`POST /api/comm/check-token`；`refresh=true` 时平台续期并返回新令牌，同步更新本地令牌 |
 | `Token` | `func (this *AdminClient) Token() Token` | 当前登录令牌（内存副本；`Expired` 为**毫秒**时间戳） |
+| `Close` | `func (this *AdminClient) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
 | `SetToken` | `func (this *AdminClient) SetToken(token Token)` | 注入外部保管的令牌（如 CI 复用已有会话；注入后跳过自动登录） |
 
 ```go

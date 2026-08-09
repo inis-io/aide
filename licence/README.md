@@ -65,6 +65,31 @@ go get github.com/inis-io/aide/licence
 import "github.com/inis-io/aide/licence"
 ```
 
+### HTTP / gRPC 传输选择
+
+运行面 `Client` 与管理面 `AdminClient` 的公开业务方法同时支持 HTTP 和原生 gRPC。零值继续使用
+HTTP，现有调用方无需改动；需要 gRPC 时只切换配置，不要改业务调用：
+
+```go
+client, err := licence.New(licence.Options{
+	ServerURL: "https://licen-hub.inis.cn",
+	Transport: licence.TransportGRPC,
+	// LicenseNo、Salt、PublicKeys 等照常填写
+})
+
+admin, err := licence.NewAdmin(licence.AdminOptions{
+	ServerURL: "https://licen-hub.inis.cn",
+	Transport: licence.TransportGRPC,
+	Account: "ops", Password: "secret",
+})
+defer admin.Close()
+```
+
+生产环境使用 `https://`（TLS + HTTP/2）。本机或受控内网的 h2c 必须同时使用 `http://` 和
+`GRPCOptions{AllowInsecure: true}` 显式开启。SDK 不做 HTTP/gRPC 自动回退，以免写操作被执行两次；
+两类客户端使用完毕后应调用幂等的 `Close()`。发布物上传和带文件验签在 gRPC 下使用
+client-streaming，`io.Reader` 不会被 SDK 全量读入内存。
+
 ## 3. 快速开始：许可证激活与授权校验（运行面）
 
 嵌入交付项目的就是这部分。**5 行接入**：
@@ -103,7 +128,7 @@ func main() {
 	if err = client.Start(context.Background()); err != nil {
 		panic(err)
 	}
-	defer client.Stop()
+	defer client.Close() // 停止刷新并释放 HTTP/gRPC 连接
 
 	// 业务闸门：功能 / 额度 / 版本范围
 	if client.HasFeature("report.advanced") {
@@ -263,7 +288,7 @@ verify, _ := admin.Artifacts.VerifyWithFile(ctx, 3, "app.tar.gz", file) // 服�
 
 资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）、`Modules`（项目功能模块）、`SaasMenus`（菜单清单草稿/发布/归档）、`SaasFeatures`（功能字典登记/禁用/删除）、`SaasPlans`（套餐定义/状态流转）、`SaasTenants`（租户开通/变更/状态机/重签/批量续期/用量/留痕）、`SaasReview`（租户申请单审批）。
 
-注意：管理面账密按明文 JSON 上送，**必须走 HTTPS**。
+注意：管理面账密通过所选传输上送，生产环境无论 HTTP 还是 gRPC 都**必须使用 TLS**。
 
 ## 8. 常见问题（FAQ）
 
@@ -525,6 +550,8 @@ type Options struct {
     Version            string                 // 当前项目版本（随校验上送）
     RefreshInterval    time.Duration          // 校验刷新间隔（默认 12 小时，建议 12~24 小时）
     HTTPTimeout        time.Duration          // 单次请求超时（默认 15 秒）
+    Transport          Transport              // 零值 HTTP；可选 TransportGRPC
+    GRPC               GRPCOptions
     OnStatusChange     func(oldStatus string, newStatus string) // 状态变化回调（可选）
 }
 ```
@@ -536,6 +563,7 @@ type Options struct {
 | `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt` / `PublicKeys` |
 | `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可用缓存（验签通过且在宽限内）时平台不可达也能降级启动；无缓存且激活失败时返回错误 |
 | `Stop` | `func (this *Client) Stop()` | 停止后台刷新循环 |
+| `Close` | `func (this *Client) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
 
 后台循环行为（开发者零感知）：
 
@@ -696,7 +724,7 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 ## 20. 管理面客户端 AdminClient
 
-> 使用方是商户自有运维系统/CI。协议为 `{code, msg, data}` JSON 信封（HTTP 状态码恒为 200，业务结果看 `code`），路由统一 `/api/{table}/{key}`（GET 走 query，POST/PUT/DELETE 走 JSON body）。账密按明文 JSON 上送，**必须走 HTTPS**；平台开启「API 签名验证」（`safety.api.sign`）时本客户端不支持。
+> 使用方是商户自有运维系统/CI。HTTP 与 gRPC 共用资源 API、JWT、IAM、数据范围和 `APIError` 语义。生产登录必须使用 TLS；HTTP 的 `safety.api.sign` 开关不套用到 gRPC。
 
 ### 20.1 配置与创建
 
@@ -707,6 +735,8 @@ type AdminOptions struct {
 	Password    string        // 登录密码（明文上送，依赖 HTTPS）
 	TOTP        string        // 2FA 验证码（可选；账号开启双因素认证时必填）
 	HTTPTimeout time.Duration // 单次请求超时（默认 15 秒）
+	Transport   Transport     // 零值 HTTP；可选 TransportGRPC
+	GRPC        GRPCOptions
 }
 
 func NewAdmin(options AdminOptions) (*AdminClient, error)
@@ -731,6 +761,7 @@ admin, _ := licence.NewAdmin(licence.AdminOptions{
 | `SignOut` | `func (this *AdminClient) SignOut(ctx context.Context) error` | 退出登录：`DELETE /api/comm/sign-out`（无论平台结果如何都清除本地令牌） |
 | `CheckToken` | `func (this *AdminClient) CheckToken(ctx context.Context, refresh bool) (*SignInResult, error)` | 校验/刷新令牌：`POST /api/comm/check-token`；`refresh=true` 时平台续期并返回新令牌，同步更新本地令牌 |
 | `Token` | `func (this *AdminClient) Token() Token` | 当前登录令牌（内存副本；`Expired` 为**毫秒**时间戳） |
+| `Close` | `func (this *AdminClient) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
 | `SetToken` | `func (this *AdminClient) SetToken(token Token)` | 注入外部保管的令牌（如 CI 复用已有会话；注入后跳过自动登录） |
 
 ```go
