@@ -268,6 +268,8 @@ type DeploymentInstance struct {
 	DeploymentType string `json:"deploymentType"`
 	// Domain - 访问域名
 	Domain string `json:"domain"`
+	// NotifyUrl - 平台回调通知地址
+	NotifyUrl string `json:"notifyUrl"`
 	// ServerFingerprint - 服务器指纹（平台只存加盐哈希）
 	ServerFingerprint string `json:"serverFingerprint"`
 	// CurrentVersion - 实际运行版本
@@ -307,6 +309,8 @@ type InstanceInput struct {
 	DeploymentType string `json:"deploymentType,omitempty"`
 	// Domain - 访问域名
 	Domain string `json:"domain,omitempty"`
+	// NotifyUrl - 平台回调通知地址（nil = 不修改，空字符串指针 = 清除）
+	NotifyUrl *string `json:"notifyUrl,omitempty"`
 	// ServerFingerprint - 服务器指纹（原文，平台加盐哈希存储）
 	ServerFingerprint string `json:"serverFingerprint,omitempty"`
 	// CurrentVersion - 实际运行版本

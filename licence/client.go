@@ -56,6 +56,10 @@ type runtimeState struct {
 	Status string `json:"status"`
 	// Envelope - 当前缓存信封原文（验签基于载荷原文）
 	Envelope json.RawMessage `json:"envelope"`
+	// Configs - 已验签的项目配置快照
+	Configs map[string]ConfigItem `json:"configs,omitempty"`
+	// ConfigSyncVersion - 项目配置增量同步水位
+	ConfigSyncVersion int `json:"configSyncVersion,omitempty"`
 }
 
 // Client - 运行面客户端（激活/校验/验签/缓存/降级一体化）
@@ -141,6 +145,7 @@ func New(options Options) (*Client, error) {
 	return &Client{
 		options: options, http: &http.Client{Timeout: options.HTTPTimeout},
 		store: store, fingerprint: fingerprint,
+		state:        runtimeState{Configs: make(map[string]ConfigItem)},
 		pendingUsage: make(map[string]int64),
 		tenantCache:  make(map[string]tenantCacheItem),
 	}, nil
@@ -371,6 +376,9 @@ func (this *Client) restore() error {
 	}
 
 	this.mu.Lock()
+	if state.Configs == nil {
+		state.Configs = make(map[string]ConfigItem)
+	}
 	this.state = state
 	this.envelope = envelope
 	this.mu.Unlock()

@@ -412,6 +412,38 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 > 前置闸门：实例许可证非放行态时 `TenantSync` / `TenantValidate` 直接返回错误（fail-closed 总闸）。fail-open / fail-closed 的租户级策略由服务商按 `TenantStatus` 自行决策。
 
+### 9.3 回调通知
+
+`NewCallbackHandler(CallbackOptions)` 返回标准 `http.Handler`，可挂载到标准库、Gin 或其他 HTTP 框架。`PublicKeys` 与运行面 `Options.PublicKeys` 使用同一组 license-key 信任链。
+
+```go
+type CallbackOptions struct {
+    PublicKeys map[string]string
+    TimeWindow time.Duration // 默认 ±5 分钟
+    DedupTTL   time.Duration // 默认 10 分钟
+    MaxBody    int64         // 默认 1MB
+}
+
+func NewCallbackHandler(options CallbackOptions) *CallbackHandler
+func (this *CallbackHandler) OnEvent(event string, fn CallbackFunc) *CallbackHandler
+func (this *CallbackHandler) OnAny(fn CallbackFunc) *CallbackHandler
+func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
+```
+
+分发顺序为精确事件 → 逐级前缀通配（例如 `saas.plan.*` 、`saas.*`）→ `OnAny` → 自动 `ignored`。应答词是 `AckSuccess` / `AckOk` / `AckIgnored` / `AckRetry` / `AckRejected`；回调返回 error 等价于 `AckRetry`，panic 由 SDK 恢复为 HTTP 500。`deliveryNo` 是业务幂等键，相同 nonce 的原请求重放会被 HTTP 401 拒绝。
+
+平台登记位置：「项目管理 → 部署实例 → 回调地址（`notify_url`）」。
+
+### 9.4 项目配置同步
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `ConfigSync` | `func (this *Client) ConfigSync(ctx context.Context) (*ConfigEnvelope, error)` | 使用持久化水位增量拉取，验签后按服务端全量 key 清单删除失效项并持久化快照 |
+| `Config` | `func (this *Client) Config(key string) (json.RawMessage, bool)` | 返回本地配置原文的副本 |
+| `ConfigMust` | `func (this *Client) ConfigMust(key string) json.RawMessage` | 配置不存在时 panic |
+
+`ConfigPayload` / `ConfigEnvelope` 与平台 `app/common/sign/config.go` 字节级镜像，验签必须使用 `ParseConfigEnvelope` 返回的 payload 原文。回调事件 `project.config.*` 只是失效信号，客户端收到后应调用 `ConfigSync`，并以周期性同步兜底。
+
 ---
 
 ## 10. 管理面客户端 AdminClient
@@ -663,7 +695,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `QualificationApplyInput` | `Reason`（必填，最长 512）、`Contact`（必填，最长 128） |
 | `QualificationReviewInput` | `Id`（必填）、`Action`（approve/reject）、`ReviewNote`（reject 必填）、`ProjectQuota`（个人配额，>=1 生效） |
 | `ProjectInput` | `Id`（Update 必填）、`ProjectName`（Create 必填，最长 128）；归属用户由平台按登录态强制写入 |
-| `InstanceInput` | `ProjectId`（Create 必填）、`ServerFingerprint`（原文提交，平台加盐哈希存储）、`IsBillableSet`（显式设置计费标记） |
+| `InstanceInput` | `ProjectId`（Create 必填）、`ServerFingerprint`（原文提交，平台加盐哈希存储）、`NotifyUrl`（平台回调入口）、`IsBillableSet`（显式设置计费标记） |
 | `LicenseApplyInput` | `ProjectId` / `LicenseType` / `Environment` / `Reason` 必填、`RequestPayload`（期望权益自由 JSON） |
 | `LicenseIssuePayload` | 签发参数：四个期限为毫秒时间戳，0=不限制（`ValidUntil` 0=永久）、`Features` / `Limits` / `Binding` |
 | `LicenseReviewInput` | `Id` / `Action` 必填、`IssuePayload`（approve 时可选，为空从申请的 requestPayload 回退解析） |
@@ -743,5 +775,6 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `client.go` / `transport.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存 |
 | `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
+| `callback.go` / `config.go` | 回调验签、防重放与幂等分发；项目配置签名同步与本地快照 |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |
 | `qualification.go` / `projects.go` / `instances.go` / `licenses.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go` | 管理面 13 个资源组 |

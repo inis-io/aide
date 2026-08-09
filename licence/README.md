@@ -213,6 +213,37 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 fail-open / fail-closed 由你按业务决策（建议写进你自己的集成文档）。
 
+### 6.1 回调通知与项目配置同步
+
+先在平台的「项目管理 → 部署实例」为每个实例登记 `notify_url`（建议 `POST /licence/callback`），然后在项目中挂载同一个回调接收器：
+
+```go
+handler := licence.NewCallbackHandler(licence.CallbackOptions{
+	PublicKeys: publicKeys, // 与运行面 Client 使用同一组 license-key 公钥
+})
+handler.OnEvent("saas.*", func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+	go func() { _, _, _ = client.TenantSync(context.Background(), 0) }()
+	return licence.AckSuccess, nil
+})
+handler.OnEvent("project.config.*", func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+	go func() { _, _ = client.ConfigSync(context.Background()) }()
+	return licence.AckSuccess, nil
+})
+http.Handle("/licence/callback", handler)
+```
+
+回调会先做原文验签、正负 5 分钟时间窗检查、nonce 防重放和 `deliveryNo` 幂等去重。业务回调应快速返回：`success`/`ok` 表示成功，`ignored` 表示无需处理，`retry` 要求平台重试，`rejected` 表示永久拒绝。未注册的事件自动返回 `ignored`。
+
+回调只是「变更信号」，全量事实仍通过拉取收敛。项目配置同步后可直接读本地快照：
+
+```go
+_, err := client.ConfigSync(ctx)
+raw, ok := client.Config("app.theme") // 返回 json.RawMessage 副本
+raw = client.ConfigMust("app.theme")   // 不存在时 panic
+```
+
+配置快照与许可证状态一起经 `Store` 加密持久化；建议除了回调驱动的即时同步，再做周期性 `ConfigSync` 兜底。
+
 ## 7. 管理面（商户 CI/运维自动化，勿随交付项目分发）
 
 ```go
@@ -912,7 +943,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `QualificationApplyInput` | `Reason`（必填，最长 512）、`Contact`（必填，最长 128） |
 | `QualificationReviewInput` | `Id`（必填）、`Action`（approve/reject）、`ReviewNote`（reject 必填）、`ProjectQuota`（个人配额，>=1 生效） |
 | `ProjectInput` | `Id`（Update 必填）、`ProjectName`（Create 必填，最长 128）；归属用户由平台按登录态强制写入 |
-| `InstanceInput` | `ProjectId`（Create 必填）、`ServerFingerprint`（原文提交，平台加盐哈希存储）、`IsBillableSet`（显式设置计费标记） |
+| `InstanceInput` | `ProjectId`（Create 必填）、`ServerFingerprint`（原文提交，平台加盐哈希存储）、`NotifyUrl`（平台回调入口）、`IsBillableSet`（显式设置计费标记） |
 | `LicenseApplyInput` | `ProjectId` / `LicenseType` / `Environment` / `Reason` 必填、`RequestPayload`（期望权益自由 JSON） |
 | `LicenseIssuePayload` | 签发参数：四个期限为毫秒时间戳，0=不限制（`ValidUntil` 0=永久）、`Features` / `Limits` / `Binding` |
 | `LicenseReviewInput` | `Id` / `Action` 必填、`IssuePayload`（approve 时可选，为空从申请的 requestPayload 回退解析） |
@@ -988,5 +1019,6 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `client.go` / `transport.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存 |
 | `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
+| `callback.go` / `config.go` | 回调接收：验签、防重放、幂等分发；项目配置签名同步与本地快照 |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |
 | `qualification.go` / `projects.go` / `instances.go` / `licenses.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go` | 管理面 13 个资源组 |
