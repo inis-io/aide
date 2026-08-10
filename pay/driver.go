@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Driver - Provider 的统一能力检查与调用门面
@@ -243,13 +242,13 @@ func (this *Driver) observe(ctx context.Context, operation, outNo string, call f
 	record := Observation{Phase: "end", Provider: this.Name(), Operation: operation, OutNoHash: hash, Duration: duration}
 	var gatewayError *GatewayError
 	if errors.As(err, &gatewayError) {
-		record.Code, record.Outcome, record.Retryable = gatewayError.Code, gatewayError.Outcome, gatewayError.Retryable
+		record.Code, record.Outcome, record.Retryable, record.Message = gatewayError.Code, gatewayError.Outcome, gatewayError.Retryable, gatewayError.Message
 	}
 	if this.options.Observer != nil {
 		this.options.Observer.Observe(ctx, record)
 	}
 	if this.options.Logger != nil {
-		this.options.Logger.Log(ctx, LogRecord{Level: levelForError(err), Provider: record.Provider, Operation: operation, OutNoHash: hash, Code: record.Code, Outcome: record.Outcome, Retryable: record.Retryable, Duration: duration})
+		this.options.Logger.Log(ctx, LogRecord{Level: levelForError(err), Provider: record.Provider, Operation: operation, OutNoHash: hash, Code: record.Code, Message: record.Message, Outcome: record.Outcome, Retryable: record.Retryable, Duration: duration})
 	}
 	return err
 }
@@ -260,5 +259,3 @@ func levelForError(err error) string {
 	}
 	return "info"
 }
-
-var _ = time.Second

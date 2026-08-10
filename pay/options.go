@@ -25,6 +25,8 @@ type LogRecord struct {
 	OutNoHash string
 	// Code - 网关错误码
 	Code string
+	// Message - 网关原始错误消息（真实业务文案；传输性失败时为占位文案，不进入 Error 文本）
+	Message string
 	// Outcome - 资金结果确定性
 	Outcome Outcome
 	// Retryable - 技术故障是否可能恢复
@@ -50,6 +52,8 @@ type Observation struct {
 	OutNoHash string
 	// Code - 网关错误码
 	Code string
+	// Message - 网关原始错误消息（真实业务文案；传输性失败时为占位文案，不进入 Error 文本）
+	Message string
 	// Outcome - 资金结果确定性
 	Outcome Outcome
 	// Retryable - 技术故障是否可能恢复

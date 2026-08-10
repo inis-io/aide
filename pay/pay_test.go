@@ -33,6 +33,18 @@ func (this *collectObserver) Observe(_ context.Context, record Observation) {
 	this.records = append(this.records, record)
 }
 
+type collectLogger struct{ records []LogRecord }
+
+func (this *collectLogger) Log(_ context.Context, record LogRecord) {
+	this.records = append(this.records, record)
+}
+
+type failingCreatorProvider struct{ *testProvider }
+
+func (this *failingCreatorProvider) CreateTrade(_ context.Context, _ TradeCreateRequest) (TradeResult, error) {
+	return TradeResult{}, &GatewayError{Provider: "demo", Operation: "gateway", Code: "NO_AUTH", Message: "此商家的收款功能已被限制", Outcome: OutcomeKnownFailed, Retryable: false, Cause: ErrGatewayRejected}
+}
+
 // TestMoneyIntegerModel - 验证金额解析、格式化、精度约束与溢出保护
 func TestMoneyIntegerModel(t *testing.T) {
 	cases := []struct {
@@ -194,5 +206,48 @@ func TestDriverContextObserverAndClose(t *testing.T) {
 	_ = driver.Close()
 	if provider.closed.Load() != 1 {
 		t.Fatal("Driver Close 必须幂等")
+	}
+}
+
+// TestObserveForwardsGatewayMessage - 验证 observe() 将 GatewayError.Message 透传到 LogRecord/Observation，
+// 且 Error() 文本保持不含 Message 的现有设计
+func TestObserveForwardsGatewayMessage(t *testing.T) {
+	logger := &collectLogger{}
+	observer := &collectObserver{}
+	provider := &failingCreatorProvider{&testProvider{name: "demo", caps: []Capability{CapTradeCreate}}}
+	registry := NewRegistry()
+	_ = registry.Register("demo", func(context.Context, ConfigInput, OpenOptions) (Provider, error) { return provider, nil })
+	driver, err := registry.New(context.Background(), "demo", struct{}{}, WithObserver(observer), WithLogger(logger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+
+	request := NewTradeCreateRequest("T-1", TradeModeQR, "商品", NewMoneyMinor(100, "CNY"))
+	if _, err = driver.CreateTrade(context.Background(), request); !errors.Is(err, ErrGatewayRejected) {
+		t.Fatalf("应返回网关拒绝错误：%v", err)
+	}
+	if len(logger.records) != 1 {
+		t.Fatalf("应产生一条 LogRecord：%+v", logger.records)
+	}
+	record := logger.records[0]
+	if record.Code != "NO_AUTH" || record.Message != "此商家的收款功能已被限制" || record.Outcome != OutcomeKnownFailed || record.Retryable {
+		t.Fatalf("LogRecord 未完整透传网关错误字段：%+v", record)
+	}
+	if len(observer.records) != 2 {
+		t.Fatalf("应产生两条 Observation：%+v", observer.records)
+	}
+	// start 阶段：仅 Provider/Operation/摘要，无错误字段
+	start := observer.records[0]
+	if start.Phase != "start" || start.Code != "" || start.Message != "" || start.Outcome != "" || start.Retryable {
+		t.Fatalf("start Observation 不应携带网关错误字段：%+v", start)
+	}
+	// end 阶段：完整透传网关错误字段
+	end := observer.records[1]
+	if end.Phase != "end" || end.Code != "NO_AUTH" || end.Message != "此商家的收款功能已被限制" || end.Outcome != OutcomeKnownFailed || end.Retryable {
+		t.Fatalf("end Observation 未完整透传网关错误字段：%+v", end)
+	}
+	if strings.Contains(err.Error(), "此商家的收款功能已被限制") {
+		t.Fatalf("Error 文本不应包含 Message：%s", err.Error())
 	}
 }

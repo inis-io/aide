@@ -118,7 +118,7 @@ PayPal 的 `CHECKOUT.ORDER.APPROVED` 只产生 `trade.approved` 事件。业务�
 - `SensitiveString` 的字符串、GoString 与 JSON 输出固定为 `[REDACTED]`。
 - Raw 默认关闭；`RawCaptureRedacted` 会脱敏并截断，`RawCaptureFull` 必须由调用方显式启用。
 - `GatewayError.Error()` 不包含完整网关报文。
-- 请求日志和 Observer 只收到 Provider、操作名、业务号摘要、网关错误码、结果确定性与耗时。
+- 请求日志和 Observer 只收到 Provider、操作名、业务号摘要、网关错误码、网关原始错误消息（`Message`，面向商户、不含密钥）、结果确定性与耗时。
 - Go 字符串不可可靠擦除。SecretResolver 返回的 `[]byte` 会在构造后覆盖，但 SDK 内部通常仍需保存密钥字符串；应通过短生命周期进程、最小权限和密钥轮换降低风险。
 - URL 白名单、订单状态机、费率、钱包、结算、事件唯一约束和商户 Webhook 仍由业务系统负责。
 
