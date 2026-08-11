@@ -24,16 +24,18 @@
 
 ```
 ├── main.go      # 空占位 main，无实际逻辑
-├── dto/         # 数据传输对象：各服务的配置与响应结构体（JwtBody 等），纯 struct，无行为
-├── pushx/       # 消息推送：以接口模式封装短信 / 邮件验证码推送，注册表 + 链式调用，可扩展服务商
-├── cachex/      # 缓存：以接口模式封装文件 / Redis 缓存，注册表 + 链式调用，可扩展后端
-├── storagex/    # 存储：以接口模式封装本地 / OSS / COS 文件存储，注册表 + 链式调用，可扩展后端
-├── logx/        # 日志：zap + lumberjack 结构化日志，按级别分文件精确收录，单例 + 独立实例
-├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理
+├── utils/       # 工具函数集合（36 个文件）：校验、加解密、JWT、日期、HTTP、文件、数组、掩码等（**嵌套独立模块** `github.com/inis-io/aide/utils`，依赖 ../dto）
+├── dto/         # 数据传输对象：各服务的配置与响应结构体（JwtBody 等），纯 struct，无行为（**嵌套独立模块** `github.com/inis-io/aide/dto`，零依赖）
+├── pushx/       # 消息推送：以接口模式封装短信 / 邮件验证码推送，注册表 + 链式调用，可扩展服务商（**嵌套独立模块**）
+├── cachex/      # 缓存：以接口模式封装文件 / Redis 缓存，注册表 + 链式调用，可扩展后端（**嵌套独立模块**）
+├── storagex/    # 存储：以接口模式封装本地 / OSS / COS 文件存储，注册表 + 链式调用，可扩展后端（**嵌套独立模块**）
+├── logx/        # 日志：zap + lumberjack 结构化日志，按级别分文件精确收录，单例 + 独立实例（**嵌套独立模块**）
+├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理（**嵌套独立模块**，依赖 logx）
 ├── pay/         # 支付能力工厂（**嵌套独立模块** `github.com/inis-io/aide/pay`，有自己的 go.mod，不参与父模块 `go build ./...`）：支付协议 + 统一 Driver + 多网关 Pool，providers/ 内置支付宝 / 微信 V3 / PayPal 适配，约定详见 pay/AGENTS.md
-├── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：运行面客户端（激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储）+ 在线更新 + SaaS 租户 + 管理面 AdminClient
-└── utils/       # 工具函数集合（36 个文件）：校验、加解密、JWT、日期、HTTP、文件、数组、掩码等
+└── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：运行面客户端（激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储）+ 在线更新 + SaaS 租户 + 管理面 AdminClient
 ```
+
+> **模块拆分说明**：除空占位 `main.go` 外，`utils`/`dto`/`pushx`/`cachex`/`storagex`/`logx`/`taskx` 均为嵌套独立模块（各自有 `go.mod` 与 `AGENTS.md`）。子模块经 `replace` 引用本地路径：`utils` 引用 `../dto`；`pushx`/`cachex`/`storagex`/`logx` 引用 `../utils` 与 `../dto`；`taskx` 额外引用 `../logx`。修改子模块依赖时必须同步维护其 `go.mod` 的 `require` / `replace` 列表。子模块的 `AGENTS.md` 与根文件同构，变更对应包时优先阅读子目录的 `AGENTS.md`。
 
 ### utils 包约定
 
@@ -122,12 +124,21 @@
 无 Makefile、无 CI 配置（仓库中没有 `.github/`），直接使用 Go 工具链：
 
 ```bash
-go build ./...    # 编译全部包（不含 licence/ 与 pay/，它们是嵌套独立模块）
+go build ./...    # 编译全部包（不含各嵌套独立模块）
 go vet ./...      # 静态检查
 go test ./...     # 运行全部测试
+cd dto && go build ./... && go vet ./... && go test ./...     # dto 模块单独执行
+cd utils && go build ./... && go vet ./... && go test ./...   # utils 模块单独执行
+cd pushx && go build ./... && go vet ./... && go test ./...   # pushx 模块单独执行
+cd cachex && go build ./... && go vet ./... && go test ./...  # cachex 模块单独执行
+cd storagex && go build ./... && go vet ./... && go test ./... # storagex 模块单独执行
+cd logx && go build ./... && go vet ./... && go test ./...    # logx 模块单独执行
+cd taskx && go build ./... && go vet ./... && go test ./...   # taskx 模块单独执行
 cd licence && go build ./... && go vet ./... && go test ./...   # licence 模块单独执行
 cd pay && go build ./... && go vet ./... && go test ./...       # pay 模块单独执行
 ```
+
+> 一次性验证全部模块可依次执行上表命令；子模块的 `go.sum` 因 `replace` 指向本地路径，首次构建会自动补齐。
 
 当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
 
