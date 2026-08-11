@@ -333,34 +333,49 @@ func (this *Provider) ParseNotify(ctx context.Context, request pay.NotifyRequest
 	if err != nil || !ok {
 		return pay.NotifyEvent{}, pay.ErrVerifyFailed
 	}
-	var notify legacy.NotifyRequest
-	if err = body.Unmarshal(&notify); err != nil {
+	return this.parseNotifyBody(request, body)
+}
+
+// parseNotifyBody - 从已验证的 BodyMap 直接读取通知字段并构建事件。
+// 不能反序列化到 gopay legacy.NotifyRequest：支付宝以 URL 编码的 JSON 字符串下发
+// fund_bill_list / voucher_detail_list，而该结构体对应字段为切片，BodyMap.Unmarshal
+// 会报 "json: cannot unmarshal string into ... []*FundBillListInfo"，导致所有携带
+// 资金明细的成功回调（TRADE_SUCCESS 常态）被拒。gopay 自身也已废弃 NotifyRequest，
+// 推荐直接读取 BodyMap 字段；验签已在 ParseNotify 中完成，此处不再涉及签名往返。
+func (this *Provider) parseNotifyBody(request pay.NotifyRequest, body gopay.BodyMap) (pay.NotifyEvent, error) {
+	appID := body.GetString("app_id")
+	outTradeNo := body.GetString("out_trade_no")
+	gatewayTradeNo := body.GetString("trade_no")
+	status := body.GetString("trade_status")
+	notifyTime := body.GetString("notify_time")
+	gmtPayment := body.GetString("gmt_payment")
+	totalAmount := body.GetString("total_amount")
+	notifyID := body.GetString("notify_id")
+
+	if appID != this.config.AppID || outTradeNo == "" || status == "" {
 		return pay.NotifyEvent{}, pay.ErrVerifyFailed
 	}
-	if notify.AppId != this.config.AppID || notify.OutTradeNo == "" || notify.TradeStatus == "" {
-		return pay.NotifyEvent{}, pay.ErrVerifyFailed
-	}
-	if notify.NotifyTime != "" {
-		parsed, parseErr := time.ParseInLocation("2006-01-02 15:04:05", notify.NotifyTime, time.FixedZone("CST", 8*3600))
+	if notifyTime != "" {
+		parsed, parseErr := time.ParseInLocation("2006-01-02 15:04:05", notifyTime, time.FixedZone("CST", 8*3600))
 		if parseErr != nil || absDuration(this.options.Clock.Now().Sub(parsed)) > this.options.NotifyClockSkew {
 			return pay.NotifyEvent{}, pay.ErrVerifyFailed
 		}
 	}
-	amount, err := pay.ParseMoney(notify.TotalAmount, "CNY")
+	amount, err := pay.ParseMoney(totalAmount, "CNY")
 	if err != nil {
 		return pay.NotifyEvent{}, pay.ErrVerifyFailed
 	}
-	eventID := notify.NotifyId
+	eventID := notifyID
 	if eventID == "" {
-		eventID = stableID(this.Name(), string(request.Kind), notify.OutTradeNo, notify.TradeNo, string(request.Body))
+		eventID = stableID(this.Name(), string(request.Kind), outTradeNo, gatewayTradeNo, string(request.Body))
 	}
 	occurred := this.options.Clock.Now()
-	if notify.GmtPayment != "" {
-		if parsed, e := time.ParseInLocation("2006-01-02 15:04:05", notify.GmtPayment, time.FixedZone("CST", 8*3600)); e == nil {
+	if gmtPayment != "" {
+		if parsed, e := time.ParseInLocation("2006-01-02 15:04:05", gmtPayment, time.FixedZone("CST", 8*3600)); e == nil {
 			occurred = parsed
 		}
 	}
-	return pay.NotifyEvent{ID: eventID, Type: eventType(notify.TradeStatus), Provider: this.Name(), Trade: &pay.TradeEvent{OutTradeNo: notify.OutTradeNo, GatewayTradeNo: notify.TradeNo, Status: tradeStatus(notify.TradeStatus), GatewayStatus: notify.TradeStatus, Amount: amount}, OccurredAt: occurred, VerifiedAt: this.options.Clock.Now(), VerificationKeyID: stableID(this.config.AlipayPublicCert)[:16], Raw: pay.CaptureRaw(this.options.RawCapture, request.Headers.Get("Content-Type"), request.Body)}, nil
+	return pay.NotifyEvent{ID: eventID, Type: eventType(status), Provider: this.Name(), Trade: &pay.TradeEvent{OutTradeNo: outTradeNo, GatewayTradeNo: gatewayTradeNo, Status: tradeStatus(status), GatewayStatus: status, Amount: amount}, OccurredAt: occurred, VerifiedAt: this.options.Clock.Now(), VerificationKeyID: stableID(this.config.AlipayPublicCert)[:16], Raw: pay.CaptureRaw(this.options.RawCapture, request.Headers.Get("Content-Type"), request.Body)}, nil
 }
 
 // NotifyResponse - 编码支付宝通知 ACK

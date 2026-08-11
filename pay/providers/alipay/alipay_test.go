@@ -3,13 +3,19 @@ package alipay
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/go-pay/gopay"
 	alipayv3 "github.com/go-pay/gopay/alipay/v3"
 
 	"github.com/inis-io/aide/pay"
 )
+
+type fixedClock struct{ now time.Time }
+
+func (this fixedClock) Now() time.Time { return this.now }
 
 type fakeSDK struct{ t *testing.T }
 
@@ -133,5 +139,95 @@ func TestOfflineOperations(t *testing.T) {
 	}
 	if err = provider.CloseTrade(context.Background(), pay.NewTradeCloseRequest("T-1")); err != nil {
 		t.Fatalf("关单失败：%v", err)
+	}
+}
+
+// TestParseNotifyBodyWithFundBillList - 回归：携带 fund_bill_list / voucher_detail_list
+// 的真实 TRADE_SUCCESS 回调必须被接受。支付宝将这两个字段以 URL 编码的 JSON 字符串下发，
+// 若反序列化到 gopay legacy.NotifyRequest（字段为切片）会报错，导致成功回调被拒。
+func TestParseNotifyBodyWithFundBillList(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	provider := &Provider{
+		config: Config{AppID: "2026100000000000"},
+		options: pay.OpenOptions{
+			Clock:            fixedClock{now},
+			NotifyClockSkew:  5 * time.Minute,
+			RawCapture:       pay.RawCapturePolicy{Mode: pay.RawCaptureNone},
+		},
+	}
+	body := gopay.BodyMap{
+		"app_id":              "2026100000000000",
+		"out_trade_no":        "T-1001",
+		"trade_no":            "2026081122000000000000000001",
+		"trade_status":        "TRADE_SUCCESS",
+		"total_amount":        "10.01",
+		"notify_id":           "R-1001",
+		"notify_time":         "2026-08-11 12:00:05",
+		"gmt_payment":         "2026-08-11 12:00:05",
+		"fund_bill_list":      `[{"amount":"10.01","fundChannel":"ALIPAYACCOUNT"}]`,
+		"voucher_detail_list": `[{"amount":"1.00","merchantContribute":"1.00"}]`,
+		"sign":                "upstream-verified",
+	}
+	request := pay.NotifyRequest{
+		Kind:   pay.NotifyKindTrade,
+		Method: http.MethodPost,
+		Body:   []byte("app_id=2026100000000000&trade_status=TRADE_SUCCESS&fund_bill_list=%5B%7B%22amount%22%3A%2210.01%22%7D%5D"),
+	}
+	event, err := provider.parseNotifyBody(request, body)
+	if err != nil {
+		t.Fatalf("携带 fund_bill_list 的成功回调必须被接受：%v", err)
+	}
+	if event.Type != pay.EventTradeSucceeded || event.Trade == nil {
+		t.Fatalf("事件类型不符：%+v", event)
+	}
+	if event.Trade.OutTradeNo != "T-1001" || event.Trade.GatewayTradeNo != "2026081122000000000000000001" || event.Trade.Amount.Minor != 1001 {
+		t.Fatalf("交易事件不符：%+v", event.Trade)
+	}
+}
+
+// TestParseNotifyBodyRejectsBadFields - 缺少必要字段或金额非法的回调必须被拒绝
+func TestParseNotifyBodyRejectsBadFields(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	provider := &Provider{
+		config: Config{AppID: "2026100000000000"},
+		options: pay.OpenOptions{
+			Clock:           fixedClock{now},
+			NotifyClockSkew: 5 * time.Minute,
+			RawCapture:      pay.RawCapturePolicy{Mode: pay.RawCaptureNone},
+		},
+	}
+	base := gopay.BodyMap{
+		"app_id":        "2026100000000000",
+		"out_trade_no":  "T-1001",
+		"trade_no":      "2026081122000000000000000001",
+		"trade_status":  "TRADE_SUCCESS",
+		"total_amount":  "10.01",
+		"notify_time":   "2026-08-11 12:00:05",
+		"gmt_payment":   "2026-08-11 12:00:05",
+		"fund_bill_list": `[{"amount":"10.01"}]`,
+	}
+	request := pay.NotifyRequest{Kind: pay.NotifyKindTrade, Method: http.MethodPost}
+
+	cases := []struct {
+		name   string
+		mutate func(gopay.BodyMap)
+	}{
+		{name: "app_id 不匹配", mutate: func(b gopay.BodyMap) { b["app_id"] = "other" }},
+		{name: "缺少 out_trade_no", mutate: func(b gopay.BodyMap) { b["out_trade_no"] = "" }},
+		{name: "缺少 trade_status", mutate: func(b gopay.BodyMap) { b["trade_status"] = "" }},
+		{name: "金额非法", mutate: func(b gopay.BodyMap) { b["total_amount"] = "not-a-number" }},
+		{name: "通知时间超差", mutate: func(b gopay.BodyMap) { b["notify_time"] = "2026-08-11 11:00:00" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := gopay.BodyMap{}
+			for k, v := range base {
+				body[k] = v
+			}
+			tc.mutate(body)
+			if _, err := provider.parseNotifyBody(request, body); !errors.Is(err, pay.ErrVerifyFailed) {
+				t.Fatalf("非法通知必须拒绝：%v", err)
+			}
+		})
 	}
 }
