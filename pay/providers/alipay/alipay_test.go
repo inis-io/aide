@@ -2,13 +2,26 @@ package alipay
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/pem"
 	"errors"
+	"io"
+	"math/big"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-pay/gopay"
 	alipayv3 "github.com/go-pay/gopay/alipay/v3"
+	"github.com/spf13/cast"
 
 	"github.com/inis-io/aide/pay"
 )
@@ -17,7 +30,18 @@ type fixedClock struct{ now time.Time }
 
 func (this fixedClock) Now() time.Time { return this.now }
 
-type fakeSDK struct{ t *testing.T }
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (this roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return this(request)
+}
+
+type fakeSDK struct {
+	t *testing.T
+	// billType / billDate - DataBillDownloadUrlQuery 期望的账单入参，billType 为空时按 trade 校验，billDate 为空不校验
+	billType string
+	billDate string
+}
 
 func (this *fakeSDK) TradePrecreate(_ context.Context, body gopay.BodyMap) (*alipayv3.TradePrecreateRsp, error) {
 	this.expectMoney(body, "10.01")
@@ -61,6 +85,17 @@ func (this *fakeSDK) FundTransUniTransfer(_ context.Context, body gopay.BodyMap)
 func (this *fakeSDK) FundTransCommonQuery(_ context.Context, _ gopay.BodyMap) (*alipayv3.FundTransCommonQueryRsp, error) {
 	return &alipayv3.FundTransCommonQueryRsp{StatusCode: 200, OutBizNo: "X-1", OrderId: "ALI-X-1", TransAmount: "2.00", Status: "SUCCESS"}, nil
 }
+func (this *fakeSDK) DataBillDownloadUrlQuery(_ context.Context, body gopay.BodyMap) (*alipayv3.DataBillDownloadUrlQueryRsp, error) {
+	billType := this.billType
+	if billType == "" {
+		billType = "trade"
+	}
+	this.expectField(body, "bill_type", billType)
+	if this.billDate != "" {
+		this.expectField(body, "bill_date", this.billDate)
+	}
+	return &alipayv3.DataBillDownloadUrlQueryRsp{StatusCode: 200, BillDownloadUrl: "https://download.alipay.test/bill.zip", BillFileCode: "BILL-1"}, nil
+}
 func (this *fakeSDK) expectMoney(body gopay.BodyMap, expected string) {
 	this.expectField(body, "total_amount", expected)
 }
@@ -91,6 +126,29 @@ func TestStatusMappings(t *testing.T) {
 	}
 	if refundStatus("REFUND_SUCCESS") != pay.RefundStatusSucceeded || transferStatus("DEALING") != pay.TransferStatusProcessing {
 		t.Fatal("退款或转账状态映射错误")
+	}
+}
+
+// TestReasonMapping - 验证错误码到标准分类的映射与网关错误 Reason 填充
+func TestReasonMapping(t *testing.T) {
+	cases := map[string]pay.Reason{
+		"ACQ.TRADE_NOT_EXIST":            pay.ReasonOrderNotFound,
+		"ACQ.TRADE_HAS_SUCCESS":          pay.ReasonDuplicateRequest,
+		"ACQ.REFUND_AMT_NOT_EQUAL_TOTAL": pay.ReasonAmountMismatch,
+		"UNKNOWN_CODE":                   pay.ReasonNone,
+	}
+	for code, expected := range cases {
+		if reasonFor(code) != expected {
+			t.Fatalf("错误码 %s 映射错误：%s", code, reasonFor(code))
+		}
+	}
+	err := checkAlipayResponse(200, alipayv3.ErrResponse{Code: "ACQ.TRADE_NOT_EXIST", Message: "订单不存在"})
+	var gateway *pay.GatewayError
+	if !errors.As(err, &gateway) || gateway.Reason != pay.ReasonOrderNotFound {
+		t.Fatalf("checkAlipayResponse 未填充 Reason：%v", err)
+	}
+	if pay.ReasonOf(checkAlipayResponse(200, alipayv3.ErrResponse{Code: "NOPE"})) != pay.ReasonNone {
+		t.Fatal("未知码应返回 ReasonNone")
 	}
 }
 
@@ -142,6 +200,80 @@ func TestOfflineOperations(t *testing.T) {
 	}
 }
 
+// TestFetchBill - 验证账单类型映射、月账单限制、代下载与截断语义
+func TestFetchBill(t *testing.T) {
+	provider := &Provider{
+		client: &fakeSDK{t: t},
+		options: pay.OpenOptions{
+			RawCapture:    pay.RawCapturePolicy{Mode: pay.RawCaptureNone},
+			Client:        &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) { return nil, io.ErrUnexpectedEOF })},
+			BillMaxBytes:  64,
+		},
+	}
+	result, err := provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01"})
+	if err != nil || result.DownloadURL != "https://download.alipay.test/bill.zip" || result.FileName != "BILL-1" {
+		t.Fatalf("日账单申请失败：%+v %v", result, err)
+	}
+	if result.Content != nil {
+		t.Fatal("Fetch=false 不应代下载")
+	}
+	if _, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08", Type: pay.BillTypeFundFlow}); !errors.Is(err, pay.ErrInvalidRequest) {
+		t.Fatalf("月账单仅限交易类型：%v", err)
+	}
+}
+
+// TestFetchBillDownload - 验证代下载命中截断与普通下载语义
+func TestFetchBillDownload(t *testing.T) {
+	provider := &Provider{
+		client: &fakeSDK{t: t},
+		options: pay.OpenOptions{
+			RawCapture:   pay.RawCapturePolicy{Mode: pay.RawCaptureNone},
+			Client:       &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) { return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(strings.Repeat("x", 100))), Request: request}, nil })},
+			BillMaxBytes: 64,
+		},
+	}
+	result, err := provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Fetch: true})
+	if err != nil || !result.Truncated || len(result.Content) != 64 {
+		t.Fatalf("超上限应截断：%+v %v", result, err)
+	}
+	small := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) { return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("zip-data")), Request: request}, nil })}
+	provider.options.Client = small
+	result, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Fetch: true})
+	if err != nil || result.Truncated || string(result.Content) != "zip-data" {
+		t.Fatalf("未超限应完整返回：%+v %v", result, err)
+	}
+}
+
+// TestFetchBillTypeMapping - 验证 bill_type/bill_date 映射：trade（含月账单）与 signcustomer 原样上送
+func TestFetchBillTypeMapping(t *testing.T) {
+	provider := &Provider{
+		client:  &fakeSDK{t: t, billType: "trade", billDate: "2026-08"},
+		options: pay.OpenOptions{RawCapture: pay.RawCapturePolicy{Mode: pay.RawCaptureNone}, BillMaxBytes: 64},
+	}
+	if _, err := provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08"}); err != nil {
+		t.Fatalf("月交易账单应合法：%v", err)
+	}
+	provider.client = &fakeSDK{t: t, billType: "signcustomer", billDate: "2026-08-01"}
+	if _, err := provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Type: pay.BillTypeFundFlow}); err != nil {
+		t.Fatalf("资金账单映射失败：%v", err)
+	}
+}
+
+// TestQueryTradeOrderNotFound - 查无此单统一识别为 order-not-found
+func TestQueryTradeOrderNotFound(t *testing.T) {
+	provider := &Provider{client: &orderNotFoundSDK{&fakeSDK{t: t}}, options: pay.OpenOptions{RawCapture: pay.RawCapturePolicy{Mode: pay.RawCaptureNone}}}
+	_, err := provider.QueryTrade(context.Background(), pay.NewTradeQueryRequest("T-404"))
+	if pay.ReasonOf(err) != pay.ReasonOrderNotFound {
+		t.Fatalf("查无此单应统一识别：%v", err)
+	}
+}
+
+type orderNotFoundSDK struct{ *fakeSDK }
+
+func (this *orderNotFoundSDK) TradeQuery(_ context.Context, _ gopay.BodyMap) (*alipayv3.TradeQueryRsp, error) {
+	return &alipayv3.TradeQueryRsp{StatusCode: 200, ErrResponse: alipayv3.ErrResponse{Code: "ACQ.TRADE_NOT_EXIST", Message: "交易不存在"}}, nil
+}
+
 // TestParseNotifyBodyWithFundBillList - 回归：携带 fund_bill_list / voucher_detail_list
 // 的真实 TRADE_SUCCESS 回调必须被接受。支付宝将这两个字段以 URL 编码的 JSON 字符串下发，
 // 若反序列化到 gopay legacy.NotifyRequest（字段为切片）会报错，导致成功回调被拒。
@@ -182,6 +314,15 @@ func TestParseNotifyBodyWithFundBillList(t *testing.T) {
 	}
 	if event.Trade.OutTradeNo != "T-1001" || event.Trade.GatewayTradeNo != "2026081122000000000000000001" || event.Trade.Amount.Minor != 1001 {
 		t.Fatalf("交易事件不符：%+v", event.Trade)
+	}
+	// 支付宝 notify_id 每次推送都不同，但同一业务号 + 事件类型的去重键必须稳定
+	body["notify_id"] = "R-2002"
+	repeated, err := provider.parseNotifyBody(request, body)
+	if err != nil || repeated.ID == event.ID {
+		t.Fatalf("重复通知解析异常：%+v %v", repeated, err)
+	}
+	if repeated.Trade.OutTradeNo != event.Trade.OutTradeNo || repeated.Type != event.Type {
+		t.Fatalf("重复通知业务字段应一致：%+v vs %+v", repeated, event)
 	}
 }
 
@@ -229,5 +370,69 @@ func TestParseNotifyBodyRejectsBadFields(t *testing.T) {
 				t.Fatalf("非法通知必须拒绝：%v", err)
 			}
 		})
+	}
+}
+
+// TestParseNotifyDedupeKey - 用真实 RSA2 签名 fixture 走完整验签链路，
+// 验证 Driver 为支付宝通知统一派生 DedupeKey，且同一载荷重复投递键相同
+func TestParseNotifyDedupeKey(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 自签证书充当支付宝公钥证书：验签只提取证书中的 RSA 公钥
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "alipay-test"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour)}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &Provider{
+		config: Config{AppID: "2026100000000000", AlipayPublicCert: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))},
+		options: pay.OpenOptions{
+			Clock:           fixedClock{now},
+			NotifyClockSkew: 5 * time.Minute,
+			RawCapture:      pay.RawCapturePolicy{Mode: pay.RawCaptureNone},
+		},
+	}
+	registry := pay.NewRegistry()
+	_ = registry.Register("alipay", func(context.Context, pay.ConfigInput, pay.OpenOptions) (pay.Provider, error) { return provider, nil })
+	driver, err := registry.New(context.Background(), "alipay", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+	params := gopay.BodyMap{
+		"app_id":       "2026100000000000",
+		"out_trade_no": "T-1001",
+		"trade_no":     "2026081122000000000000000001",
+		"trade_status": "TRADE_SUCCESS",
+		"total_amount": "10.01",
+		"notify_id":    "R-1001",
+		"notify_time":  "2026-08-11 12:00:05",
+		"gmt_payment":  "2026-08-11 12:00:05",
+	}
+	digest := sha256.Sum256([]byte(params.EncodeAliPaySignParams()))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := url.Values{}
+	for key, value := range params {
+		values.Set(key, cast.ToString(value))
+	}
+	values.Set("sign", base64.StdEncoding.EncodeToString(signature))
+	values.Set("sign_type", "RSA2")
+	request := pay.NotifyRequest{Kind: pay.NotifyKindTrade, Method: http.MethodPost, Headers: http.Header{}, Body: []byte(values.Encode())}
+	event, err := driver.ParseNotify(context.Background(), request)
+	if err != nil {
+		t.Fatalf("真实签名的通知应通过验签：%v", err)
+	}
+	if event.DedupeKey != "T-1001|trade.succeeded" {
+		t.Fatalf("Driver 未派生去重键：%s", event.DedupeKey)
+	}
+	again, err := driver.ParseNotify(context.Background(), request)
+	if err != nil || again.DedupeKey != event.DedupeKey {
+		t.Fatalf("同一载荷重复解析键应相同：%s vs %s", again.DedupeKey, event.DedupeKey)
 	}
 }

@@ -94,6 +94,8 @@ type TradeResult struct {
 	OutTradeNo string `json:"outTradeNo"`
 	// GatewayTradeNo - 网关交易号
 	GatewayTradeNo string `json:"gatewayTradeNo"`
+	// GatewayCaptureNo - 网关捕获号（仅 PayPal 等先授权后捕获的通道有值；退款以此号为目标）
+	GatewayCaptureNo string `json:"gatewayCaptureNo"`
 	// Status - 标准交易状态
 	Status TradeStatus `json:"status"`
 	// GatewayStatus - 网关原始状态
@@ -112,6 +114,8 @@ type TradeEvent struct {
 	OutTradeNo string `json:"outTradeNo"`
 	// GatewayTradeNo - 网关交易号
 	GatewayTradeNo string `json:"gatewayTradeNo"`
+	// GatewayCaptureNo - 网关捕获号（仅 PayPal 等先授权后捕获的通道有值；退款以此号为目标）
+	GatewayCaptureNo string `json:"gatewayCaptureNo"`
 	// Status - 标准交易状态
 	Status TradeStatus `json:"status"`
 	// GatewayStatus - 网关原始状态

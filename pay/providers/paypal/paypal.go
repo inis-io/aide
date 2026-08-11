@@ -91,7 +91,7 @@ func (this *Provider) Name() string { return "paypal" }
 
 // Capabilities - 返回 PayPal 真实能力集合
 func (this *Provider) Capabilities() []pay.Capability {
-	return []pay.Capability{pay.CapTradeCreate, pay.CapTradeQuery, pay.CapTradeCapture, pay.CapWebhook}
+	return []pay.Capability{pay.CapTradeCreate, pay.CapTradeQuery, pay.CapTradeCapture, pay.CapRefund, pay.CapRefundQuery, pay.CapWebhook}
 }
 
 // Close - 幂等清理客户端持有的 token 与敏感字符串
@@ -177,7 +177,7 @@ func (this *Provider) QueryTrade(ctx context.Context, request pay.TradeQueryRequ
 		return pay.TradeResult{}, invalidResponse("trade:query")
 	}
 	outNo, amount := orderAmount(response.Response)
-	return pay.TradeResult{OutTradeNo: outNo, GatewayTradeNo: response.Response.Id, Status: tradeStatus(response.Response.Status), GatewayStatus: response.Response.Status, ChargedAmount: amount, Raw: capture(this.options, response)}, nil
+	return pay.TradeResult{OutTradeNo: outNo, GatewayTradeNo: response.Response.Id, GatewayCaptureNo: orderCaptureID(response.Response), Status: tradeStatus(response.Response.Status), GatewayStatus: response.Response.Status, ChargedAmount: amount, Raw: capture(this.options, response)}, nil
 }
 
 // CaptureTrade - 显式捕获已获买家批准的 PayPal 订单
@@ -206,7 +206,67 @@ func (this *Provider) CaptureTrade(ctx context.Context, request pay.TradeCapture
 	if amount.Minor == 0 {
 		amount = request.Amount
 	}
-	return pay.TradeResult{OutTradeNo: outNo, GatewayTradeNo: response.Response.Id, Status: tradeStatus(response.Response.Status), GatewayStatus: response.Response.Status, ChargedAmount: amount, Raw: capture(this.options, response)}, nil
+	captureID := orderCaptureID(response.Response)
+	if captureID == "" {
+		return pay.TradeResult{}, invalidResponse("trade:capture")
+	}
+	return pay.TradeResult{OutTradeNo: outNo, GatewayTradeNo: response.Response.Id, GatewayCaptureNo: captureID, Status: tradeStatus(response.Response.Status), GatewayStatus: response.Response.Status, ChargedAmount: amount, Raw: capture(this.options, response)}, nil
+}
+
+// Refund - 发起 PayPal 捕获退款（以 capture id 为目标）
+func (this *Provider) Refund(ctx context.Context, request pay.RefundRequest) (pay.RefundResult, error) {
+	if request.GatewayTradeNo == "" {
+		return pay.RefundResult{}, fmt.Errorf("%w：PayPal 退款必须提供捕获号（GatewayTradeNo 填 capture id）", pay.ErrInvalidRequest)
+	}
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	if err := this.ensureTokenLocked(); err != nil {
+		return pay.RefundResult{}, err
+	}
+	body := gopay.BodyMap{"amount": gopay.BodyMap{"value": request.RefundAmount.MajorString(), "currency_code": request.RefundAmount.Currency.Code}, "invoice_id": request.OutRefundNo}
+	setOptional(body, "note_to_payer", request.Reason)
+	if request.IdempotencyKey != "" {
+		this.client.SetRequestHeader("PayPal-Request-Id", request.IdempotencyKey)
+		defer this.client.ClearRequestHeader()
+	}
+	response, err := this.client.PaymentCaptureRefund(ctx, request.GatewayTradeNo, body)
+	if err != nil {
+		return pay.RefundResult{}, gatewayError("refund:create", err, pay.OutcomeUnknown)
+	}
+	if err = checkResponse(response.Code, response.ErrorResponse); err != nil {
+		return pay.RefundResult{}, err
+	}
+	if response.Response == nil {
+		return pay.RefundResult{}, invalidResponse("refund:create")
+	}
+	return pay.RefundResult{OutRefundNo: request.OutRefundNo, GatewayRefundNo: response.Response.Id, Status: refundStatus(response.Response.Status), GatewayStatus: response.Response.Status, Amount: request.RefundAmount, Raw: capture(this.options, response)}, nil
+}
+
+// QueryRefund - 查询 PayPal 退款详情
+func (this *Provider) QueryRefund(ctx context.Context, request pay.RefundQueryRequest) (pay.RefundResult, error) {
+	if request.GatewayRefundNo == "" {
+		return pay.RefundResult{}, fmt.Errorf("%w：PayPal 退款查询必须提供网关退款号", pay.ErrInvalidRequest)
+	}
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	if err := this.ensureTokenLocked(); err != nil {
+		return pay.RefundResult{}, err
+	}
+	response, err := this.client.PaymentRefundDetail(ctx, request.GatewayRefundNo)
+	if err != nil {
+		return pay.RefundResult{}, gatewayError("refund:query", err, pay.OutcomeUnknown)
+	}
+	if err = checkResponse(response.Code, response.ErrorResponse); err != nil {
+		return pay.RefundResult{}, err
+	}
+	if response.Response == nil {
+		return pay.RefundResult{}, invalidResponse("refund:query")
+	}
+	amount := pay.Money{}
+	if response.Response.Amount != nil {
+		amount, _ = pay.ParseMoney(response.Response.Amount.Value, response.Response.Amount.CurrencyCode)
+	}
+	return pay.RefundResult{OutRefundNo: response.Response.InvoiceId, GatewayRefundNo: response.Response.Id, Status: refundStatus(response.Response.Status), GatewayStatus: response.Response.Status, Amount: amount, Raw: capture(this.options, response)}, nil
 }
 
 // ParseNotify - 通过 PayPal 验签 API 验证并解析 Webhook，不执行 Capture
@@ -311,10 +371,10 @@ func (this *Provider) webhookEvent(webhook paypalv2.WebhookEvent) (pay.NotifyEve
 	switch webhook.EventType {
 	case "PAYMENT.CAPTURE.COMPLETED":
 		base.Type = pay.EventTradeSucceeded
-		base.Trade = &pay.TradeEvent{OutTradeNo: firstNonEmpty(resource.CustomID, resource.InvoiceID), GatewayTradeNo: orderID, Status: pay.TradeStatusSucceeded, GatewayStatus: resource.Status, Amount: amount}
+		base.Trade = &pay.TradeEvent{OutTradeNo: firstNonEmpty(resource.CustomID, resource.InvoiceID), GatewayTradeNo: orderID, GatewayCaptureNo: resource.ID, Status: pay.TradeStatusSucceeded, GatewayStatus: resource.Status, Amount: amount}
 	case "PAYMENT.CAPTURE.DENIED", "PAYMENT.CAPTURE.REVERSED":
 		base.Type = pay.EventTradeClosed
-		base.Trade = &pay.TradeEvent{OutTradeNo: firstNonEmpty(resource.CustomID, resource.InvoiceID), GatewayTradeNo: orderID, Status: pay.TradeStatusFailed, GatewayStatus: resource.Status, Amount: amount}
+		base.Trade = &pay.TradeEvent{OutTradeNo: firstNonEmpty(resource.CustomID, resource.InvoiceID), GatewayTradeNo: orderID, GatewayCaptureNo: resource.ID, Status: pay.TradeStatusFailed, GatewayStatus: resource.Status, Amount: amount}
 	default:
 		return pay.NotifyEvent{}, fmt.Errorf("%w：未支持的 PayPal 事件 %s", pay.ErrInvalidRequest, webhook.EventType)
 	}
@@ -380,6 +440,20 @@ func resolveSecret(ctx context.Context, inline pay.SensitiveString, ref pay.Secr
 	defer clear(value)
 	return string(value), nil
 }
+// paypalReasonMap - PayPal 错误名到标准分类的映射表
+// 出处：RESOURCE_NOT_FOUND / RATE_LIMIT_REACHED / UNPROCESSABLE_ENTITY 为
+// PayPal v2 标准错误名，语义以官方文档为准（联调复核）。
+var paypalReasonMap = map[string]pay.Reason{
+	"RESOURCE_NOT_FOUND":    pay.ReasonOrderNotFound,
+	"RATE_LIMIT_REACHED":    pay.ReasonRateLimited,
+	"UNPROCESSABLE_ENTITY":  pay.ReasonInvalidRequest,
+}
+
+// reasonFor - 将 PayPal 原始错误名映射为标准分类；未知码返回 ReasonNone
+func reasonFor(code string) pay.Reason {
+	return paypalReasonMap[code]
+}
+
 func checkResponse(code int, response *paypalv2.ErrorResponse) error {
 	if code == paypalv2.Success && response == nil {
 		return nil
@@ -387,6 +461,7 @@ func checkResponse(code int, response *paypalv2.ErrorResponse) error {
 	gateway := &pay.GatewayError{Provider: "paypal", Operation: "gateway", Outcome: pay.OutcomeKnownFailed, Cause: pay.ErrGatewayRejected}
 	if response != nil {
 		gateway.Code, gateway.Message = response.Name, response.Message
+		gateway.Reason = reasonFor(response.Name)
 	}
 	gateway.Retryable = code == 429 || code >= 500
 	if gateway.Retryable {
@@ -413,6 +488,13 @@ func approvalURL(links []*paypalv2.Link) string {
 	}
 	return ""
 }
+// orderCaptureID - 从订单明细提取首个 capture id，无捕获记录返回空
+func orderCaptureID(order *paypalv2.OrderDetail) string {
+	if order == nil || len(order.PurchaseUnits) == 0 || order.PurchaseUnits[0] == nil || order.PurchaseUnits[0].Payments == nil || len(order.PurchaseUnits[0].Payments.Captures) == 0 || order.PurchaseUnits[0].Payments.Captures[0] == nil {
+		return ""
+	}
+	return order.PurchaseUnits[0].Payments.Captures[0].Id
+}
 func orderAmount(order *paypalv2.OrderDetail) (string, pay.Money) {
 	if order == nil || len(order.PurchaseUnits) == 0 || order.PurchaseUnits[0] == nil {
 		return "", pay.Money{}
@@ -436,6 +518,18 @@ func tradeStatus(value string) pay.TradeStatus {
 		return pay.TradeStatusClosed
 	default:
 		return pay.TradeStatusUnknown
+	}
+}
+func refundStatus(value string) pay.RefundStatus {
+	switch value {
+	case "COMPLETED":
+		return pay.RefundStatusSucceeded
+	case "PENDING":
+		return pay.RefundStatusProcessing
+	case "CANCELLED":
+		return pay.RefundStatusClosed
+	default:
+		return pay.RefundStatusUnknown
 	}
 }
 func validCertURL(value string) bool {

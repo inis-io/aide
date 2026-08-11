@@ -20,6 +20,18 @@ var (
 	ErrPoolClosed               = errors.New("pay: Provider Pool 已关闭")
 )
 
+// Reason - 网关错误的标准分类；映射缺失时为空串，业务不得依赖空值之外的取值集合收敛
+type Reason string
+
+const (
+	ReasonNone             Reason = ""
+	ReasonOrderNotFound    Reason = "order-not-found"   // 订单/退款/转账单不存在
+	ReasonAmountMismatch   Reason = "amount-mismatch"   // 金额与原单不一致
+	ReasonDuplicateRequest Reason = "duplicate-request" // 幂等冲突（网关侧判定重复提交且参数不一致）
+	ReasonRateLimited      Reason = "rate-limited"      // 网关频率限制
+	ReasonInvalidRequest   Reason = "invalid-request"   // 参数或状态被网关判定非法
+)
+
 // GatewayError - 标准网关错误
 type GatewayError struct {
 	// Provider - Provider 名称
@@ -30,6 +42,8 @@ type GatewayError struct {
 	Code string
 	// Message - 仅供结构化处理的网关消息，不进入 Error 文本
 	Message string
+	// Reason - 标准错误分类，由 Provider 按错误码映射表填写
+	Reason Reason
 	// Retryable - 技术故障是否可能恢复
 	Retryable bool
 	// Outcome - 本次资金结果的确定性
@@ -55,4 +69,13 @@ func (this *GatewayError) Unwrap() error {
 		return nil
 	}
 	return this.Cause
+}
+
+// ReasonOf - 提取错误的标准分类，非 GatewayError 或未映射返回 ReasonNone
+func ReasonOf(err error) Reason {
+	var gatewayError *GatewayError
+	if errors.As(err, &gatewayError) {
+		return gatewayError.Reason
+	}
+	return ReasonNone
 }

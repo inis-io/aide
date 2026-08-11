@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Driver - Provider 的统一能力检查与调用门面
@@ -158,6 +159,41 @@ func (this *Driver) QueryTransfer(ctx context.Context, request TransferQueryRequ
 	return result, err
 }
 
+// FetchBill - 获取并可选代下载账单
+func (this *Driver) FetchBill(ctx context.Context, request BillRequest) (BillResult, error) {
+	provider, err := capabilityOf[Biller](this, CapBill)
+	if err != nil {
+		return BillResult{}, err
+	}
+	if !validBillDate(request.Date) {
+		return BillResult{}, fmt.Errorf("%w：账单日期必须为 yyyy-MM-dd 或 yyyy-MM", ErrInvalidRequest)
+	}
+	if request.Type == "" {
+		request.Type = BillTypeTrade
+	}
+	if request.Type != BillTypeTrade && request.Type != BillTypeFundFlow {
+		return BillResult{}, fmt.Errorf("%w：未知账单类型 %s", ErrInvalidRequest, request.Type)
+	}
+	if err := validateOwnExtensions(request.Extensions, this.Name()); err != nil {
+		return BillResult{}, err
+	}
+	var result BillResult
+	err = this.observe(ctx, "bill:fetch", request.Date, func() error { var e error; result, e = provider.FetchBill(ctx, request); return e })
+	return result, err
+}
+
+// validBillDate - 校验账单日期：日账单 yyyy-MM-dd 或月账单 yyyy-MM，且必须是合法日期
+func validBillDate(value string) bool {
+	layout := "2006-01-02"
+	if len(value) == len("2006-01") {
+		layout = "2006-01"
+	} else if len(value) != len("2006-01-02") {
+		return false
+	}
+	_, err := time.Parse(layout, value)
+	return err == nil
+}
+
 // ParseNotify - 验签并解析通知
 func (this *Driver) ParseNotify(ctx context.Context, request NotifyRequest) (NotifyEvent, error) {
 	capability := notifyCapability(request.Kind)
@@ -173,7 +209,37 @@ func (this *Driver) ParseNotify(ctx context.Context, request NotifyRequest) (Not
 	if err == nil && !event.Valid() {
 		return NotifyEvent{}, fmt.Errorf("%w：Provider 返回无效事件", ErrInvalidProvider)
 	}
+	if err == nil {
+		event.DedupeKey = deriveDedupeKey(event)
+	}
 	return event, err
+}
+
+// deriveDedupeKey - 派生业务幂等去重键：业务单号（缺省退化为网关单号）+ "|" + 标准事件类型
+func deriveDedupeKey(event NotifyEvent) string {
+	no := ""
+	if event.Trade != nil {
+		no = firstNonEmpty(event.Trade.OutTradeNo, event.Trade.GatewayTradeNo)
+	}
+	if event.Refund != nil {
+		no = firstNonEmpty(event.Refund.OutRefundNo, event.Refund.GatewayRefundNo)
+	}
+	if event.Transfer != nil {
+		no = firstNonEmpty(event.Transfer.OutTransferNo, event.Transfer.GatewayTransferNo)
+	}
+	if no == "" {
+		return event.ID + "|" + string(event.Type)
+	}
+	return no + "|" + string(event.Type)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // NotifyResponse - 将业务决策编码为网关 ACK
@@ -242,13 +308,13 @@ func (this *Driver) observe(ctx context.Context, operation, outNo string, call f
 	record := Observation{Phase: "end", Provider: this.Name(), Operation: operation, OutNoHash: hash, Duration: duration}
 	var gatewayError *GatewayError
 	if errors.As(err, &gatewayError) {
-		record.Code, record.Outcome, record.Retryable, record.Message = gatewayError.Code, gatewayError.Outcome, gatewayError.Retryable, gatewayError.Message
+		record.Code, record.Message, record.Reason, record.Outcome, record.Retryable = gatewayError.Code, gatewayError.Message, gatewayError.Reason, gatewayError.Outcome, gatewayError.Retryable
 	}
 	if this.options.Observer != nil {
 		this.options.Observer.Observe(ctx, record)
 	}
 	if this.options.Logger != nil {
-		this.options.Logger.Log(ctx, LogRecord{Level: levelForError(err), Provider: record.Provider, Operation: operation, OutNoHash: hash, Code: record.Code, Message: record.Message, Outcome: record.Outcome, Retryable: record.Retryable, Duration: duration})
+		this.options.Logger.Log(ctx, LogRecord{Level: levelForError(err), Provider: record.Provider, Operation: operation, OutNoHash: hash, Code: record.Code, Message: record.Message, Reason: record.Reason, Outcome: record.Outcome, Retryable: record.Retryable, Duration: duration})
 	}
 	return err
 }

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -50,6 +51,14 @@ type TradeOptions struct {
 	H5Type string `json:"h5Type,omitempty"`
 }
 
+// BillOptions - 微信账单专属扩展
+type BillOptions struct {
+	// TradeBillType - 交易账单类型：ALL / SUCCESS / REFUND，缺省 ALL
+	TradeBillType string `json:"tradeBillType,omitempty"`
+	// AccountType - 资金账单账户：BASIC / OPERATION / FEES，缺省 BASIC
+	AccountType string `json:"accountType,omitempty"`
+}
+
 // Provider - 微信支付 V3 Provider 实例
 type Provider struct {
 	client   sdkClient
@@ -68,6 +77,9 @@ type sdkClient interface {
 	V3TransferBills(context.Context, gopay.BodyMap) (*wechatv3.TransferBillsRsp, error)
 	V3TransferBillsQuery(context.Context, string) (*wechatv3.TransferBillsQueryRsp, error)
 	V3TransferBillsMerchantQuery(context.Context, string) (*wechatv3.TransferBillsMerchantQueryRsp, error)
+	V3BillTradeBill(context.Context, gopay.BodyMap) (*wechatv3.BillRsp, error)
+	V3BillFundFlowBill(context.Context, gopay.BodyMap) (*wechatv3.BillRsp, error)
+	V3BillDownLoadBill(context.Context, string) ([]byte, error)
 	V3EncryptText(string) (string, error)
 	WxPublicKeyMap() map[string]*rsa.PublicKey
 }
@@ -122,7 +134,7 @@ func (this *Provider) Name() string { return "wechat" }
 
 // Capabilities - 返回微信支付真实能力集合
 func (this *Provider) Capabilities() []pay.Capability {
-	return []pay.Capability{pay.CapTradeCreate, pay.CapTradeQuery, pay.CapTradeClose, pay.CapRefund, pay.CapRefundQuery, pay.CapTransfer, pay.CapTransferQuery, pay.CapNotifyTrade, pay.CapNotifyRefund, pay.CapNotifyTransfer}
+	return []pay.Capability{pay.CapTradeCreate, pay.CapTradeQuery, pay.CapTradeClose, pay.CapRefund, pay.CapRefundQuery, pay.CapTransfer, pay.CapTransferQuery, pay.CapNotifyTrade, pay.CapNotifyRefund, pay.CapNotifyTransfer, pay.CapBill}
 }
 
 // Close - 关闭 Provider；公钥模式没有后台证书刷新任务
@@ -327,6 +339,69 @@ func (this *Provider) QueryTransfer(ctx context.Context, request pay.TransferQue
 	return pay.TransferResult{OutTransferNo: response.Response.OutBillNo, GatewayTransferNo: response.Response.TransferBillNo, Status: transferStatus(response.Response.State), GatewayStatus: response.Response.State, Amount: pay.NewMoneyMinor(int64(response.Response.TransferAmount), "CNY"), Raw: capture(this.options, response)}, nil
 }
 
+// FetchBill - 获取并代下载微信对账单（微信下载地址必须带签名 GET，建议总是 Fetch=true）
+func (this *Provider) FetchBill(ctx context.Context, request pay.BillRequest) (pay.BillResult, error) {
+	if len(request.Date) == len("2006-01") {
+		return pay.BillResult{}, fmt.Errorf("%w：微信不支持月账单", pay.ErrInvalidRequest)
+	}
+	var extension BillOptions
+	if err := pay.DecodeExtension(request.Extensions, this.Name(), &extension); err != nil {
+		return pay.BillResult{}, err
+	}
+	body := gopay.BodyMap{"bill_date": request.Date, "tar_type": "GZIP"}
+	var response *wechatv3.BillRsp
+	var err error
+	switch request.Type {
+	case pay.BillTypeFundFlow:
+		if extension.AccountType == "" {
+			extension.AccountType = "BASIC"
+		}
+		body.Set("account_type", extension.AccountType)
+		response, err = this.client.V3BillFundFlowBill(ctx, body)
+	case pay.BillTypeTrade, "":
+		if extension.TradeBillType == "" {
+			extension.TradeBillType = "ALL"
+		}
+		body.Set("bill_type", extension.TradeBillType)
+		response, err = this.client.V3BillTradeBill(ctx, body)
+	default:
+		return pay.BillResult{}, fmt.Errorf("%w：未知账单类型 %s", pay.ErrInvalidRequest, request.Type)
+	}
+	if err != nil {
+		return pay.BillResult{}, gatewayError("bill:fetch", err, pay.OutcomeUnknown)
+	}
+	if err = checkResponse(response.Code, response.ErrResponse); err != nil {
+		return pay.BillResult{}, err
+	}
+	if response.Response == nil {
+		return pay.BillResult{}, invalidResponse("bill:fetch")
+	}
+	result := pay.BillResult{DownloadURL: response.Response.DownloadUrl, HashType: response.Response.HashType, HashValue: response.Response.HashValue, Raw: capture(this.options, response)}
+	if !request.Fetch {
+		return result, nil
+	}
+	content, err := this.client.V3BillDownLoadBill(ctx, result.DownloadURL)
+	if err != nil {
+		return pay.BillResult{}, gatewayError("bill:fetch", err, pay.OutcomeUnknown)
+	}
+	limit := this.options.BillMaxBytes
+	if limit <= 0 {
+		limit = 32 << 20
+	}
+	if int64(len(content)) > limit {
+		result.Content, result.Truncated = content[:limit], true
+		return result, nil
+	}
+	result.Content = content
+	if strings.EqualFold(result.HashType, "SHA1") && result.HashValue != "" {
+		digest := sha1.Sum(content)
+		if !strings.EqualFold(hex.EncodeToString(digest[:]), result.HashValue) {
+			return pay.BillResult{}, &pay.GatewayError{Provider: this.Name(), Operation: "bill:fetch", Message: "账单摘要校验失败", Retryable: true, Outcome: pay.OutcomeUnknown, Cause: pay.ErrGatewayRejected}
+		}
+	}
+	return result, nil
+}
+
 // ParseNotify - 严格验签、时间校验并解密微信通知
 func (this *Provider) ParseNotify(ctx context.Context, request pay.NotifyRequest) (pay.NotifyEvent, error) {
 	if !strings.EqualFold(request.Method, http.MethodPost) {
@@ -439,11 +514,28 @@ func resolveSecret(ctx context.Context, inline pay.SensitiveString, ref pay.Secr
 	return string(value), nil
 }
 
+// wechatReasonMap - 微信支付错误码到标准分类的映射表
+// 出处：ORDER_NOT_EXIST / PARAM_ERROR / INVALID_REQUEST 见微信商户平台错误码文档；
+// 268892183（订单或退款金额不一致）、268448746（单笔订单退款频率限制）见官方退款错误码。
+// RULE_LIMIT 属业务规则限制而非频率限制，不映射为 rate-limited，留空待联调归类。
+var wechatReasonMap = map[string]pay.Reason{
+	"ORDER_NOT_EXIST":    pay.ReasonOrderNotFound,
+	"PARAM_ERROR":        pay.ReasonInvalidRequest,
+	"INVALID_REQUEST":    pay.ReasonInvalidRequest,
+	"268892183":          pay.ReasonAmountMismatch,
+	"268448746":          pay.ReasonRateLimited,
+}
+
+// reasonFor - 将微信原始错误码映射为标准分类；未知码返回 ReasonNone
+func reasonFor(code string) pay.Reason {
+	return wechatReasonMap[code]
+}
+
 func checkResponse(code int, response wechatv3.ErrResponse) error {
 	if code == wechatv3.Success && response.Code == "" {
 		return nil
 	}
-	return &pay.GatewayError{Provider: "wechat", Operation: "gateway", Code: response.Code, Message: response.Message, Retryable: code == 429 || code >= 500, Outcome: pay.OutcomeKnownFailed, Cause: pay.ErrGatewayRejected}
+	return &pay.GatewayError{Provider: "wechat", Operation: "gateway", Code: response.Code, Message: response.Message, Reason: reasonFor(response.Code), Retryable: code == 429 || code >= 500, Outcome: pay.OutcomeKnownFailed, Cause: pay.ErrGatewayRejected}
 }
 func invalidResponse(operation string) error {
 	return &pay.GatewayError{Provider: "wechat", Operation: operation, Message: "网关响应为空", Retryable: true, Outcome: pay.OutcomeUnknown, Cause: pay.ErrGatewayUnavailable}

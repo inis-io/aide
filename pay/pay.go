@@ -61,24 +61,38 @@ type NotifyParser interface {
 	NotifyResponse(NotifyKind, NotifyDecision) NotifyResponse
 }
 
-// BillRequest - 账单请求预留结构
+// BillRequest - 账单请求
 type BillRequest struct {
 	_ noUnkeyedLiterals
-	// Date - 账单日期
+	// Date - 账单日期：日账单 yyyy-MM-dd；月账单 yyyy-MM（是否支持月账单由 Provider 决定）
 	Date string `json:"date"`
+	// Type - 账单类型，缺省 BillTypeTrade
+	Type BillType `json:"type"`
+	// Fetch - 是否由 Provider 代下载账单内容；false 时只返回 DownloadURL
+	Fetch bool `json:"fetch"`
 	// Extensions - Provider 专属扩展
 	Extensions Extensions `json:"extensions"`
 }
 
-// BillResult - 账单结果预留结构
+// BillResult - 账单结果
 type BillResult struct {
-	// DownloadURL - 账单下载地址
+	// DownloadURL - 账单下载地址（Fetch=false 时业务自行下载；微信 URL 需签名 GET，见扩展说明）
 	DownloadURL string `json:"downloadUrl"`
+	// FileName - 网关给出的账单文件标识（如支付宝 bill_file_code），可为空
+	FileName string `json:"fileName"`
+	// Content - Fetch=true 时代下载的账单原始字节（通常为 zip/gzip 包），未代下载为 nil
+	Content []byte `json:"-"`
+	// HashType - 网关给出的摘要算法（微信为 SHA1），无则为空
+	HashType string `json:"hashType"`
+	// HashValue - 网关给出的账单摘要值，无则为空
+	HashValue string `json:"hashValue"`
+	// Truncated - 代下载内容因大小上限被截断（此时 HashValue 校验已跳过）
+	Truncated bool `json:"truncated"`
 	// Raw - 按捕获策略保留的原始响应
 	Raw *RawPayload `json:"-"`
 }
 
-// Biller - 账单下载预留能力
+// Biller - 账单下载能力
 type Biller interface {
 	FetchBill(context.Context, BillRequest) (BillResult, error)
 }

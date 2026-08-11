@@ -23,8 +23,10 @@ type NotifyRequest struct {
 
 // NotifyEvent - 完成验签后的标准通知事件
 type NotifyEvent struct {
-	// ID - 稳定的网关事件标识
+	// ID - 稳定的网关事件标识（仅用于排查与对账；幂等请使用 DedupeKey）
 	ID string `json:"id"`
+	// DedupeKey - 业务幂等去重键：业务单号（缺省退化为网关单号）+ "|" + 标准事件类型，由 Driver 统一派生
+	DedupeKey string `json:"dedupeKey"`
 	// Type - 标准事件类型
 	Type EventType `json:"type"`
 	// Provider - Provider 名称

@@ -27,6 +27,8 @@ type LogRecord struct {
 	Code string
 	// Message - 网关原始错误消息（真实业务文案；传输性失败时为占位文案，不进入 Error 文本）
 	Message string
+	// Reason - 标准错误分类
+	Reason Reason
 	// Outcome - 资金结果确定性
 	Outcome Outcome
 	// Retryable - 技术故障是否可能恢复
@@ -54,6 +56,8 @@ type Observation struct {
 	Code string
 	// Message - 网关原始错误消息（真实业务文案；传输性失败时为占位文案，不进入 Error 文本）
 	Message string
+	// Reason - 标准错误分类
+	Reason Reason
 	// Outcome - 资金结果确定性
 	Outcome Outcome
 	// Retryable - 技术故障是否可能恢复
@@ -89,6 +93,8 @@ type OpenOptions struct {
 	NotifyMaxBody int64
 	// NotifyClockSkew - 通知时间戳最大允许偏差
 	NotifyClockSkew time.Duration
+	// BillMaxBytes - 代下载账单的字节上限（压缩包体积），默认 32 MiB
+	BillMaxBytes int64
 	// SchemaVersion - Provider 动态配置结构版本
 	SchemaVersion uint16
 }
@@ -135,13 +141,18 @@ func WithNotifyLimits(maxBody int64, clockSkew time.Duration) Option {
 	return func(options *OpenOptions) { options.NotifyMaxBody, options.NotifyClockSkew = maxBody, clockSkew }
 }
 
+// WithBillMaxBytes - 设置代下载账单的字节上限
+func WithBillMaxBytes(value int64) Option {
+	return func(options *OpenOptions) { options.BillMaxBytes = value }
+}
+
 // WithSchemaVersion - 设置动态配置结构版本
 func WithSchemaVersion(version uint16) Option {
 	return func(options *OpenOptions) { options.SchemaVersion = version }
 }
 
 func normalizeOpenOptions(options []Option) OpenOptions {
-	result := OpenOptions{Timeout: 15 * time.Second, Clock: systemClock{}, RawCapture: RawCapturePolicy{Mode: RawCaptureNone, MaxBytes: 32 << 10}, NotifyMaxBody: 1 << 20, NotifyClockSkew: 5 * time.Minute, SchemaVersion: 1}
+	result := OpenOptions{Timeout: 15 * time.Second, Clock: systemClock{}, RawCapture: RawCapturePolicy{Mode: RawCaptureNone, MaxBytes: 32 << 10}, NotifyMaxBody: 1 << 20, NotifyClockSkew: 5 * time.Minute, BillMaxBytes: 32 << 20, SchemaVersion: 1}
 	for _, option := range options {
 		if option != nil {
 			option(&result)
@@ -158,6 +169,9 @@ func normalizeOpenOptions(options []Option) OpenOptions {
 	}
 	if result.NotifyClockSkew <= 0 {
 		result.NotifyClockSkew = 5 * time.Minute
+	}
+	if result.BillMaxBytes <= 0 {
+		result.BillMaxBytes = 32 << 20
 	}
 	if result.RawCapture.MaxBytes <= 0 {
 		result.RawCapture.MaxBytes = 32 << 10

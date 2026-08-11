@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +76,7 @@ type sdkClient interface {
 	TradeFastPayRefundQuery(context.Context, gopay.BodyMap) (*alipayv3.TradeFastPayRefundQueryRsp, error)
 	FundTransUniTransfer(context.Context, gopay.BodyMap) (*alipayv3.FundTransUniTransferRsp, error)
 	FundTransCommonQuery(context.Context, gopay.BodyMap) (*alipayv3.FundTransCommonQueryRsp, error)
+	DataBillDownloadUrlQuery(context.Context, gopay.BodyMap) (*alipayv3.DataBillDownloadUrlQueryRsp, error)
 }
 
 // Register - 向指定实例 Registry 显式注册支付宝工厂
@@ -119,7 +122,7 @@ func (this *Provider) Name() string { return "alipay" }
 
 // Capabilities - 返回支付宝真实能力集合
 func (this *Provider) Capabilities() []pay.Capability {
-	return []pay.Capability{pay.CapTradeCreate, pay.CapTradeQuery, pay.CapTradeClose, pay.CapRefund, pay.CapRefundQuery, pay.CapTransfer, pay.CapTransferQuery, pay.CapNotifyTrade}
+	return []pay.Capability{pay.CapTradeCreate, pay.CapTradeQuery, pay.CapTradeClose, pay.CapRefund, pay.CapRefundQuery, pay.CapTransfer, pay.CapTransferQuery, pay.CapNotifyTrade, pay.CapBill}
 }
 
 // Close - 关闭 Provider；支付宝 SDK 无常驻资源
@@ -309,6 +312,58 @@ func (this *Provider) QueryTransfer(ctx context.Context, request pay.TransferQue
 	return pay.TransferResult{OutTransferNo: response.OutBizNo, GatewayTransferNo: response.OrderId, Status: transferStatus(response.Status), GatewayStatus: response.Status, Amount: amount, Raw: capture(this.options, response)}, nil
 }
 
+// BillOptions - 支付宝账单专属扩展（预留命名空间，保持扩展点形态一致）
+type BillOptions struct{}
+
+// FetchBill - 获取并可选代下载支付宝对账单
+func (this *Provider) FetchBill(ctx context.Context, request pay.BillRequest) (pay.BillResult, error) {
+	billType := "trade"
+	if request.Type == pay.BillTypeFundFlow {
+		billType = "signcustomer"
+	}
+	if len(request.Date) == len("2006-01") && request.Type == pay.BillTypeFundFlow {
+		return pay.BillResult{}, fmt.Errorf("%w：支付宝月账单仅支持交易账单", pay.ErrInvalidRequest)
+	}
+	body := gopay.BodyMap{"bill_type": billType, "bill_date": request.Date}
+	response, err := this.client.DataBillDownloadUrlQuery(ctx, body)
+	if err != nil {
+		return pay.BillResult{}, gatewayError("bill:fetch", err, pay.OutcomeUnknown)
+	}
+	if err = checkAlipayResponse(response.StatusCode, response.ErrResponse); err != nil {
+		return pay.BillResult{}, err
+	}
+	result := pay.BillResult{DownloadURL: response.BillDownloadUrl, FileName: response.BillFileCode, Raw: capture(this.options, response)}
+	if !request.Fetch {
+		return result, nil
+	}
+	limit := this.options.BillMaxBytes
+	if limit <= 0 {
+		limit = 32 << 20
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, result.DownloadURL, nil)
+	if err != nil {
+		return pay.BillResult{}, fmt.Errorf("%w：账单下载地址非法", pay.ErrInvalidRequest)
+	}
+	httpResponse, err := this.options.Client.Do(httpRequest)
+	if err != nil {
+		return pay.BillResult{}, gatewayError("bill:fetch", err, pay.OutcomeUnknown)
+	}
+	defer httpResponse.Body.Close()
+	if httpResponse.StatusCode < 200 || httpResponse.StatusCode >= 300 {
+		return pay.BillResult{}, &pay.GatewayError{Provider: this.Name(), Operation: "bill:fetch", Code: strconv.Itoa(httpResponse.StatusCode), Message: "账单下载失败", Retryable: httpResponse.StatusCode == 429 || httpResponse.StatusCode >= 500, Outcome: pay.OutcomeUnknown, Cause: pay.ErrGatewayRejected}
+	}
+	content, err := io.ReadAll(io.LimitReader(httpResponse.Body, limit+1))
+	if err != nil {
+		return pay.BillResult{}, gatewayError("bill:fetch", err, pay.OutcomeUnknown)
+	}
+	if int64(len(content)) > limit {
+		result.Content, result.Truncated = content[:limit], true
+		return result, nil
+	}
+	result.Content = content
+	return result, nil
+}
+
 // ParseNotify - 验签并解析支付宝交易通知
 func (this *Provider) ParseNotify(ctx context.Context, request pay.NotifyRequest) (pay.NotifyEvent, error) {
 	if request.Kind != pay.NotifyKindTrade {
@@ -432,11 +487,25 @@ func resolveSecret(ctx context.Context, inline pay.SensitiveString, ref pay.Secr
 	return string(value), nil
 }
 
+// alipayReasonMap - 支付宝错误码到标准分类的映射表
+// 出处：ACQ.TRADE_NOT_EXIST 为现网代码特判（关单幂等）；ACQ.TRADE_HAS_SUCCESS /
+// ACQ.REFUND_AMT_NOT_EQUAL_TOTAL 待联调确认。未知码返回 ReasonNone，行为与现状一致。
+var alipayReasonMap = map[string]pay.Reason{
+	"ACQ.TRADE_NOT_EXIST":            pay.ReasonOrderNotFound,
+	"ACQ.TRADE_HAS_SUCCESS":          pay.ReasonDuplicateRequest,
+	"ACQ.REFUND_AMT_NOT_EQUAL_TOTAL": pay.ReasonAmountMismatch,
+}
+
+// reasonFor - 将支付宝原始错误码映射为标准分类；未知码返回 ReasonNone
+func reasonFor(code string) pay.Reason {
+	return alipayReasonMap[code]
+}
+
 func checkAlipayResponse(status int, response alipayv3.ErrResponse) error {
 	if status >= 200 && status < 300 && response.Code == "" {
 		return nil
 	}
-	return &pay.GatewayError{Provider: "alipay", Operation: "gateway", Code: response.Code, Message: response.Message, Retryable: status == 429 || status >= 500, Outcome: pay.OutcomeKnownFailed, Cause: pay.ErrGatewayRejected}
+	return &pay.GatewayError{Provider: "alipay", Operation: "gateway", Code: response.Code, Message: response.Message, Reason: reasonFor(response.Code), Retryable: status == 429 || status >= 500, Outcome: pay.OutcomeKnownFailed, Cause: pay.ErrGatewayRejected}
 }
 
 func gatewayError(operation string, err error, outcome pay.Outcome) error {

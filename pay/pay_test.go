@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type testProvider struct {
@@ -43,6 +44,16 @@ type failingCreatorProvider struct{ *testProvider }
 
 func (this *failingCreatorProvider) CreateTrade(_ context.Context, _ TradeCreateRequest) (TradeResult, error) {
 	return TradeResult{}, &GatewayError{Provider: "demo", Operation: "gateway", Code: "NO_AUTH", Message: "此商家的收款功能已被限制", Outcome: OutcomeKnownFailed, Retryable: false, Cause: ErrGatewayRejected}
+}
+
+type billerTestProvider struct {
+	*testProvider
+	lastRequest BillRequest
+}
+
+func (this *billerTestProvider) FetchBill(ctx context.Context, request BillRequest) (BillResult, error) {
+	this.lastRequest = request
+	return BillResult{DownloadURL: "https://gateway.test/bill.zip", FileName: "FILE-1", HashType: "SHA1", HashValue: "abc", Content: []byte("bill")}, ctx.Err()
 }
 
 // TestMoneyIntegerModel - 验证金额解析、格式化、精度约束与溢出保护
@@ -178,6 +189,154 @@ func TestSensitiveRawAndGatewayError(t *testing.T) {
 	errorValue := &GatewayError{Provider: "demo", Operation: "pay", Code: "E1", Message: "拒绝", Cause: ErrGatewayRejected}
 	if !errors.Is(errorValue, ErrGatewayRejected) || strings.Contains(errorValue.Error(), "canary-secret") {
 		t.Fatalf("错误分类或脱敏失败：%v", errorValue)
+	}
+}
+
+// TestFetchBillValidationAndObservation - 验证账单请求日期格式、Type 归一与观测链路
+func TestFetchBillValidationAndObservation(t *testing.T) {
+	observer := &collectObserver{}
+	provider := &billerTestProvider{testProvider: &testProvider{name: "demo", caps: []Capability{CapBill}}}
+	registry := NewRegistry()
+	_ = registry.Register("demo", func(context.Context, ConfigInput, OpenOptions) (Provider, error) { return provider, nil })
+	driver, err := registry.New(context.Background(), "demo", struct{}{}, WithObserver(observer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+	if !driver.Supports(CapBill) {
+		t.Fatal("Driver 应声明账单能力")
+	}
+	result, err := driver.FetchBill(context.Background(), BillRequest{Date: "2026-08-01"})
+	if err != nil || result.DownloadURL == "" || provider.lastRequest.Type != BillTypeTrade {
+		t.Fatalf("缺省类型应归一为交易账单：%+v %v", result, err)
+	}
+	result, err = driver.FetchBill(context.Background(), BillRequest{Date: "2026-08", Type: BillTypeFundFlow, Fetch: true})
+	if err != nil || provider.lastRequest.Type != BillTypeFundFlow || !provider.lastRequest.Fetch || result.Content == nil {
+		t.Fatalf("显式类型与代下载未透传：%+v %v", result, err)
+	}
+	for _, bad := range []string{"2026/08/01", "20260801", "2026-08-32", "2026-8-1", "2026-13", "abc"} {
+		if _, err = driver.FetchBill(context.Background(), BillRequest{Date: bad}); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("非法日期 %s 应拒绝：%v", bad, err)
+		}
+	}
+	if _, err = driver.FetchBill(context.Background(), BillRequest{Date: "2026-08-01", Type: "unknown"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("未知账单类型应拒绝：%v", err)
+	}
+	if len(observer.records) != 4 {
+		t.Fatalf("每次成功 FetchBill 应产生两条观测：%d", len(observer.records))
+	}
+	plain := NewRegistry()
+	_ = plain.Register("plain", func(context.Context, ConfigInput, OpenOptions) (Provider, error) {
+		return &testProvider{name: "plain"}, nil
+	})
+	plainDriver, err := plain.New(context.Background(), "plain", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plainDriver.Close()
+	if _, err = plainDriver.FetchBill(context.Background(), BillRequest{Date: "2026-08-01"}); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("缺失账单能力应返回不支持：%v", err)
+	}
+}
+
+// TestReasonAndDedupeKey - 验证错误分类提取与通知去重键派生规则
+func TestReasonAndDedupeKey(t *testing.T) {
+	gateway := &GatewayError{Provider: "demo", Operation: "trade:query", Code: "ACQ.TRADE_NOT_EXIST", Reason: ReasonOrderNotFound, Cause: ErrGatewayRejected}
+	if ReasonOf(gateway) != ReasonOrderNotFound || ReasonOf(fmt.Errorf("wrapped: %w", gateway)) != ReasonOrderNotFound {
+		t.Fatal("ReasonOf 应穿透包装错误")
+	}
+	if ReasonOf(errors.New("plain")) != ReasonNone || ReasonOf(nil) != ReasonNone {
+		t.Fatal("非网关错误应返回 ReasonNone")
+	}
+	now := time.Now()
+	base := NotifyEvent{ID: "EV-1", Type: EventTradeSucceeded, Provider: "demo", OccurredAt: now, VerifiedAt: now}
+	trade := base
+	trade.Trade = &TradeEvent{OutTradeNo: "T-1", GatewayTradeNo: "G-1"}
+	if key := deriveDedupeKey(trade); key != "T-1|trade.succeeded" {
+		t.Fatalf("交易去重键错误：%s", key)
+	}
+	refund := base
+	refund.Type, refund.Refund = EventRefundSucceeded, &RefundEvent{OutRefundNo: "R-1", GatewayRefundNo: "GR-1"}
+	if key := deriveDedupeKey(refund); key != "R-1|refund.succeeded" {
+		t.Fatalf("退款去重键错误：%s", key)
+	}
+	transfer := base
+	transfer.Type, transfer.Transfer = EventTransferSucceeded, &TransferEvent{OutTransferNo: "X-1", GatewayTransferNo: "GX-1"}
+	if key := deriveDedupeKey(transfer); key != "X-1|transfer.succeeded" {
+		t.Fatalf("转账去重键错误：%s", key)
+	}
+	fallback := base
+	fallback.Trade = &TradeEvent{GatewayTradeNo: "G-1"}
+	if key := deriveDedupeKey(fallback); key != "G-1|trade.succeeded" {
+		t.Fatalf("缺业务号应退化网关单号：%s", key)
+	}
+	empty := base
+	empty.Trade = &TradeEvent{}
+	if key := deriveDedupeKey(empty); key != "EV-1|trade.succeeded" {
+		t.Fatalf("单号全空应退化事件 ID：%s", key)
+	}
+}
+
+// TestObserveForwardsReason - 验证 observe() 将 GatewayError.Reason 透传到 Observation 与 LogRecord
+func TestObserveForwardsReason(t *testing.T) {
+	logger := &collectLogger{}
+	observer := &collectObserver{}
+	registry := NewRegistry()
+	_ = registry.Register("demo", func(context.Context, ConfigInput, OpenOptions) (Provider, error) {
+		return &errorProvider{testProvider: &testProvider{name: "demo", caps: []Capability{CapBill}}}, nil
+	})
+	driver, err := registry.New(context.Background(), "demo", struct{}{}, WithObserver(observer), WithLogger(logger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+	_, err = driver.FetchBill(context.Background(), BillRequest{Date: "2026-08-01"})
+	if !errors.Is(err, ErrGatewayRejected) {
+		t.Fatalf("应返回网关错误：%v", err)
+	}
+	if ReasonOf(err) != ReasonOrderNotFound {
+		t.Fatalf("Reason 应透传：%v", err)
+	}
+	if logger.records[0].Reason != ReasonOrderNotFound || observer.records[1].Reason != ReasonOrderNotFound {
+		t.Fatalf("Reason 未写入观测与日志：%+v %+v", observer.records[1], logger.records[0])
+	}
+}
+
+type errorProvider struct{ *testProvider }
+
+func (this *errorProvider) FetchBill(_ context.Context, _ BillRequest) (BillResult, error) {
+	return BillResult{}, &GatewayError{Provider: "demo", Operation: "bill:fetch", Code: "ACQ.TRADE_NOT_EXIST", Reason: ReasonOrderNotFound, Outcome: OutcomeKnownFailed, Cause: ErrGatewayRejected}
+}
+
+type notifyTestProvider struct {
+	*testProvider
+	event NotifyEvent
+}
+
+func (this *notifyTestProvider) ParseNotify(_ context.Context, _ NotifyRequest) (NotifyEvent, error) {
+	return this.event, nil
+}
+
+func (this *notifyTestProvider) NotifyResponse(_ NotifyKind, _ NotifyDecision) NotifyResponse {
+	return NotifyResponse{StatusCode: 200}
+}
+
+// TestDriverDerivesDedupeKey - 验证 Driver.ParseNotify 为通知事件统一派生 DedupeKey
+func TestDriverDerivesDedupeKey(t *testing.T) {
+	now := time.Now()
+	base := NotifyEvent{ID: "EV-1", Type: EventTradeSucceeded, Provider: "demo", Trade: &TradeEvent{OutTradeNo: "T-1", GatewayTradeNo: "G-1"}, OccurredAt: now, VerifiedAt: now}
+	registry := NewRegistry()
+	_ = registry.Register("demo", func(context.Context, ConfigInput, OpenOptions) (Provider, error) {
+		return &notifyTestProvider{testProvider: &testProvider{name: "demo", caps: []Capability{CapNotifyTrade}}, event: base}, nil
+	})
+	driver, err := registry.New(context.Background(), "demo", struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+	event, err := driver.ParseNotify(context.Background(), NotifyRequest{Kind: NotifyKindTrade})
+	if err != nil || event.DedupeKey != "T-1|trade.succeeded" {
+		t.Fatalf("Driver 未派生去重键：%+v %v", event, err)
 	}
 }
 

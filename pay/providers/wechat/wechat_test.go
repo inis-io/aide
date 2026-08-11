@@ -7,9 +7,13 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"strconv"
@@ -26,6 +30,7 @@ import (
 type fakeSDK struct {
 	t          *testing.T
 	publicKeys map[string]*rsa.PublicKey
+	billHash   string
 }
 
 func (this *fakeSDK) V3TransactionNative(_ context.Context, body gopay.BodyMap) (*wechatv3.NativeRsp, error) {
@@ -64,6 +69,21 @@ func (this *fakeSDK) V3TransferBillsQuery(context.Context, string) (*wechatv3.Tr
 func (this *fakeSDK) V3TransferBillsMerchantQuery(context.Context, string) (*wechatv3.TransferBillsMerchantQueryRsp, error) {
 	return &wechatv3.TransferBillsMerchantQueryRsp{Response: &wechatv3.TransferBillsMerchantQuery{OutBillNo: "X-1", TransferBillNo: "WX-X-1", State: "SUCCESS", TransferAmount: 200}}, nil
 }
+func (this *fakeSDK) V3BillTradeBill(_ context.Context, body gopay.BodyMap) (*wechatv3.BillRsp, error) {
+	if body.GetString("bill_type") != "ALL" && body.GetString("bill_type") != "SUCCESS" && body.GetString("bill_type") != "REFUND" {
+		this.t.Fatalf("微信交易账单类型错误：%s", body.GetString("bill_type"))
+	}
+	return &wechatv3.BillRsp{Response: &wechatv3.TradeBill{HashType: "SHA1", HashValue: this.billHash, DownloadUrl: "https://wxbill.test/bill.tar.gz"}}, nil
+}
+func (this *fakeSDK) V3BillFundFlowBill(_ context.Context, body gopay.BodyMap) (*wechatv3.BillRsp, error) {
+	if body.GetString("account_type") != "BASIC" && body.GetString("account_type") != "OPERATION" && body.GetString("account_type") != "FEES" {
+		this.t.Fatalf("微信资金账单账户类型错误：%s", body.GetString("account_type"))
+	}
+	return &wechatv3.BillRsp{Response: &wechatv3.TradeBill{HashType: "SHA1", HashValue: this.billHash, DownloadUrl: "https://wxbill.test/fund.tar.gz"}}, nil
+}
+func (this *fakeSDK) V3BillDownLoadBill(context.Context, string) ([]byte, error) {
+	return []byte("gzip-bill"), nil
+}
 func (this *fakeSDK) V3EncryptText(value string) (string, error) { return "encrypted:" + value, nil }
 func (this *fakeSDK) WxPublicKeyMap() map[string]*rsa.PublicKey  { return this.publicKeys }
 func (this *fakeSDK) expectAmount(body gopay.BodyMap, expected int64) {
@@ -95,6 +115,32 @@ func TestStatusMappings(t *testing.T) {
 	}
 	if refundStatus("PROCESSING") != pay.RefundStatusProcessing || transferStatus("CANCELLED") != pay.TransferStatusClosed {
 		t.Fatal("退款或转账状态映射错误")
+	}
+}
+
+// TestReasonMapping - 验证微信错误码到标准分类的映射与网关错误 Reason 填充
+func TestReasonMapping(t *testing.T) {
+	cases := map[string]pay.Reason{
+		"ORDER_NOT_EXIST": pay.ReasonOrderNotFound,
+		"PARAM_ERROR":     pay.ReasonInvalidRequest,
+		"INVALID_REQUEST": pay.ReasonInvalidRequest,
+		"268892183":       pay.ReasonAmountMismatch,
+		"268448746":       pay.ReasonRateLimited,
+		"RULE_LIMIT":      pay.ReasonNone,
+		"UNKNOWN":         pay.ReasonNone,
+	}
+	for code, expected := range cases {
+		if reasonFor(code) != expected {
+			t.Fatalf("错误码 %s 映射错误：%s", code, reasonFor(code))
+		}
+	}
+	err := checkResponse(404, wechatv3.ErrResponse{Code: "ORDER_NOT_EXIST", Message: "订单不存在"})
+	var gateway *pay.GatewayError
+	if !errors.As(err, &gateway) || gateway.Reason != pay.ReasonOrderNotFound {
+		t.Fatalf("checkResponse 未填充 Reason：%v", err)
+	}
+	if pay.ReasonOf(checkResponse(400, wechatv3.ErrResponse{Code: "SOMETHING_ELSE"})) != pay.ReasonNone {
+		t.Fatal("未知码应返回 ReasonNone")
 	}
 }
 
@@ -140,6 +186,69 @@ func TestOfflineOperations(t *testing.T) {
 	}
 }
 
+// TestFetchBill - 验证账单类型映射、月账单拒绝、代下载与 SHA-1 校验
+func TestFetchBill(t *testing.T) {
+	digest := sha1.Sum([]byte("gzip-bill"))
+	provider := &Provider{client: &fakeSDK{t: t, billHash: hex.EncodeToString(digest[:])}, options: pay.OpenOptions{RawCapture: pay.RawCapturePolicy{Mode: pay.RawCaptureNone}, BillMaxBytes: 1 << 20}}
+	result, err := provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01"})
+	if err != nil || result.DownloadURL == "" || result.HashType != "SHA1" {
+		t.Fatalf("交易账单申请失败：%+v %v", result, err)
+	}
+	result, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Type: pay.BillTypeFundFlow})
+	if err != nil || result.DownloadURL == "" {
+		t.Fatalf("资金账单申请失败：%+v %v", result, err)
+	}
+	if _, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08"}); !errors.Is(err, pay.ErrInvalidRequest) {
+		t.Fatalf("微信月账单应拒绝：%v", err)
+	}
+	result, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Fetch: true})
+	if err != nil || result.Truncated || string(result.Content) != "gzip-bill" {
+		t.Fatalf("代下载与 SHA-1 校验失败：%+v %v", result, err)
+	}
+	provider.client = &fakeSDK{t: t, billHash: "deadbeef"}
+	if _, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Fetch: true}); !errors.Is(err, pay.ErrGatewayRejected) {
+		t.Fatalf("摘要不符应拒绝：%v", err)
+	}
+	provider.options.BillMaxBytes = 4
+	result, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Fetch: true})
+	if err != nil || !result.Truncated || len(result.Content) != 4 {
+		t.Fatalf("截断时应跳过摘要校验：%+v %v", result, err)
+	}
+}
+
+// TestFetchBillExtensions - 验证扩展的显式值透传与未知账单类型拒绝
+func TestFetchBillExtensions(t *testing.T) {
+	provider := &Provider{client: &fakeSDK{t: t, billHash: "any"}, options: pay.OpenOptions{RawCapture: pay.RawCapturePolicy{Mode: pay.RawCaptureNone}}}
+	extensions, err := pay.SetExtension(nil, "wechat", BillOptions{TradeBillType: "REFUND", AccountType: "OPERATION"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Type: pay.BillTypeFundFlow, Extensions: extensions}); err != nil {
+		t.Fatalf("资金账单扩展失败：%v", err)
+	}
+	if _, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Type: pay.BillTypeFundFlow, Extensions: extensions}); err != nil {
+		t.Fatalf("交易账单扩展失败：%v", err)
+	}
+	if _, err = provider.FetchBill(context.Background(), pay.BillRequest{Date: "2026-08-01", Type: "unknown"}); !errors.Is(err, pay.ErrInvalidRequest) {
+		t.Fatalf("未知账单类型应拒绝：%v", err)
+	}
+}
+
+// TestQueryTradeOrderNotFound - 查无此单统一识别为 order-not-found
+func TestQueryTradeOrderNotFound(t *testing.T) {
+	provider := &Provider{client: &orderNotFoundSDK{&fakeSDK{t: t}}, options: pay.OpenOptions{RawCapture: pay.RawCapturePolicy{Mode: pay.RawCaptureNone}}}
+	_, err := provider.QueryTrade(context.Background(), pay.NewTradeQueryRequest("T-404"))
+	if pay.ReasonOf(err) != pay.ReasonOrderNotFound {
+		t.Fatalf("查无此单应统一识别：%v", err)
+	}
+}
+
+type orderNotFoundSDK struct{ *fakeSDK }
+
+func (this *orderNotFoundSDK) V3TransactionQueryOrder(context.Context, wechatv3.OrderNoType, string) (*wechatv3.QueryOrderRsp, error) {
+	return &wechatv3.QueryOrderRsp{Code: 404, ErrResponse: wechatv3.ErrResponse{Code: "ORDER_NOT_EXIST", Message: "订单不存在"}}, nil
+}
+
 // TestOfflineSignedNotify - 用本地 RSA 与 AES-GCM fixture 验证微信通知验签、时间窗和解密顺序
 func TestOfflineSignedNotify(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -183,10 +292,43 @@ func TestOfflineSignedNotify(t *testing.T) {
 	if event.ID != "EV-1" || event.VerificationKeyID != "PUB-1" || event.Trade == nil || event.Trade.Amount.Minor != 1001 {
 		t.Fatalf("通知事件不符：%+v", event)
 	}
+	privatePEM, publicPEM := pemFixture(t, privateKey)
+	registry := pay.NewRegistry()
+	if err := Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	driver, err := registry.New(context.Background(), "wechat", Config{AppID: "app", MerchantID: "mch", APIv3Key: pay.NewSensitiveString(apiKey), SerialNo: "sn", PrivateKey: pay.NewSensitiveString(privatePEM), PublicKeyID: "PUB-1", PublicKey: publicPEM}, pay.WithClock(fixedClock{now}), pay.WithNotifyLimits(1<<20, 5*time.Minute))
+	if err != nil {
+		t.Fatalf("构造 Driver 失败：%v", err)
+	}
+	defer driver.Close()
+	driverEvent, err := driver.ParseNotify(context.Background(), request)
+	if err != nil || driverEvent.DedupeKey != "T-1|trade.succeeded" {
+		t.Fatalf("Driver 派生去重键错误：%+v %v", driverEvent, err)
+	}
+	repeated, err := driver.ParseNotify(context.Background(), request)
+	if err != nil || repeated.DedupeKey != driverEvent.DedupeKey {
+		t.Fatalf("同一载荷重复解析键应相同：%s vs %s", repeated.DedupeKey, driverEvent.DedupeKey)
+	}
 	headers.Set("Wechatpay-Signature", base64.StdEncoding.EncodeToString([]byte("invalid")))
 	if _, err = provider.ParseNotify(context.Background(), request); !errors.Is(err, pay.ErrVerifyFailed) {
 		t.Fatalf("错误签名必须拒绝：%v", err)
 	}
+}
+
+func pemFixture(t *testing.T, key *rsa.PrivateKey) (string, string) {
+	t.Helper()
+	privateDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})
+	publicDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
+	return string(privatePEM), string(publicPEM)
 }
 
 type fixedClock struct{ now time.Time }

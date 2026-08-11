@@ -19,6 +19,14 @@ const (
 	CapBill           Capability = "bill:fetch"
 )
 
+// BillType - 账单类型
+type BillType string
+
+const (
+	BillTypeTrade    BillType = "trade"     // 交易账单
+	BillTypeFundFlow BillType = "fund-flow" // 资金账单（账户维度资金变动）
+)
+
 // TradeMode - 支付交易模式
 type TradeMode string
 
