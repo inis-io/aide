@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -22,6 +23,14 @@ import (
 type runtimeLicenseServer struct {
 	licencev1.UnimplementedLicenseRuntimeServiceServer
 	t *testing.T
+}
+
+type rejectingRuntimeLicenseServer struct {
+	licencev1.UnimplementedLicenseRuntimeServiceServer
+}
+
+func (rejectingRuntimeLicenseServer) Activate(context.Context, *licencev1.ActivateRequest) (*licencev1.RuntimeResponse, error) {
+	return &licencev1.RuntimeResponse{Status: StatusExpired, ServerTime: time.Now().UnixMilli()}, nil
 }
 
 func (s runtimeLicenseServer) check(ctx context.Context, signed bool) {
@@ -146,6 +155,51 @@ func newTestEventTransport(t *testing.T, eventServer licencev1.EventRuntimeServi
 	}
 	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
 	return &grpcRuntimeTransport{client: client, conn: conn, event: licencev1.NewEventRuntimeServiceClient(conn)}, nil
+}
+
+// TestGRPCRejectedActivationDoesNotPoisonState - gRPC 拒绝响应与 HTTP 共用无信封不落盘语义。
+func TestGRPCRejectedActivationDoesNotPoisonState(t *testing.T) {
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	licencev1.RegisterLicenseRuntimeServiceServer(server, rejectingRuntimeLicenseServer{})
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+	dir := t.TempDir()
+	options := Options{
+		ServerURL: "grpc://" + listener.Addr().String(), LicenseNo: "LIC-2026-000123", Salt: "test-salt",
+		PublicKeys: map[string]string{"license-key-2026-01": "unused-for-rejected-activation"},
+		StorageDir: dir, Fingerprint: "test-fingerprint", HTTPTimeout: time.Second,
+		Transport: TransportGRPC, GRPC: GRPCOptions{AllowInsecure: true},
+	}
+
+	first, err := New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+	if err = first.Start(t.Context()); err == nil || err.Error() != "激活被拒绝："+StatusExpired {
+		t.Fatalf("gRPC 首次激活应返回业务拒绝，实际: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("gRPC 激活被拒绝不应保留无信封状态文件: %v", entries)
+	}
+
+	second, err := New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	if err = second.Start(t.Context()); err == nil || err.Error() != "激活被拒绝："+StatusExpired {
+		t.Fatalf("gRPC 重启后应继续返回业务拒绝，实际: %v", err)
+	}
 }
 
 // TestGRPCRuntimeTransportSubscribeEvents - gRPC 服务端流订阅：收集事件 + metadata 签名齐全 + 非放行态错误归一

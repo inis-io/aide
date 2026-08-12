@@ -157,10 +157,10 @@ func newFakePlatform(t *testing.T) *fakePlatform {
 	platform := &fakePlatform{
 		seed: seed, publicKey: hex.EncodeToString(publicKey),
 		validUntil: "", graceDays: 7, version: 1,
-		features: map[string]bool{"report.advanced": true, "ai.chat": false},
-		limits:   map[string]int64{"max_users": 100},
-		tenants:        make(map[string]fakeTenant),
-		configs:        make(map[string]ConfigItem),
+		features:        map[string]bool{"report.advanced": true, "ai.chat": false},
+		limits:          map[string]int64{"max_users": 100},
+		tenants:         make(map[string]fakeTenant),
+		configs:         make(map[string]ConfigItem),
 		platformConfigs: make(map[string]PlatformConfigItem),
 	}
 	releaseSeed, releasePublicKey, err := generateKeyPair()
@@ -764,6 +764,69 @@ func TestClientResumeWithoutReactivate(t *testing.T) {
 	}
 	if second.Status() != StatusValid {
 		t.Fatalf("恢复后状态应为 VALID，实际 %s", second.Status())
+	}
+}
+
+// TestClientRejectedActivationDoesNotPoisonState - 首次激活被拒绝不得落盘缺失信封的半成品状态。
+func TestClientRejectedActivationDoesNotPoisonState(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	platform.mu.Lock()
+	platform.validUntil = time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	platform.mu.Unlock()
+	dir := t.TempDir()
+
+	first, err := New(testOptions(platform, dir))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = first.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "激活被拒绝："+StatusExpired) {
+		t.Fatalf("首次激活应返回业务拒绝，实际: %v", err)
+	}
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("读取状态目录失败: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("激活被拒绝不应保留无信封状态文件: %v", entries)
+	}
+
+	second, err := New(testOptions(platform, dir))
+	if err != nil {
+		t.Fatalf("第二次 New 失败: %v", err)
+	}
+	if err = second.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "激活被拒绝："+StatusExpired) {
+		t.Fatalf("重启后应继续返回业务拒绝而非状态解析错误，实际: %v", err)
+	}
+}
+
+// TestClientHealsLegacyEnvelopeLessState - 升级后自动清理旧版本已落盘的无信封毒状态。
+func TestClientHealsLegacyEnvelopeLessState(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	dir := t.TempDir()
+	legacy, err := New(testOptions(platform, dir))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	raw, err := json.Marshal(runtimeState{Status: StatusExpired, ClientSeed: "legacy-incomplete-seed"})
+	if err != nil {
+		t.Fatalf("构造旧状态失败: %v", err)
+	}
+	if err = legacy.store.Save(raw); err != nil {
+		t.Fatalf("写入旧状态失败: %v", err)
+	}
+
+	restored, err := New(testOptions(platform, dir))
+	if err != nil {
+		t.Fatalf("重启 New 失败: %v", err)
+	}
+	if err = restored.Start(t.Context()); err != nil {
+		t.Fatalf("旧毒状态应自愈并重新激活，实际: %v", err)
+	}
+	defer restored.Stop()
+	if restored.Status() != StatusValid {
+		t.Fatalf("自愈后应重新激活为 VALID，实际: %s", restored.Status())
 	}
 }
 

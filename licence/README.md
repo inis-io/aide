@@ -350,7 +350,7 @@ licence.Options{
 ```
 
 **Q：状态存哪？安全吗？**
-`StorageDir`（默认 `./runtime/licence`）下的 `licence-<licenseNo>.state`，AES-256-GCM 加密（密钥派生自盐+指纹），权限 0600。token、私钥、信封都在里面。想接系统密钥库（DPAPI/Keychain/keyring）就实现 `licence.Store` 接口注入。
+`StorageDir`（默认 `./runtime/licence`）下的 `licence-<licenseNo>.state`，AES-256-GCM 加密（密钥派生自盐+指纹），权限 0600。token、私钥、信封都在里面。SDK 只有在拿到并验签完整许可证信封后才会落盘；首次激活被拒绝不保存半成品状态，升级时遇到旧版无信封状态会自动清理并重新激活。想接系统密钥库（DPAPI/Keychain/keyring）就实现 `licence.Store` 接口注入。
 
 **Q：平台轮换密钥了怎么办？**
 `PublicKeys`/`ReleasePublicKeys` 是 map，把新旧公钥都放进去即可平滑过渡（SDK 按载荷 `keyVersion` 自动选钥）。
@@ -607,6 +607,7 @@ type Options struct {
 - 断网/平台故障自动按本地缓存信封降级运行（宽限内 `GRACE`，耗尽 `EXPIRED`）；
 - 许可证被续期/调整权益后新信封自动下发、验签、替换缓存；
 - `validate` 返回 `EXPIRED` 时自动清除本地凭证并尝试重新激活。
+- 首次激活被拒绝时不落盘无信封状态；启动时检测到旧版残留的无信封状态会按未激活自愈。
 
 ### 17.3 业务闸门方法
 

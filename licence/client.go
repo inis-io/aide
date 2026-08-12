@@ -1,6 +1,7 @@
 package licence
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -414,6 +415,12 @@ func (this *Client) restore() error {
 	if err = json.Unmarshal(raw, &state); err != nil {
 		return err
 	}
+	// 旧版本在首次激活被拒绝时曾落盘不含信封的半成品状态。
+	// 该状态不具备离线恢复价值，按未激活处理并清理，避免解析空信封卡死启动。
+	rawEnvelope := bytes.TrimSpace(state.Envelope)
+	if len(rawEnvelope) == 0 || bytes.Equal(rawEnvelope, []byte("null")) {
+		return this.store.Clear()
+	}
 
 	envelope, rawPayload, err := ParseEnvelope(state.Envelope)
 	if err != nil {
@@ -444,6 +451,13 @@ func (this *Client) restore() error {
 func (this *Client) persist() {
 
 	this.mu.RLock()
+	if len(this.state.Envelope) == 0 || this.envelope.Payload.LicenseId == "" {
+		this.mu.RUnlock()
+		// 只有已验签的完整信封才能成为可恢复状态。
+		// 首次激活被拒绝时不保存 token/客户端私钥等半成品数据。
+		_ = this.store.Clear()
+		return
+	}
 	raw, err := json.Marshal(this.state)
 	this.mu.RUnlock()
 	if err == nil {
