@@ -1,7 +1,8 @@
 // Package cachex - 缓存包：以接口模式封装文件、Redis 等缓存能力
 //
 // 设计要点：
-//   - Store 是唯一扩展点：新后端只需实现 Has/Get/Set/Delete/Clear 五个方法
+//   - Store 是唯一扩展点：新后端实现 Has/Get/Set/Delete/Clear 五个读写方法，
+//     以及 Incr/SetNX/TTL 三个原子方法（计数、占位、存活查询）
 //   - 内置驱动在注册表变量初始化时登记（不依赖文件 init 顺序）；外部驱动在自己包内
 //     通过 init() + Register 注册，同名注册会覆盖先注册者（可借此替换内置实现）
 //   - 扩展驱动的自定义配置通过 Config.Options 传入（key 为驱动名）
@@ -27,7 +28,9 @@ import (
 //
 // 约定：键由 Driver 层命名（前缀 + Hash），驱动按原名持久化；
 // Set 的 value 须可 JSON 序列化，expired <= 0 表示永不过期；
-// 返回值 bool 仅表示操作是否成功，Get 未命中返回 nil。
+// Get 未命中返回 nil；读写方法以 bool 表示成功与否；
+// 原子方法（Incr/SetNX/TTL）返回 error，调用方可据此区分"未命中"与"后端故障"
+//（安全限流等 fail-closed 场景必须感知故障，不得静默放行）。
 type Store interface {
 	// Has - 判断缓存是否存在（过期视为不存在）
 	Has(key string) (ok bool)
@@ -39,6 +42,12 @@ type Store interface {
 	Delete(key ...string) (ok bool)
 	// Clear - 清空缓存
 	Clear() (ok bool)
+	// Incr - 原子自增 1（仅当自增结果为 1 时写入过期时间，实现固定窗口计数语义；expired <= 0 表示永不过期）
+	Incr(key string, expired time.Duration) (count int64, err error)
+	// SetNX - 仅当键不存在时设置（已存在不覆盖、不续期；expired <= 0 表示永不过期）
+	SetNX(key string, value any, expired time.Duration) (ok bool, err error)
+	// TTL - 剩余存活秒数（>0 有效；0 = 不存在或已过期；-1 = 存在但永不过期）
+	TTL(key string) (seconds int64, err error)
 }
 
 // Factory - 驱动工厂：按配置构建驱动实例（传入的 Config 已归一化）
@@ -250,6 +259,50 @@ func (this Driver) Clear() (ok bool) {
 	return this.store.Clear()
 }
 
+// Incr - 原子自增 1（固定窗口计数：仅首次自增写入过期时间，过期时间取链式 Expired；不参与标签簿记）
+/**
+ * @param key string - 缓存键
+ * @return count int64 - 自增后的值
+ * @return err error - 后端故障时返回错误（调用方可据此 fail-closed）
+ * @example：
+ * 	count, err := cachex.Cache.Expired(10 * time.Minute).Incr("sms:sign-code:count")
+ */
+func (this Driver) Incr(key string) (count int64, err error) {
+	if this.store == nil || utils.Is.Empty(key) {
+		return 0, fmt.Errorf("cachex: store 未初始化或键为空")
+	}
+	return this.store.Incr(this.name(key), this.expired)
+}
+
+// SetNX - 仅当键不存在时设置（已存在不覆盖、不续期；过期时间取链式 Expired；不参与标签簿记）
+/**
+ * @param key   string - 缓存键
+ * @param value any    - 缓存值（须可 JSON 序列化）
+ * @return ok  bool   - 本次是否真正写入（false 表示键已存在）
+ * @return err error  - 后端故障时返回错误
+ * @example：
+ * 	ok, err := cachex.Cache.Expired(30 * time.Minute).SetNX("sms:block", 1)
+ */
+func (this Driver) SetNX(key string, value any) (ok bool, err error) {
+	if this.store == nil || utils.Is.Empty(key) {
+		return false, fmt.Errorf("cachex: store 未初始化或键为空")
+	}
+	return this.store.SetNX(this.name(key), value, this.expired)
+}
+
+// TTL - 剩余存活秒数（>0 有效；0 = 不存在或已过期；-1 = 存在但永不过期）
+/**
+ * @param key string - 缓存键
+ * @example：
+ * 	seconds, err := cachex.Cache.TTL("sms:block")
+ */
+func (this Driver) TTL(key string) (seconds int64, err error) {
+	if this.store == nil || utils.Is.Empty(key) {
+		return 0, fmt.Errorf("cachex: store 未初始化或键为空")
+	}
+	return this.store.TTL(this.name(key))
+}
+
 // name - 缓存键命名规则：前缀 + key 的 MD5 前 16 位（64 位，碰撞概率远低于旧的 32 位哈希）
 // 注意：与 Sum32 时代的旧键不兼容，旧键随默认过期时间自然淘汰
 func (this Driver) name(key string) string {
@@ -353,6 +406,15 @@ func (this storeError) Delete(...string) bool { return false }
 
 // Clear - 占位实现，返回 false
 func (this storeError) Clear() bool { return false }
+
+// Incr - 占位实现，返回初始化错误
+func (this storeError) Incr(string, time.Duration) (int64, error) { return 0, this.err }
+
+// SetNX - 占位实现，返回初始化错误
+func (this storeError) SetNX(string, any, time.Duration) (bool, error) { return false, this.err }
+
+// TTL - 占位实现，返回初始化错误
+func (this storeError) TTL(string) (int64, error) { return 0, this.err }
 
 // 编译期接口校验
 var _ Store = storeError{}

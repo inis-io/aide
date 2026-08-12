@@ -1,11 +1,14 @@
 package cachex
 
 import (
+	"fmt"
 	"path"
+	"sync"
 	"time"
 
 	"github.com/inis-io/aide/utils"
 	"github.com/spf13/afero"
+	"github.com/spf13/cast"
 )
 
 // ================================== 文件缓存 - 开始 ==================================
@@ -16,6 +19,8 @@ type FileStore struct {
 	Fs afero.Fs
 	// 配置
 	Config FileConfig
+	// 原子方法（Incr/SetNX）的进程内互斥锁：读-改-写串行化，文件缓存本就是单机兜底场景
+	mu sync.Mutex
 }
 
 // newFileStore - 文件缓存驱动工厂
@@ -50,30 +55,92 @@ func (this *FileStore) Set(key string, value any, expired time.Duration) (ok boo
 	// 创建存储目录
 	_ = this.Fs.MkdirAll(this.Config.Root, 0755)
 
-	// 过期时间戳，永不过期按一百年计
+	data := utils.Json.Encode(fileBody{Expired: this.expiredAt(expired), Value: value})
+	return this.write(this.dest(key), []byte(data)) == nil
+}
+
+// Incr - 原子自增 1（读-改-写在互斥锁内串行；仅当自增结果为 1 时写入过期时间）
+func (this *FileStore) Incr(key string, expired time.Duration) (count int64, err error) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	dest := this.dest(key)
+	row, readErr := this.read(dest)
+
+	// 已存在且未过期：保留原过期时间戳，仅累加计数
+	if readErr == nil && row.Expired >= time.Now().Unix() {
+		count = cast.ToInt64(row.Value) + 1
+		row.Value = count
+	} else {
+		// 不存在或已过期：从 1 重新计数并写入过期时间
+		count = 1
+		row = fileBody{Expired: this.expiredAt(expired), Value: count}
+	}
+
+	if err = this.write(dest, []byte(utils.Json.Encode(row))); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// SetNX - 仅当键不存在时设置（已存在不覆盖、不续期）
+func (this *FileStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	if this.get(key) != nil {
+		return false, nil
+	}
+	if !this.Set(key, value, expired) {
+		return false, fmt.Errorf("cachex: SetNX 写入失败")
+	}
+	return true, nil
+}
+
+// TTL - 剩余存活秒数（>0 有效；0 = 不存在或已过期；-1 = 存在但永不过期）
+func (this *FileStore) TTL(key string) (seconds int64, err error) {
+
+	row, readErr := this.read(this.dest(key))
+	if readErr != nil {
+		return 0, nil
+	}
+	// 永不过期按一百年写入，回读时还原为 -1 语义
+	if row.Expired >= time.Now().AddDate(99, 0, 0).Unix() {
+		return -1, nil
+	}
+	if seconds = row.Expired - time.Now().Unix(); seconds < 0 {
+		seconds = 0
+	}
+	return seconds, nil
+}
+
+// expiredAt - 过期时间戳（expired <= 0 表示永不过期，按一百年计）
+func (this *FileStore) expiredAt(expired time.Duration) int64 {
 	at := time.Now().AddDate(100, 0, 0)
 	if expired > 0 {
 		at = time.Now().Add(expired)
 	}
+	return at.Unix()
+}
 
-	data := utils.Json.Encode(fileBody{Expired: at.Unix(), Value: value})
+// write - 写入缓存文件：先写临时文件再改名，避免写入中途崩溃留下半个文件
+func (this *FileStore) write(dest string, data []byte) (err error) {
 
-	// 先写临时文件再改名，避免写入中途崩溃留下半个文件
-	dest := this.dest(key)
 	temp := dest + ".tmp"
-	if err := afero.WriteFile(this.Fs, temp, []byte(data), 0755); err != nil {
-		return false
+	if err = afero.WriteFile(this.Fs, temp, data, 0755); err != nil {
+		return err
 	}
-	if err := this.Fs.Rename(temp, dest); err != nil {
+	if err = this.Fs.Rename(temp, dest); err != nil {
 		// Windows 下 Rename 不允许覆盖已存在文件，删除目标后重试
 		_ = this.Fs.RemoveAll(dest)
 		if err = this.Fs.Rename(temp, dest); err != nil {
 			_ = this.Fs.RemoveAll(temp)
-			return false
+			return err
 		}
 	}
-
-	return true
+	return nil
 }
 
 // Delete - 删除缓存

@@ -115,6 +115,49 @@ func (this *RedisStore) Clear() (ok bool) {
 	return true
 }
 
+// incrScript - 自增脚本：仅当自增结果为 1 时写入过期时间（固定窗口语义），Lua 保证原子性
+var incrScript = redis.NewScript(`
+local c = redis.call('INCR', KEYS[1])
+if c == 1 and tonumber(ARGV[1]) > 0 then
+	redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+end
+return c
+`)
+
+// Incr - 原子自增 1（仅当自增结果为 1 时写入过期时间；expired <= 0 表示永不过期）
+func (this *RedisStore) Incr(key string, expired time.Duration) (count int64, err error) {
+	ctx := context.Background()
+	return incrScript.Run(ctx, this.Client, []string{key}, int64(expired/time.Second)).Int64()
+}
+
+// SetNX - 仅当键不存在时设置（已存在不覆盖、不续期；expired <= 0 表示永不过期）
+func (this *RedisStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
+	ctx := context.Background()
+	// go-redis 以 0 表示永不过期
+	if expired < 0 {
+		expired = 0
+	}
+	return this.Client.SetNX(ctx, key, utils.Json.Encode(value), expired).Result()
+}
+
+// TTL - 剩余存活秒数（>0 有效；0 = 不存在或已过期；-1 = 存在但永不过期）
+func (this *RedisStore) TTL(key string) (seconds int64, err error) {
+	ctx := context.Background()
+	ttl, err := this.Client.TTL(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	// go-redis 特殊值（原始纳秒，不乘精度）：-2 表示键不存在，-1 表示存在但无过期时间
+	switch ttl {
+	case -2:
+		return 0, nil
+	case -1:
+		return -1, nil
+	default:
+		return int64(ttl / time.Second), nil
+	}
+}
+
 // 编译期接口校验
 var _ Store = (*RedisStore)(nil)
 

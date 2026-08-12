@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/afero"
 	"github.com/spf13/cast"
 )
@@ -60,6 +62,40 @@ func (this *fakeStore) Delete(key ...string) bool {
 func (this *fakeStore) Clear() bool {
 	this.items = map[string]fakeItem{}
 	return true
+}
+
+// Incr - 原子自增 1（测试实现：仅首次写入记录过期时间）
+func (this *fakeStore) Incr(key string, expired time.Duration) (int64, error) {
+	item, ok := this.items[key]
+	if !ok {
+		this.items[key] = fakeItem{value: int64(1), expired: expired}
+		return 1, nil
+	}
+	count := cast.ToInt64(item.value) + 1
+	item.value = count
+	this.items[key] = item
+	return count, nil
+}
+
+// SetNX - 仅当键不存在时设置（测试实现）
+func (this *fakeStore) SetNX(key string, value any, expired time.Duration) (bool, error) {
+	if _, ok := this.items[key]; ok {
+		return false, nil
+	}
+	this.items[key] = fakeItem{value: value, expired: expired}
+	return true, nil
+}
+
+// TTL - 剩余存活秒数（测试实现：不存在返回 0，永不过期返回 -1）
+func (this *fakeStore) TTL(key string) (int64, error) {
+	item, ok := this.items[key]
+	if !ok {
+		return 0, nil
+	}
+	if item.expired <= 0 {
+		return -1, nil
+	}
+	return int64(item.expired / time.Second), nil
 }
 
 // registerFake - 注册一个测试驱动并返回其实例（同名覆盖，互不影响）
@@ -360,6 +396,17 @@ func TestStoreError(t *testing.T) {
 		t.Fatal("初始化失败的驱动应所有操作返回失败")
 	}
 
+	// 原子方法应返回初始化错误（fail-closed 场景依赖该错误感知后端故障）
+	if _, err := Cache.Incr("x"); err == nil {
+		t.Fatal("初始化失败的驱动 Incr 应返回错误")
+	}
+	if _, err := Cache.SetNX("x", 1); err == nil {
+		t.Fatal("初始化失败的驱动 SetNX 应返回错误")
+	}
+	if _, err := Cache.TTL("x"); err == nil {
+		t.Fatal("初始化失败的驱动 TTL 应返回错误")
+	}
+
 	inst.HasConfig = false
 	inst.useDefault()
 }
@@ -395,5 +442,185 @@ func TestDriverTagsConcurrent(t *testing.T) {
 	}
 	if store.Get("AIDE-TAG-USER") != nil || store.Has(driver.name("k0")) {
 		t.Fatal("按标签删除后成员与标签列表应已清除")
+	}
+}
+
+
+// TestDriverIncrSetNxTtl - 验证链式实例的原子方法：自增序列、过期时间透传、占位不覆盖、存活查询、空驱动返回错误
+func TestDriverIncrSetNxTtl(t *testing.T) {
+
+	fake := registerFake("mock")
+	driver := NewDriver(fake, "TEST", time.Minute)
+
+	// 自增序列与过期时间透传（仅首次写入记录）
+	for want := int64(1); want <= 3; want++ {
+		count, err := driver.Incr("counter")
+		if err != nil || count != want {
+			t.Fatalf("自增应为 %d，实际: %d, err=%v", want, count, err)
+		}
+	}
+	if item := fake.items[driver.name("counter")]; item.expired != time.Minute {
+		t.Fatalf("链式过期时间应透传到 Incr，实际: %v", item.expired)
+	}
+
+	// SetNX：已存在不覆盖，不存在则写入
+	if ok, _ := driver.SetNX("counter", 99); ok {
+		t.Fatal("键已存在时 SetNX 应返回 false")
+	}
+	if got := cast.ToInt64(fake.items[driver.name("counter")].value); got != 3 {
+		t.Fatalf("SetNX 不应覆盖已有值，实际: %d", got)
+	}
+	if ok, _ := driver.SetNX("fresh", 1); !ok {
+		t.Fatal("键不存在时 SetNX 应返回 true")
+	}
+
+	// TTL：有窗口返回剩余秒，永不过期返回 -1，不存在返回 0
+	if seconds, _ := driver.TTL("counter"); seconds != 60 {
+		t.Fatalf("TTL 应返回窗口秒数，实际: %d", seconds)
+	}
+	forever := NewDriver(fake, "TEST", 0)
+	if _, err := forever.SetNX("forever", 1); err != nil {
+		t.Fatal(err)
+	}
+	if seconds, _ := forever.TTL("forever"); seconds != -1 {
+		t.Fatalf("永不过期的键 TTL 应为 -1，实际: %d", seconds)
+	}
+	if seconds, _ := driver.TTL("missing"); seconds != 0 {
+		t.Fatalf("不存在的键 TTL 应为 0，实际: %d", seconds)
+	}
+
+	// 底层驱动为 nil 时应返回错误
+	var empty Driver
+	if _, err := empty.Incr("x"); err == nil {
+		t.Fatal("底层驱动为空时 Incr 应返回错误")
+	}
+	if _, err := empty.SetNX("x", 1); err == nil {
+		t.Fatal("底层驱动为空时 SetNX 应返回错误")
+	}
+	if _, err := empty.TTL("x"); err == nil {
+		t.Fatal("底层驱动为空时 TTL 应返回错误")
+	}
+}
+
+// TestFileStoreAtomic - 验证文件驱动的原子方法：固定窗口自增、过期时间保留、SetNX、TTL 映射、过期重计
+func TestFileStoreAtomic(t *testing.T) {
+
+	store := &FileStore{Fs: afero.NewMemMapFs(), Config: FileConfig{Root: "cache", Suffix: "json"}}
+
+	// 固定窗口：首次自增写入过期时间，后续自增保留原时间戳
+	if count, _ := store.Incr("c", 10*time.Minute); count != 1 {
+		t.Fatalf("首次自增应为 1，实际: %d", count)
+	}
+	row, _ := store.read(store.dest("c"))
+	if count, _ := store.Incr("c", time.Hour); count != 2 {
+		t.Fatalf("第二次自增应为 2，实际: %d", count)
+	}
+	row2, _ := store.read(store.dest("c"))
+	if row.Expired != row2.Expired {
+		t.Fatalf("后续自增不应改写过期时间戳: %d → %d", row.Expired, row2.Expired)
+	}
+
+	// TTL：窗口内返回剩余秒（秒级精度，容差 2 秒），永不过期返回 -1，不存在返回 0
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("TTL 应接近 600 秒，实际: %d", seconds)
+	}
+	store.Set("f", "v", 0)
+	if seconds, _ := store.TTL("f"); seconds != -1 {
+		t.Fatalf("永不过期的键 TTL 应为 -1，实际: %d", seconds)
+	}
+	if seconds, _ := store.TTL("none"); seconds != 0 {
+		t.Fatalf("不存在的键 TTL 应为 0，实际: %d", seconds)
+	}
+
+	// SetNX：已存在不覆盖，不存在则写入
+	if ok, _ := store.SetNX("c", 99, time.Minute); ok {
+		t.Fatal("键已存在时 SetNX 应返回 false")
+	}
+	if count, _ := store.Incr("c", 0); count != 3 {
+		t.Fatalf("SetNX 不应覆盖已有值，实际计数: %d", count)
+	}
+	if ok, _ := store.SetNX("n", 1, time.Minute); !ok {
+		t.Fatal("键不存在时 SetNX 应返回 true")
+	}
+
+	// 窗口过期后从 1 重新计数（落盘为秒级时间戳，等待需越过秒边界）
+	if _, err := store.Incr("e", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2100 * time.Millisecond)
+	if count, _ := store.Incr("e", 10*time.Minute); count != 1 {
+		t.Fatalf("窗口过期后应重新从 1 计数，实际: %d", count)
+	}
+}
+
+// TestFileStoreIncrConcurrent - 验证并发自增计数准确（互斥锁回归测试）
+func TestFileStoreIncrConcurrent(t *testing.T) {
+
+	store := &FileStore{Fs: afero.NewMemMapFs(), Config: FileConfig{Root: "cache", Suffix: "json"}}
+
+	const goroutines = 50
+	const each = 4
+	var group sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.Incr("c", 10*time.Minute); err != nil {
+					t.Errorf("并发自增失败: %v", err)
+				}
+			}
+		}()
+	}
+	group.Wait()
+
+	count, _ := store.Incr("c", 0)
+	if want := int64(goroutines*each + 1); count != want {
+		t.Fatalf("并发自增计数应准确为 %d，实际: %d", want, count)
+	}
+}
+
+// TestRedisStoreAtomic - 验证 Redis 驱动的原子方法（miniredis 进程内实例，不触网；Incr 走 Lua 脚本路径）
+func TestRedisStoreAtomic(t *testing.T) {
+
+	server := miniredis.RunT(t)
+
+	store := &RedisStore{
+		Client: redis.NewClient(&redis.Options{Addr: server.Addr()}),
+		Config: RedisConfig{Host: "127.0.0.1", Port: cast.ToInt(server.Port())},
+	}
+
+	// 自增序列（Lua 脚本原子执行）
+	for want := int64(1); want <= 3; want++ {
+		count, err := store.Incr("c", 10*time.Minute)
+		if err != nil || count != want {
+			t.Fatalf("自增应为 %d，实际: %d, err=%v", want, count, err)
+		}
+	}
+	// 首次自增已写入过期时间
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("TTL 应接近 600 秒，实际: %d", seconds)
+	}
+	// 永不过期返回 -1
+	if _, err := store.Incr("f", 0); err != nil {
+		t.Fatal(err)
+	}
+	if seconds, _ := store.TTL("f"); seconds != -1 {
+		t.Fatalf("永不过期的键 TTL 应为 -1，实际: %d", seconds)
+	}
+	// 不存在返回 0
+	if seconds, _ := store.TTL("none"); seconds != 0 {
+		t.Fatalf("不存在的键 TTL 应为 0，实际: %d", seconds)
+	}
+
+	// SetNX：已存在不覆盖、不续期，不存在则写入
+	if ok, _ := store.SetNX("c", 99, time.Hour); ok {
+		t.Fatal("键已存在时 SetNX 应返回 false")
+	}
+	if got := cast.ToInt64(store.Get("c")); got != 3 {
+		t.Fatalf("SetNX 不应覆盖已有值，实际: %d", got)
+	}
+	if ok, _ := store.SetNX("n", 1, 10*time.Minute); !ok {
+		t.Fatal("键不存在时 SetNX 应返回 true")
 	}
 }

@@ -5,7 +5,8 @@
 
 ## 1. 特性
 
-- **接口模式**：`Store` 接口是唯一扩展点（仅 5 个方法），新后端实现即可接入
+- **接口模式**：`Store` 接口是唯一扩展点（5 个读写方法 + 3 个原子方法），新后端实现即可接入
+- **原子原语**：`Incr`（固定窗口自增）/ `SetNX`（占位不续期）/ `TTL`（存活查询），返回 `error` 可判别后端故障，支撑安全限流等 fail-closed 场景
 - **内置驱动**：`file`（本地文件，零依赖开箱即用）、`redis`（go-redis）
 - **链式调用**：值语义，每次调用返回副本，并发安全，天然隔离上下文
 - **标签分组**：`Tag` 簿记成员、`Delete` 按标签整组清除，簿记收敛在 Driver 层，新后端免费获得
@@ -94,6 +95,9 @@ cachex.Cache.Key("goods:9:price").Tag("user").Delete()
 | `Set(key, value)` | 设置缓存（value 须可 JSON 序列化） |
 | `Delete(key ...string)` | 删除缓存（实参键 + 链式累积键 + 各标签成员） |
 | `Clear()` | 清空缓存（redis 按前缀扫描删除，前缀为空回退 `FlushDB`） |
+| `Incr(key)` | 原子自增 1（固定窗口计数：仅首次自增写入链式 `Expired` 指定的过期时间；返回 `(count, err)`，不参与标签簿记） |
+| `SetNX(key, value)` | 仅当键不存在时设置（已存在不覆盖、不续期；返回 `(ok, err)`，不参与标签簿记） |
+| `TTL(key)` | 剩余存活秒数（返回 `(seconds, err)`：`>0` 有效、`0` 不存在或已过期、`-1` 存在但永不过期） |
 | `Store()` | 取出底层驱动（供类型断言访问驱动特有方法） |
 
 键命名规则：`前缀-MD5前16位(key)`（64 位哈希，碰撞概率极低），驱动按原名持久化。
@@ -151,6 +155,21 @@ func (this store) Delete(key ...string) bool {
 	return true
 }
 func (this store) Clear() bool { clear(this.items); return true }
+func (this store) Incr(key string, expired time.Duration) (int64, error) {
+	count, _ := this.items[key].(int64)
+	count++
+	this.items[key] = count // 示例从简：生产实现需仅在首次自增（count == 1）时写入过期时间
+	return count, nil
+}
+func (this store) SetNX(key string, value any, expired time.Duration) (bool, error) {
+	if _, ok := this.items[key]; ok { return false, nil }
+	this.items[key] = value
+	return true, nil
+}
+func (this store) TTL(key string) (int64, error) {
+	if _, ok := this.items[key]; !ok { return 0, nil }
+	return -1, nil // 示例从简：一律按永不过期处理
+}
 
 func newStore(config cachex.Config) (cachex.Store, error) {
 	// 自定义配置从 config.Options["memory"] 读取
@@ -167,6 +186,7 @@ func init() {
 - 键由 Driver 层命名（前缀 + 哈希），驱动按原名持久化，不要自行再加工
 - `Set` 的 value 须可 JSON 序列化，`expired <= 0` 表示永不过期
 - `Get` 未命中或已过期返回 `nil`；返回值 `bool` 仅表示操作是否成功
+- 原子方法 `Incr` / `SetNX` / `TTL` 返回 `error` 暴露后端故障（fail-closed 调用方依赖该错误判别）；`Incr` 仅在自增结果为 1 时写入过期时间（固定窗口语义）；`TTL` 约定 `>0` 有效、`0` 不存在或已过期、`-1` 永不过期
 
 注册后：`cachex.New("memory", config)` 可用；`Config.Engine` 填 `"memory"` 即可接入全局门面。
 

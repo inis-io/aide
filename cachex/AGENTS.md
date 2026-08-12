@@ -20,9 +20,9 @@
 
 ## 核心约定
 
-- **`Store` 接口是唯一扩展点**：只含 `Has` / `Get` / `Set(key, value, expired)` / `Delete` / `Clear` 五个方法。内置驱动在 `cachex.go` 的 `registry` 变量初始化时登记；外部驱动在自己包内 `init()` 中 `Register("名称", 工厂)` 注册，同名覆盖。新增内置驱动：新建文件实现 `Store`，并在 `registry` 登记一行。
-- **`Store` 契约**：键由 Driver 层命名（`前缀-MD5前16位(key)`），驱动按原名持久化；`Set` 的 value 须可 JSON 序列化，**`expired <= 0` 表示永不过期**；`Get` 未命中或已过期返回 `nil`。
-- **`Driver` 链式包装**（`Tag` / `Key` / `Expired` / `Has` / `Get` / `Set` / `Delete` / `Clear`），**值语义**：每次链式调用返回副本。**标签簿记统一收敛在 Driver 层**（成员列表永不过期；读-改-写带键控锁），后端不感知标签。
+- **`Store` 接口是唯一扩展点**：`Has` / `Get` / `Set(key, value, expired)` / `Delete` / `Clear` 五个读写方法，外加 `Incr(key, expired)` / `SetNX(key, value, expired)` / `TTL(key)` 三个原子方法（计数、占位、存活查询，支撑安全限流等场景）。内置驱动在 `cachex.go` 的 `registry` 变量初始化时登记；外部驱动在自己包内 `init()` 中 `Register("名称", 工厂)` 注册，同名覆盖。新增内置驱动：新建文件实现 `Store`，并在 `registry` 登记一行。
+- **`Store` 契约**：键由 Driver 层命名（`前缀-MD5前16位(key)`），驱动按原名持久化；`Set` 的 value 须可 JSON 序列化，**`expired <= 0` 表示永不过期**；`Get` 未命中或已过期返回 `nil`；读写方法以 `bool` 表示成功与否；**原子方法返回 `error` 暴露后端故障**（fail-closed 调用方依赖该错误，不得静默吞掉）；`Incr` 仅在自增结果为 1 时写入过期时间（固定窗口语义，redis 用 Lua 保证原子，file 用进程内互斥锁）；`TTL` 约定 `>0` 有效、`0` 不存在或已过期、`-1` 永不过期（file 以"一百年时间戳"哨兵还原 -1）。
+- **`Driver` 链式包装**（`Tag` / `Key` / `Expired` / `Has` / `Get` / `Set` / `Delete` / `Clear` / `Incr` / `SetNX` / `TTL`），**值语义**：每次链式调用返回副本。**标签簿记统一收敛在 Driver 层**（成员列表永不过期；读-改-写带键控锁），后端不感知标签；`Incr`/`SetNX` 不参与标签簿记。
 - **配置自包含**：`cachex.Config`（含 `file` / `redis` 两组内置驱动配置，外部扩展配置放 `Config.Options`）；`normConfig()` 补齐默认值（引擎未注册回退 `file`，默认前缀 `AIDE`、默认过期 7200 秒）；`defaultContext()` 按引擎取对应分段的前缀与过期时间。
 - **全局门面**：控制器单例 `cachex.Inst`（`Init` / `ReloadIfChanged`，`sync.RWMutex` 保护）+ 全局实例 `cachex.Cache`。驱动初始化失败时全局位用 `storeError` 占位，所有操作返回失败。
 
@@ -33,7 +33,7 @@
 ## 测试约定
 
 - 测试与源码同包同目录，标准库 `testing`，**禁止联网**（Redis 用 miniredis）；文件驱动用 `afero.NewMemMapFs` 实测。
-- 现有覆盖：注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动实测、控制器热重载。
+- 现有覆盖：注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动实测、控制器热重载、原子方法（Driver 透传与 nil 驱动报错、file 固定窗口/过期保留/并发自增、redis 经 miniredis 实测 Lua 自增/SetNX/TTL）、storeError 原子方法错误透传。
 
 ## 构建与测试命令
 
