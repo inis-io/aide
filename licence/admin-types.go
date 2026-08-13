@@ -1056,7 +1056,7 @@ type ReleaseResult struct {
 // ============================= SaaS 菜单清单 =============================
 
 // SaasMenuManifest - SaaS 应用菜单清单（平台 models/basic.SaasMenuManifest）
-// 项目级版本化清单：projectId + version 联合唯一；每个项目同一时刻仅一条 published。
+// 项目级双轨版本化清单：projectId + menuKind + version 联合唯一。
 type SaasMenuManifest struct {
 	// Id - 清单ID
 	Id int `json:"id"`
@@ -1064,6 +1064,8 @@ type SaasMenuManifest struct {
 	ProjectId int `json:"projectId"`
 	// UserId - 归属用户ID（冗余自项目）
 	UserId int `json:"userId"`
+	// MenuKind - 菜单轨（platform/tenant）
+	MenuKind string `json:"menuKind"`
 	// Version - 清单版本号（项目内递增）
 	Version int `json:"version"`
 	// Manifest - 清单原文（JSON 字符串，结构见平台 types.SaasManifest）
@@ -1092,6 +1094,8 @@ type SaasMenuFindParams struct {
 	Limit int `json:"limit,omitempty"`
 	// ProjectId - 项目ID
 	ProjectId int `json:"projectId,omitempty"`
+	// MenuKind - 菜单轨（必填）
+	MenuKind string `json:"menuKind"`
 	// Status - 清单状态（draft/published/archived）
 	Status string `json:"status,omitempty"`
 }
@@ -1103,6 +1107,8 @@ type SaasMenuSaveInput struct {
 	Id int `json:"id,omitempty"`
 	// ProjectId - 项目ID（必填）
 	ProjectId int `json:"projectId"`
+	// MenuKind - 菜单轨（必填）
+	MenuKind string `json:"menuKind"`
 	// Manifest - 清单原文（JSON，草稿允许半成品，发布时才做完整结构校验）
 	Manifest string `json:"manifest"`
 	// Remark - 备注
@@ -1115,6 +1121,24 @@ type SaasMenuSaveResult struct {
 	Id int `json:"id"`
 	// Version - 清单版本号
 	Version int `json:"version"`
+	// ImpactReport - 发布租户清单时的下游影响报告
+	ImpactReport *SaasMenuImpactReport `json:"impactReport,omitempty"`
+}
+
+// SaasMenuImpactItem - 清单发布影响项。
+type SaasMenuImpactItem struct {
+	PlanId     int      `json:"planId,omitempty"`
+	PlanCode   string   `json:"planCode,omitempty"`
+	TenantId   int      `json:"tenantId,omitempty"`
+	TenantCode string   `json:"tenantCode,omitempty"`
+	StaleCodes []string `json:"staleCodes"`
+}
+
+// SaasMenuImpactReport - 租户清单发布影响报告。
+type SaasMenuImpactReport struct {
+	RemovedCodes    []string             `json:"removedCodes"`
+	AffectedPlans   []SaasMenuImpactItem `json:"affectedPlans"`
+	AffectedTenants []SaasMenuImpactItem `json:"affectedTenants"`
 }
 
 // ============================= SaaS 功能字典 =============================
@@ -1198,10 +1222,12 @@ type SaasPlan struct {
 	Features string `json:"features"`
 	// Limits - 额度（JSON map[string]int64 原文）
 	Limits string `json:"limits"`
-	// MenuCodes - 菜单编码数组（JSON 原文，当前 published 清单 code 子集）
+	// MenuCodes - 菜单编码数组（JSON 原文，当前 published 租户清单 code 子集）
 	MenuCodes string `json:"menuCodes"`
-	// ManifestVersion - 选单依据的清单版本（溯源用）
-	ManifestVersion int `json:"manifestVersion"`
+	// TenantManifestVersion - 选单依据的租户清单版本（溯源用）
+	TenantManifestVersion int `json:"tenantManifestVersion"`
+	// StaleMenuCodes - 相对当前已发布租户清单的悬空编码
+	StaleMenuCodes []string `json:"staleMenuCodes"`
 	// Status - 状态（draft/enabled/disabled；仅 enabled 可被订阅）
 	Status string `json:"status"`
 	// Sort - 排序
@@ -1232,7 +1258,7 @@ type SaasPlanFindParams struct {
 
 // SaasPlanSaveInput - 套餐新建/修改参数（平台 types.SaasPlanSave）
 // Create 时 Id 留空；Update 时 Id 必填且 planCode 须与现值一致；
-// 保存即做功能字典引用与菜单子集校验（menuCodes 须为当前 published 清单 code 子集）。
+// 保存即做功能字典引用与菜单子集校验（menuCodes 须为当前 published 租户清单 code 子集）。
 type SaasPlanSaveInput struct {
 	// Id - 套餐ID（Update 必填，Create 留空）
 	Id int `json:"id,omitempty"`
@@ -1248,7 +1274,7 @@ type SaasPlanSaveInput struct {
 	Features map[string]bool `json:"features,omitempty"`
 	// Limits - 额度
 	Limits map[string]int64 `json:"limits,omitempty"`
-	// MenuCodes - 菜单编码数组（当前 published 清单 code 子集）
+	// MenuCodes - 菜单编码数组（当前 published 租户清单 code 子集）
 	MenuCodes []string `json:"menuCodes,omitempty"`
 	// Sort - 排序
 	Sort int `json:"sort,omitempty"`
@@ -1350,10 +1376,8 @@ type SaasTenantPayloadView struct {
 	KeyVersion string `json:"keyVersion"`
 }
 
-// SaasOverrideMenus - 个性化覆盖的菜单增删结构（平台 types.SaasOverrideMenus）
+// SaasOverrideMenus - 个性化覆盖的菜单裁剪结构（平台 types.SaasOverrideMenus）
 type SaasOverrideMenus struct {
-	// Add - 新增菜单编码
-	Add []string `json:"add,omitempty"`
 	// Remove - 移除菜单编码
 	Remove []string `json:"remove,omitempty"`
 }
@@ -1364,7 +1388,7 @@ type SaasOverrides struct {
 	Features map[string]bool `json:"features,omitempty"`
 	// Limits - 额度覆盖
 	Limits map[string]int64 `json:"limits,omitempty"`
-	// Menus - 菜单增删（在套餐 menuCodes 基础上）
+	// Menus - 菜单裁剪（在套餐 menuCodes 基础上）
 	Menus SaasOverrideMenus `json:"menus,omitempty"`
 }
 
@@ -1486,6 +1510,8 @@ type SaasTenantActionInput struct {
 type SaasTenantReissueInput struct {
 	// Id - 租户ID（必填）
 	Id int `json:"id"`
+	// PlanId - 新套餐ID（0=保留原套餐）
+	PlanId int `json:"planId,omitempty"`
 	// Reason - 操作原因
 	Reason string `json:"reason,omitempty"`
 	// Environment - 环境（非空覆盖）

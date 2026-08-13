@@ -36,7 +36,7 @@ func TestEventSubscriberHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pushEvent 失败: %v", err)
 	}
-	second, err := platform.pushEvent(EventSaasPlanUpdated, map[string]any{"planCode": "pro", "manifestVersion": 2})
+	second, err := platform.pushEvent(EventSaasPlanUpdated, map[string]any{"planCode": "pro", "tenantManifestVersion": 2})
 	if err != nil {
 		t.Fatalf("pushEvent 失败: %v", err)
 	}

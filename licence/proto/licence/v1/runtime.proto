@@ -132,12 +132,15 @@ message TenantSyncItem {
 }
 
 message TenantSyncResponse {
+  reserved 4;
+  reserved "manifest";
   string status = 1;
   int64 server_time = 2;
   int64 sync_time = 3;
-  TenantManifest manifest = 4;
   repeated TenantSyncItem tenants = 5;
   string message = 6;
+  TenantManifest platform_manifest = 7;
+  TenantManifest tenant_manifest = 8;
 }
 
 message TenantValidateRequest {

@@ -21,10 +21,12 @@ func (this *SaasMenusResource) Find(ctx context.Context, params *SaasMenuFindPar
 }
 
 // Take - 菜单清单详情：GET /api/saas-menus/take?id=N
-func (this *SaasMenusResource) Take(ctx context.Context, id int) (*SaasMenuManifest, error) {
+func (this *SaasMenusResource) Take(ctx context.Context, id int, menuKind string) (*SaasMenuManifest, error) {
 
 	var result SaasMenuManifest
-	if err := this.client.getWithQuery(ctx, "/api/saas-menus/take", idQuery(id), &result); err != nil {
+	query := idQuery(id)
+	query.Set("menuKind", menuKind)
+	if err := this.client.getWithQuery(ctx, "/api/saas-menus/take", query, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -41,19 +43,19 @@ func (this *SaasMenusResource) Save(ctx context.Context, input SaasMenuSaveInput
 }
 
 // Publish - 发布清单（结构校验通过后转 published，旧 published 同事务转 archived）：POST /api/saas-menus/publish
-func (this *SaasMenusResource) Publish(ctx context.Context, id int) (*SaasMenuSaveResult, error) {
+func (this *SaasMenusResource) Publish(ctx context.Context, id int, menuKind string) (*SaasMenuSaveResult, error) {
 
 	var result SaasMenuSaveResult
-	if err := this.client.post(ctx, "/api/saas-menus/publish", map[string]any{"id": id}, &result); err != nil {
+	if err := this.client.post(ctx, "/api/saas-menus/publish", map[string]any{"id": id, "menuKind": menuKind}, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
 // Archive - 强制归档清单（reason 必填；平台操作写审计留痕）：POST /api/saas-menus/archive
-func (this *SaasMenusResource) Archive(ctx context.Context, id int, reason string) error {
+func (this *SaasMenusResource) Archive(ctx context.Context, id int, menuKind string, reason string) error {
 
 	return this.client.post(ctx, "/api/saas-menus/archive", map[string]any{
-		"id": id, "reason": reason,
+		"id": id, "menuKind": menuKind, "reason": reason,
 	}, nil)
 }

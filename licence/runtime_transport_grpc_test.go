@@ -76,7 +76,11 @@ type runtimeSaasServer struct {
 }
 
 func (runtimeSaasServer) Sync(context.Context, *licencev1.TenantSyncRequest) (*licencev1.TenantSyncResponse, error) {
-	return &licencev1.TenantSyncResponse{Status: StatusValid}, nil
+	return &licencev1.TenantSyncResponse{
+		Status:           StatusValid,
+		PlatformManifest: &licencev1.TenantManifest{Version: 2, MenusJson: []byte(`[{"code":"console"}]`)},
+		TenantManifest:   &licencev1.TenantManifest{Version: 3, MenusJson: []byte(`[{"code":"workspace"}]`)},
+	}, nil
 }
 func (runtimeSaasServer) Validate(context.Context, *licencev1.TenantValidateRequest) (*licencev1.TenantResponse, error) {
 	return &licencev1.TenantResponse{Status: StatusValid}, nil
@@ -300,12 +304,70 @@ func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {
 			}
 		})
 	}
-	if err = transport.Close(); err != nil {
+	_, raw, err := transport.RoundTrip(context.Background(), http.MethodPost, "/api/v1/saas/tenants/sync", []byte(`{"licenseNo":"LIC-1"}`), true)
+	if err != nil {
 		t.Fatal(err)
+	}
+	var syncResult syncResponse
+	if err = json.Unmarshal(raw, &syncResult); err != nil {
+		t.Fatal(err)
+	}
+	if syncResult.Manifests == nil || syncResult.Manifests.Platform == nil || syncResult.Manifests.Platform.Version != 2 || syncResult.Manifests.Tenant == nil || syncResult.Manifests.Tenant.Version != 3 {
+		t.Fatalf("gRPC 双轨菜单映射不符: %s", raw)
 	}
 	if err = transport.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if err = transport.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// runtimeSaasPlatformNilServer - platform 轨未发布的租户运行面假服务端：只返回 tenant 轨清单
+type runtimeSaasPlatformNilServer struct {
+	licencev1.UnimplementedSaasRuntimeServiceServer
+}
+
+func (runtimeSaasPlatformNilServer) Sync(context.Context, *licencev1.TenantSyncRequest) (*licencev1.TenantSyncResponse, error) {
+	return &licencev1.TenantSyncResponse{
+		Status:         StatusValid,
+		TenantManifest: &licencev1.TenantManifest{Version: 3, MenusJson: []byte(`[{"code":"workspace"}]`)},
+	}, nil
+}
+
+// TestGRPCRuntimeTenantSyncAllowsNilPlatformManifest - 双清单 platform 轨为 nil 的分支：
+// gRPC 映射必须原样保留 platform=nil（未发布轨），不得误报缺失或填充空清单
+func TestGRPCRuntimeTenantSyncAllowsNilPlatformManifest(t *testing.T) {
+
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	licencev1.RegisterSaasRuntimeServiceServer(server, runtimeSaasPlatformNilServer{})
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	seed, _, err := generateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
+	transport := &grpcRuntimeTransport{client: client, conn: conn, saas: licencev1.NewSaasRuntimeServiceClient(conn)}
+
+	_, raw, err := transport.RoundTrip(context.Background(), http.MethodPost, "/api/v1/saas/tenants/sync", []byte(`{"licenseNo":"LIC-1"}`), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var syncResult syncResponse
+	if err = json.Unmarshal(raw, &syncResult); err != nil {
+		t.Fatal(err)
+	}
+	if syncResult.Manifests == nil || syncResult.Manifests.Platform != nil || syncResult.Manifests.Tenant == nil || syncResult.Manifests.Tenant.Version != 3 {
+		t.Fatalf("platform 轨为 nil 的双轨菜单映射不符: %s", raw)
+	}
+	_ = transport.Close()
 }
 
 // runtimeSeatServer - 席位映射断言用运行面假服务端：

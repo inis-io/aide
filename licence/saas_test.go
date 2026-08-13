@@ -1,6 +1,8 @@
 package licence
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -11,6 +13,23 @@ func withTenant(platform *fakePlatform, code string, tenant fakeTenant) {
 	platform.mu.Lock()
 	defer platform.mu.Unlock()
 	platform.tenants[code] = tenant
+}
+
+func TestFilterManifestMenus(t *testing.T) {
+	menus := []ManifestMenu{
+		{Code: "root", Type: "directory"},
+		{Code: "page", ParentCode: "root", Type: "page"},
+		{Code: "hidden", ParentCode: "root", Type: "page", Hidden: true},
+	}
+	raw, _ := json.Marshal(menus)
+	got, err := FilterManifestMenus(&TenantManifest{Version: 2, Menus: raw}, []string{"root", "hidden"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ManifestMenu{menus[0], menus[2]}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
 }
 
 // TestTenantSync - 全量同步：放行租户携带已验签信封写入缓存，非放行租户只记录状态
@@ -31,12 +50,12 @@ func TestTenantSync(t *testing.T) {
 	}
 	defer client.Stop()
 
-	syncTime, manifest, err := client.TenantSync(t.Context(), 0)
+	syncTime, manifests, err := client.TenantSync(t.Context(), 0)
 	if err != nil {
 		t.Fatalf("TenantSync 失败: %v", err)
 	}
-	if syncTime <= 0 || manifest == nil || manifest.Version != 1 {
-		t.Fatalf("同步响应异常: %v %+v", syncTime, manifest)
+	if syncTime <= 0 || manifests == nil || manifests.Platform != nil || manifests.Tenant == nil || manifests.Tenant.Version != 1 {
+		t.Fatalf("同步响应异常: %v %+v", syncTime, manifests)
 	}
 
 	// 放行租户：本地状态与功能权益生效

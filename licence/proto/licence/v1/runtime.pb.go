@@ -880,15 +880,16 @@ func (x *TenantSyncItem) GetEnvelopeJson() []byte {
 }
 
 type TenantSyncResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	ServerTime    int64                  `protobuf:"varint,2,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
-	SyncTime      int64                  `protobuf:"varint,3,opt,name=sync_time,json=syncTime,proto3" json:"sync_time,omitempty"`
-	Manifest      *TenantManifest        `protobuf:"bytes,4,opt,name=manifest,proto3" json:"manifest,omitempty"`
-	Tenants       []*TenantSyncItem      `protobuf:"bytes,5,rep,name=tenants,proto3" json:"tenants,omitempty"`
-	Message       string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Status           string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ServerTime       int64                  `protobuf:"varint,2,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	SyncTime         int64                  `protobuf:"varint,3,opt,name=sync_time,json=syncTime,proto3" json:"sync_time,omitempty"`
+	Tenants          []*TenantSyncItem      `protobuf:"bytes,5,rep,name=tenants,proto3" json:"tenants,omitempty"`
+	Message          string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	PlatformManifest *TenantManifest        `protobuf:"bytes,7,opt,name=platform_manifest,json=platformManifest,proto3" json:"platform_manifest,omitempty"`
+	TenantManifest   *TenantManifest        `protobuf:"bytes,8,opt,name=tenant_manifest,json=tenantManifest,proto3" json:"tenant_manifest,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TenantSyncResponse) Reset() {
@@ -942,13 +943,6 @@ func (x *TenantSyncResponse) GetSyncTime() int64 {
 	return 0
 }
 
-func (x *TenantSyncResponse) GetManifest() *TenantManifest {
-	if x != nil {
-		return x.Manifest
-	}
-	return nil
-}
-
 func (x *TenantSyncResponse) GetTenants() []*TenantSyncItem {
 	if x != nil {
 		return x.Tenants
@@ -961,6 +955,20 @@ func (x *TenantSyncResponse) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *TenantSyncResponse) GetPlatformManifest() *TenantManifest {
+	if x != nil {
+		return x.PlatformManifest
+	}
+	return nil
+}
+
+func (x *TenantSyncResponse) GetTenantManifest() *TenantManifest {
+	if x != nil {
+		return x.TenantManifest
+	}
+	return nil
 }
 
 type TenantValidateRequest struct {
@@ -1618,15 +1626,16 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\vtenant_code\x18\x01 \x01(\tR\n" +
 	"tenantCode\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12#\n" +
-	"\renvelope_json\x18\x03 \x01(\fR\fenvelopeJson\"\x84\x02\n" +
+	"\renvelope_json\x18\x03 \x01(\fR\fenvelopeJson\"\xf3\x02\n" +
 	"\x12TenantSyncResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
 	"serverTime\x12\x1b\n" +
-	"\tsync_time\x18\x03 \x01(\x03R\bsyncTime\x12?\n" +
-	"\bmanifest\x18\x04 \x01(\v2#.licenhub.licence.v1.TenantManifestR\bmanifest\x12=\n" +
+	"\tsync_time\x18\x03 \x01(\x03R\bsyncTime\x12=\n" +
 	"\atenants\x18\x05 \x03(\v2#.licenhub.licence.v1.TenantSyncItemR\atenants\x12\x18\n" +
-	"\amessage\x18\x06 \x01(\tR\amessage\"\x92\x02\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\x12P\n" +
+	"\x11platform_manifest\x18\a \x01(\v2#.licenhub.licence.v1.TenantManifestR\x10platformManifest\x12L\n" +
+	"\x0ftenant_manifest\x18\b \x01(\v2#.licenhub.licence.v1.TenantManifestR\x0etenantManifestJ\x04\b\x04\x10\x05R\bmanifest\"\x92\x02\n" +
 	"\x15TenantValidateRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12\x1f\n" +
@@ -1742,38 +1751,39 @@ var file_licence_v1_runtime_proto_goTypes = []any{
 }
 var file_licence_v1_runtime_proto_depIdxs = []int32{
 	22, // 0: licenhub.licence.v1.ValidateRequest.usage:type_name -> licenhub.licence.v1.ValidateRequest.UsageEntry
-	10, // 1: licenhub.licence.v1.TenantSyncResponse.manifest:type_name -> licenhub.licence.v1.TenantManifest
-	11, // 2: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
-	23, // 3: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
-	0,  // 4: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
-	1,  // 5: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
-	2,  // 6: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
-	4,  // 7: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
-	6,  // 8: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
-	7,  // 9: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
-	9,  // 10: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
-	13, // 11: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
-	14, // 12: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
-	16, // 13: licenhub.licence.v1.ProjectConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.ProjectConfigSyncRequest
-	18, // 14: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
-	20, // 15: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
-	3,  // 16: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
-	3,  // 17: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
-	3,  // 18: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
-	5,  // 19: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
-	8,  // 20: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
-	8,  // 21: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
-	12, // 22: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
-	15, // 23: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
-	15, // 24: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
-	17, // 25: licenhub.licence.v1.ProjectConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.ProjectConfigSyncResponse
-	19, // 26: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
-	21, // 27: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
-	16, // [16:28] is the sub-list for method output_type
-	4,  // [4:16] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	11, // 1: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
+	10, // 2: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	10, // 3: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	23, // 4: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	0,  // 5: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
+	1,  // 6: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
+	2,  // 7: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
+	4,  // 8: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
+	6,  // 9: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
+	7,  // 10: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
+	9,  // 11: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
+	13, // 12: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
+	14, // 13: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
+	16, // 14: licenhub.licence.v1.ProjectConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.ProjectConfigSyncRequest
+	18, // 15: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
+	20, // 16: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
+	3,  // 17: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
+	3,  // 18: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
+	3,  // 19: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
+	5,  // 20: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
+	8,  // 21: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
+	8,  // 22: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
+	12, // 23: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
+	15, // 24: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
+	15, // 25: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
+	17, // 26: licenhub.licence.v1.ProjectConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.ProjectConfigSyncResponse
+	19, // 27: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
+	21, // 28: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
+	17, // [17:29] is the sub-list for method output_type
+	5,  // [5:17] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_licence_v1_runtime_proto_init() }

@@ -93,3 +93,65 @@ func TestAdminGRPCStatusMapsToAPIErrorWithCause(t *testing.T) {
 		t.Fatal("gRPC cause 丢失")
 	}
 }
+
+// saasTenantSyncMenusServer - SyncMenus 映射断言用管理面假服务端：
+// 记录 full method 与请求体原文，校验 JWT metadata，返回 {ids,count} 结果
+type saasTenantSyncMenusServer struct {
+	licencev1.UnimplementedSaasTenantAdminServiceServer
+	t        *testing.T
+	fullName string
+	body     []byte
+}
+
+func (s *saasTenantSyncMenusServer) SyncSaasTenantMenus(ctx context.Context, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {
+	s.t.Helper()
+	md, _ := metadata.FromIncomingContext(ctx)
+	if values := md.Get("authorization"); len(values) != 1 || values[0] != "Bearer jwt" {
+		s.t.Fatalf("authorization=%v", values)
+	}
+	s.fullName, _ = grpc.Method(ctx)
+	s.body = request.GetJson()
+	raw, _ := json.Marshal(map[string]any{"ids": []int{41}, "count": 1})
+	return &licencev1.AdminResponse{Code: 200, Message: "ok", DataJson: raw}, nil
+}
+
+// TestGRPCSaasTenantSyncMenus - gRPC 管理面 SyncMenus 映射（对照 HTTP 用例 TestSaasTenantSyncMenus）：
+// POST /api/saas-tenants/sync-menus 路由到 SaasTenantAdminService.SyncSaasTenantMenus，
+// 请求体 projectId/tenantIds 原样透传，响应 {ids,count} 解析一致
+func TestGRPCSaasTenantSyncMenus(t *testing.T) {
+
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	saasServer := &saasTenantSyncMenusServer{t: t}
+	licencev1.RegisterSaasTenantAdminServiceServer(server, saasServer)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	transport := &grpcAdminTransport{client: &AdminClient{options: AdminOptions{}}, conn: conn, saasTenant: licencev1.NewSaasTenantAdminServiceClient(conn)}
+
+	data, err := transport.RoundTrip(context.Background(), adminCall{
+		Method: http.MethodPost, Path: "/api/saas-tenants/sync-menus",
+		Body: []byte(`{"projectId":11,"tenantIds":[41]}`), Token: "jwt",
+	})
+	if err != nil {
+		t.Fatalf("同步菜单失败: %v", err)
+	}
+	if saasServer.fullName != "/licenhub.licence.v1.SaasTenantAdminService/SyncSaasTenantMenus" {
+		t.Fatalf("full method 路由不符: %q", saasServer.fullName)
+	}
+	if !bytes.Contains(saasServer.body, []byte(`"projectId":11`)) || !bytes.Contains(saasServer.body, []byte(`"tenantIds":[41]`)) {
+		t.Fatalf("请求体 projectId/tenantIds 未透传: %s", string(saasServer.body))
+	}
+	var result struct {
+		Ids   []int `json:"ids"`
+		Count int   `json:"count"`
+	}
+	if json.Unmarshal(data, &result) != nil || len(result.Ids) != 1 || result.Ids[0] != 41 || result.Count != 1 {
+		t.Fatalf("响应解析不符: %s", string(data))
+	}
+	_ = transport.Close()
+}

@@ -5,6 +5,7 @@ import "context"
 // SaasPlansResource - SaaS 套餐模板资源（/api/saas-plans/*）
 // 自助即时生效：保存时校验功能字典引用完整性与菜单子集约束；仅 enabled 可被订阅；
 // 平台治理手段为全量可见 + 强制 disabled。
+// 套餐选单来源为项目当前 published 租户清单（menuCodes 必须是其 code 子集）。
 type SaasPlansResource struct {
 	// client - 所属客户端
 	client *AdminClient

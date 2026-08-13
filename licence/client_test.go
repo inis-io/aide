@@ -590,7 +590,7 @@ func (this *fakePlatform) issueTenantEnvelope(code string, tenant fakeTenant) (T
 		PlanCode: "pro", Environment: "production", SubscriptionType: "yearly",
 		ValidFrom: "2026-01-01T00:00:00Z", ValidUntil: tenant.validUntil, GraceDays: tenant.graceDays,
 		Features: tenant.features, Limits: map[string]int64{}, MenuCodes: []string{"dashboard"},
-		ManifestVersion: 1, IssuedAt: time.Now().UTC().Format(time.RFC3339),
+		TenantManifestVersion: 1, IssuedAt: time.Now().UTC().Format(time.RFC3339),
 		KeyVersion: "license-key-2026-01", Nonce: Licence.Nonce(),
 	}, this.seed)
 }
@@ -618,7 +618,7 @@ func (this *fakePlatform) handleTenantSync(writer http.ResponseWriter, request *
 	}
 	writeJson(writer, map[string]any{
 		"status": StatusValid, "serverTime": time.Now().UnixMilli(), "syncTime": time.Now().UnixMilli(),
-		"manifest": map[string]any{"version": 1, "menus": []any{}}, "tenants": tenants,
+		"manifests": map[string]any{"platform": nil, "tenant": map[string]any{"version": 1, "menus": []any{}}}, "tenants": tenants,
 	})
 }
 

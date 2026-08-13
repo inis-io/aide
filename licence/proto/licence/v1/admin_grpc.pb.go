@@ -4362,6 +4362,7 @@ const (
 	SaasTenantAdminService_ResumeSaasTenant_FullMethodName           = "/licenhub.licence.v1.SaasTenantAdminService/ResumeSaasTenant"
 	SaasTenantAdminService_RevokeSaasTenant_FullMethodName           = "/licenhub.licence.v1.SaasTenantAdminService/RevokeSaasTenant"
 	SaasTenantAdminService_ReissueSaasTenant_FullMethodName          = "/licenhub.licence.v1.SaasTenantAdminService/ReissueSaasTenant"
+	SaasTenantAdminService_SyncSaasTenantMenus_FullMethodName        = "/licenhub.licence.v1.SaasTenantAdminService/SyncSaasTenantMenus"
 	SaasTenantAdminService_BatchRenewSaasTenants_FullMethodName      = "/licenhub.licence.v1.SaasTenantAdminService/BatchRenewSaasTenants"
 	SaasTenantAdminService_FindSaasTenantApplications_FullMethodName = "/licenhub.licence.v1.SaasTenantAdminService/FindSaasTenantApplications"
 	SaasTenantAdminService_GetSaasTenantApplication_FullMethodName   = "/licenhub.licence.v1.SaasTenantAdminService/GetSaasTenantApplication"
@@ -4386,6 +4387,7 @@ type SaasTenantAdminServiceClient interface {
 	ResumeSaasTenant(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	RevokeSaasTenant(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	ReissueSaasTenant(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	SyncSaasTenantMenus(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	BatchRenewSaasTenants(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	FindSaasTenantApplications(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	GetSaasTenantApplication(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
@@ -4522,6 +4524,16 @@ func (c *saasTenantAdminServiceClient) ReissueSaasTenant(ctx context.Context, in
 	return out, nil
 }
 
+func (c *saasTenantAdminServiceClient) SyncSaasTenantMenus(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, SaasTenantAdminService_SyncSaasTenantMenus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *saasTenantAdminServiceClient) BatchRenewSaasTenants(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminResponse)
@@ -4598,6 +4610,7 @@ type SaasTenantAdminServiceServer interface {
 	ResumeSaasTenant(context.Context, *AdminRequest) (*AdminResponse, error)
 	RevokeSaasTenant(context.Context, *AdminRequest) (*AdminResponse, error)
 	ReissueSaasTenant(context.Context, *AdminRequest) (*AdminResponse, error)
+	SyncSaasTenantMenus(context.Context, *AdminRequest) (*AdminResponse, error)
 	BatchRenewSaasTenants(context.Context, *AdminRequest) (*AdminResponse, error)
 	FindSaasTenantApplications(context.Context, *AdminRequest) (*AdminResponse, error)
 	GetSaasTenantApplication(context.Context, *AdminRequest) (*AdminResponse, error)
@@ -4649,6 +4662,9 @@ func (UnimplementedSaasTenantAdminServiceServer) RevokeSaasTenant(context.Contex
 }
 func (UnimplementedSaasTenantAdminServiceServer) ReissueSaasTenant(context.Context, *AdminRequest) (*AdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReissueSaasTenant not implemented")
+}
+func (UnimplementedSaasTenantAdminServiceServer) SyncSaasTenantMenus(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncSaasTenantMenus not implemented")
 }
 func (UnimplementedSaasTenantAdminServiceServer) BatchRenewSaasTenants(context.Context, *AdminRequest) (*AdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchRenewSaasTenants not implemented")
@@ -4906,6 +4922,24 @@ func _SaasTenantAdminService_ReissueSaasTenant_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SaasTenantAdminService_SyncSaasTenantMenus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SaasTenantAdminServiceServer).SyncSaasTenantMenus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SaasTenantAdminService_SyncSaasTenantMenus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SaasTenantAdminServiceServer).SyncSaasTenantMenus(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SaasTenantAdminService_BatchRenewSaasTenants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminRequest)
 	if err := dec(in); err != nil {
@@ -5068,6 +5102,10 @@ var SaasTenantAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReissueSaasTenant",
 			Handler:    _SaasTenantAdminService_ReissueSaasTenant_Handler,
+		},
+		{
+			MethodName: "SyncSaasTenantMenus",
+			Handler:    _SaasTenantAdminService_SyncSaasTenantMenus_Handler,
 		},
 		{
 			MethodName: "BatchRenewSaasTenants",

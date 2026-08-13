@@ -137,6 +137,13 @@ func (this *SaasTenantsResource) Reissue(ctx context.Context, input SaasTenantRe
 	return &result, nil
 }
 
+// SyncMenus - 按当前租户清单批量裁剪悬空菜单并重签；tenantIds 为空时处理项目下全部受影响租户。
+func (this *SaasTenantsResource) SyncMenus(ctx context.Context, projectId int, tenantIds []int) error {
+	return this.client.post(ctx, "/api/saas-tenants/sync-menus", map[string]any{
+		"projectId": projectId, "tenantIds": tenantIds,
+	}, nil)
+}
+
 // BatchRenew - 租户批量续期（仅 active/suspended 可续；member 逐租户生成 change 申请单走审批，
 // platform 直通生效重签；ids 须全部处于写数据范围内否则整体拒绝）：POST /api/saas-tenants/batch-renew
 func (this *SaasTenantsResource) BatchRenew(ctx context.Context, input SaasTenantBatchRenewInput) (*SaasTenantBatchRenewResult, error) {

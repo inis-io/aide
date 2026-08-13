@@ -9,24 +9,24 @@ import "encoding/json"
 // 租户不做指纹绑定（无 binding），绑定语义由「SaaS 服务端持有效实例凭证」间接达成；
 // 签名密钥复用 license-key，验签使用 Options.PublicKeys。
 type TenantPayload struct {
-	GrantId          string           `json:"grantId"`
-	TenantCode       string           `json:"tenantCode"`
-	UserId           string           `json:"userId"`
-	ProjectId        string           `json:"projectId"`
-	PlanCode         string           `json:"planCode"`
-	Environment      string           `json:"environment"`
-	SubscriptionType string           `json:"subscriptionType"`
-	ValidFrom        string           `json:"validFrom"`
-	ValidUntil       string           `json:"validUntil"`
-	GraceDays        int              `json:"graceDays"`
-	VersionRange     string           `json:"versionRange"`
-	Features         map[string]bool  `json:"features"`
-	Limits           map[string]int64 `json:"limits"`
-	MenuCodes        []string         `json:"menuCodes"`
-	ManifestVersion  int              `json:"manifestVersion"`
-	IssuedAt         string           `json:"issuedAt"`
-	KeyVersion       string           `json:"keyVersion"`
-	Nonce            string           `json:"nonce"`
+	GrantId               string           `json:"grantId"`
+	TenantCode            string           `json:"tenantCode"`
+	UserId                string           `json:"userId"`
+	ProjectId             string           `json:"projectId"`
+	PlanCode              string           `json:"planCode"`
+	Environment           string           `json:"environment"`
+	SubscriptionType      string           `json:"subscriptionType"`
+	ValidFrom             string           `json:"validFrom"`
+	ValidUntil            string           `json:"validUntil"`
+	GraceDays             int              `json:"graceDays"`
+	VersionRange          string           `json:"versionRange"`
+	Features              map[string]bool  `json:"features"`
+	Limits                map[string]int64 `json:"limits"`
+	MenuCodes             []string         `json:"menuCodes"`
+	TenantManifestVersion int              `json:"tenantManifestVersion"`
+	IssuedAt              string           `json:"issuedAt"`
+	KeyVersion            string           `json:"keyVersion"`
+	Nonce                 string           `json:"nonce"`
 }
 
 // TenantEnvelope - 租户签名信封（信封 v1，结构与 Envelope 一致，载荷为 TenantPayload）

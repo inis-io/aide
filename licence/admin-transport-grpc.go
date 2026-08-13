@@ -376,6 +376,8 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.saasTenant.RevokeSaasTenant(callCtx, request)
 	case http.MethodPost + " /api/saas-tenants/reissue":
 		response, err = this.saasTenant.ReissueSaasTenant(callCtx, request)
+	case http.MethodPost + " /api/saas-tenants/sync-menus":
+		response, err = this.saasTenant.SyncSaasTenantMenus(callCtx, request)
 	case http.MethodPost + " /api/saas-tenants/batch-renew":
 		response, err = this.saasTenant.BatchRenewSaasTenants(callCtx, request)
 	case http.MethodGet + " /api/saas-tenants/applications/find":

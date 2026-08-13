@@ -167,6 +167,7 @@ service SaasTenantAdminService {
   rpc ResumeSaasTenant(AdminRequest) returns (AdminResponse);
   rpc RevokeSaasTenant(AdminRequest) returns (AdminResponse);
   rpc ReissueSaasTenant(AdminRequest) returns (AdminResponse);
+  rpc SyncSaasTenantMenus(AdminRequest) returns (AdminResponse);
   rpc BatchRenewSaasTenants(AdminRequest) returns (AdminResponse);
   rpc FindSaasTenantApplications(AdminRequest) returns (AdminResponse);
   rpc GetSaasTenantApplication(AdminRequest) returns (AdminResponse);

@@ -187,11 +187,18 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 		result := map[string]any{
 			"status": response.GetStatus(), "serverTime": response.GetServerTime(), "syncTime": response.GetSyncTime(),
 		}
-		if response.GetManifest() != nil {
-			result["manifest"] = map[string]any{
-				"version": response.GetManifest().GetVersion(), "menus": json.RawMessage(response.GetManifest().GetMenusJson()),
+		manifests := map[string]any{"platform": nil, "tenant": nil}
+		if response.GetPlatformManifest() != nil {
+			manifests["platform"] = map[string]any{
+				"version": response.GetPlatformManifest().GetVersion(), "menus": json.RawMessage(response.GetPlatformManifest().GetMenusJson()),
 			}
 		}
+		if response.GetTenantManifest() != nil {
+			manifests["tenant"] = map[string]any{
+				"version": response.GetTenantManifest().GetVersion(), "menus": json.RawMessage(response.GetTenantManifest().GetMenusJson()),
+			}
+		}
+		result["manifests"] = manifests
 		items := make([]map[string]any, 0, len(response.GetTenants()))
 		for _, item := range response.GetTenants() {
 			row := map[string]any{"tenantCode": item.GetTenantCode(), "status": item.GetStatus()}

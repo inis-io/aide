@@ -17,12 +17,38 @@ type TenantInfo struct {
 	Envelope *TenantEnvelope
 }
 
-// TenantManifest - 项目菜单清单（sync 随响应下发）
+// TenantManifest - 按轨（platform/tenant）下发的项目菜单清单（sync 随响应下发，未发布的轨为 nil）
 type TenantManifest struct {
 	// Version - 清单版本
 	Version int `json:"version"`
 	// Menus - 菜单树原文（结构由 SaaS 项目自行解释）
 	Menus json.RawMessage `json:"menus"`
+}
+
+// TenantManifests - 项目平台/租户双轨菜单清单；未发布的轨为 nil。
+type TenantManifests struct {
+	Platform *TenantManifest `json:"platform"`
+	Tenant   *TenantManifest `json:"tenant"`
+}
+
+// ManifestMenuRoute - 菜单路由定义。
+type ManifestMenuRoute struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Component string `json:"component"`
+	Title     string `json:"title"`
+	Icon      string `json:"icon"`
+	Sort      int    `json:"sort"`
+}
+
+// ManifestMenu - 双轨清单菜单条目。
+type ManifestMenu struct {
+	Code       string            `json:"code"`
+	ParentCode string            `json:"parentCode"`
+	Type       string            `json:"type"`
+	Route      ManifestMenuRoute `json:"route"`
+	Feature    string            `json:"feature"`
+	Hidden     bool              `json:"hidden"`
 }
 
 // TenantValidateOptions - 单租户实时校验的可选判定输入
@@ -45,10 +71,10 @@ type tenantCacheItem struct {
 
 // syncResponse - 租户同步响应
 type syncResponse struct {
-	Status     string          `json:"status"`
-	ServerTime int64           `json:"serverTime"`
-	SyncTime   int64           `json:"syncTime"`
-	Manifest   *TenantManifest `json:"manifest"`
+	Status     string           `json:"status"`
+	ServerTime int64            `json:"serverTime"`
+	SyncTime   int64            `json:"syncTime"`
+	Manifests  *TenantManifests `json:"manifests"`
 	Tenants    []struct {
 		TenantCode string          `json:"tenantCode"`
 		Status     string          `json:"status"`
@@ -66,14 +92,14 @@ type tenantResponse struct {
 }
 
 // TenantSync - 租户授权全量/增量同步（每小时 + 启动时调用）
-// sinceTime 为增量水位线（毫秒，0 = 全量）；返回本次同步时间与项目菜单清单（无则 nil）。
+// sinceTime 为增量水位线（毫秒，0 = 全量）；返回本次同步时间与项目双轨菜单清单。
 // 放行租户的信封验签后写入本地缓存；平台不可达时返回错误，本地缓存继续可用（TenantStatus）。
 /**
  * @param sinceTime int64 - 增量水位线（上次返回的 syncTime；0 = 全量）
  * @example：
- * 	syncTime, manifest, err := client.TenantSync(ctx, 0)
+ * 	syncTime, manifests, err := client.TenantSync(ctx, 0)
  */
-func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *TenantManifest, error) {
+func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *TenantManifests, error) {
 
 	this.opMu.Lock()
 	defer this.opMu.Unlock()
@@ -117,7 +143,30 @@ func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *Te
 		this.tenantCache[item.TenantCode] = cached
 		this.mu.Unlock()
 	}
-	return response.SyncTime, response.Manifest, nil
+	return response.SyncTime, response.Manifests, nil
+}
+
+// FilterManifestMenus - 按签名载荷 menuCodes 过滤租户清单，保持清单原顺序与 parentCode。
+// 平台菜单不应调用本函数裁剪；hidden 节点仍会返回，由接入方注册路由但不展示导航。
+func FilterManifestMenus(manifest *TenantManifest, codes []string) ([]ManifestMenu, error) {
+	if manifest == nil {
+		return nil, nil
+	}
+	var menus []ManifestMenu
+	if err := json.Unmarshal(manifest.Menus, &menus); err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]bool, len(codes))
+	for _, code := range codes {
+		allowed[code] = true
+	}
+	result := make([]ManifestMenu, 0, len(menus))
+	for _, menu := range menus {
+		if allowed[menu.Code] {
+			result = append(result, menu)
+		}
+	}
+	return result, nil
 }
 
 // TenantValidate - 单租户实时校验（租户用户登录/访问受控功能时调用）

@@ -76,6 +76,8 @@
 
 - `Payload`、`TenantPayload`、`ManifestPayload`、`ConfigPayload` 等签名载荷字段顺序即签名内容；
   新字段只允许追加，禁止插入、重排或改名。信封验签始终优先使用解析得到的 payload 原文字节。
+- **载荷 v2 破坏性例外**：双轨菜单重构已获准清表重建，`TenantPayload.manifestVersion`
+  在 v2 中更名为 `tenantManifestVersion`；这是无正式存量信封前的一次性例外，后续仍恢复只追加纪律。
 - license-key / release-key 私钥永远不进入 SDK；SDK 只持公钥。客户端 Ed25519 私钥与
   `activationToken` 只允许经 `Store` 保存，不出本机、不进日志。
 - HTTP 现有签名 canonical 不得因 gRPC 上线而改变；gRPC 使用独立、明确版本化的 canonical，

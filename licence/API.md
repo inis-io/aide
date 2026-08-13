@@ -107,13 +107,14 @@ type GRPCOptions struct {
 
 | 常量 | 值 | 说明 |
 |---|---|---|
-| `EventSaasPlanCreated` | `saas.plan.created` | SaaS 套餐已创建，回调 `data` 含 `{planId, planCode, manifestVersion}` |
-| `EventSaasPlanUpdated` | `saas.plan.updated` | SaaS 套餐内容已修改，回调 `data` 含 `{planId, planCode, manifestVersion}` |
-| `EventSaasPlanEnabled` | `saas.plan.enabled` | SaaS 套餐已启用，回调 `data` 含 `{planId, planCode, manifestVersion}` |
-| `EventSaasPlanDisabled` | `saas.plan.disabled` | SaaS 套餐已停用，回调 `data` 含 `{planId, planCode, manifestVersion}` |
+| `EventSaasPlanCreated` | `saas.plan.created` | SaaS 套餐已创建，回调 `data` 含 `{planId, planCode, tenantManifestVersion}` |
+| `EventSaasPlanUpdated` | `saas.plan.updated` | SaaS 套餐内容已修改，回调 `data` 含 `{planId, planCode, tenantManifestVersion}` |
+| `EventSaasPlanEnabled` | `saas.plan.enabled` | SaaS 套餐已启用，回调 `data` 含 `{planId, planCode, tenantManifestVersion}` |
+| `EventSaasPlanDisabled` | `saas.plan.disabled` | SaaS 套餐已停用，回调 `data` 含 `{planId, planCode, tenantManifestVersion}` |
 | `EventSaasTenantCreated` | `saas.tenant.created` | SaaS 租户已诞生（首次生效 `pending→active`），回调 `data` 含 `{tenantNo, tenantCode, planCode, subscriptionType, environment}` |
-| `EventSaasMenuPublished` | `saas.menu.published` | SaaS 菜单清单已发布，回调 `data` 含 `{manifestId, version}` |
-| `EventSaasMenuArchived` | `saas.menu.archived` | SaaS 菜单清单已归档，回调 `data` 含 `{manifestId, version}` |
+| `EventSaasMenuPublished` | `saas.menu.published` | SaaS 菜单清单已发布，回调 `data` 含 `{manifestId, menuKind, version, removedCodes}` |
+| `EventSaasMenuArchived` | `saas.menu.archived` | SaaS 菜单清单已归档，回调 `data` 含 `{manifestId, menuKind, version}` |
+| `EventSaasTenantMenusTrimmed` | `saas.tenant.menus-trimmed` | 租户菜单已按最新租户清单裁剪并重签，回调 `data` 含 `{tenantId, tenantCode, removedCodes}` |
 | `EventProjectConfigUpdated` | `project.config.updated` | 项目配置已更新（新建或保存），回调 `data` 含 `{configKey, version}` |
 | `EventProjectConfigDeleted` | `project.config.deleted` | 项目配置已删除，回调 `data` 含 `{configKey, version}` |
 | `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值（规则）已更新，回调 `data` 含 `{configKey, projectId}` |
@@ -439,7 +440,7 @@ func ParseTenantEnvelope(data []byte) (envelope TenantEnvelope, rawPayload []byt
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `TenantSync` | `func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *TenantManifest, error)` | 租户授权全量/增量同步（每小时 + 启动时调用）。`sinceTime` 为增量水位线（毫秒，0 = 全量），返回本次同步时间（下次传入）与项目菜单清单（无则 nil）。放行租户的信封验签后写入本地缓存；平台不可达时返回错误，本地缓存继续可用 |
+| `TenantSync` | `func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *TenantManifests, error)` | 租户授权全量/增量同步（每小时 + 启动时调用）。`sinceTime` 为增量水位线（毫秒，0 = 全量），返回本次同步时间与 `platform`、`tenant` 双轨项目菜单清单（某一轨未发布时对应字段为 nil）。放行租户的信封验签后写入本地缓存；平台不可达时返回错误，本地缓存继续可用 |
 | `TenantValidate` | `func (this *Client) TenantValidate(ctx context.Context, tenantCode string, options TenantValidateOptions) (string, error)` | 单租户实时校验（租户用户登录/访问受控功能时调用）。放行返回状态码并把信封写入本地缓存；非放行只返回状态码 |
 | `TenantCurrent` | `func (this *Client) TenantCurrent(ctx context.Context, tenantCode string) (*TenantEnvelope, error)` | 取租户当前生效信封（不更新缓存水位，仅按需拉取） |
 | `TenantStatus` | `func (this *Client) TenantStatus(tenantCode string) string` | 租户本地状态：有缓存信封时按信封做时间维度本地判定，无信封时返回缓存的服务端判定（平台不可达时的降级判定依据；无缓存返回空串） |
@@ -447,7 +448,13 @@ func ParseTenantEnvelope(data []byte) (envelope TenantEnvelope, rawPayload []byt
 
 ```go
 // 启动时 + 每小时同步一次（增量水位线）
-syncTime, manifest, err := client.TenantSync(ctx, 0) // 之后传上次返回的 syncTime
+syncTime, manifests, err := client.TenantSync(ctx, 0) // 之后传上次返回的 syncTime
+envelope, _ := client.TenantCurrent(ctx, "tenant-a")
+// manifests 整体或其中未发布的轨都可能为 nil（服务端省略 manifests 键 / 该轨未发布），取值前必须判空
+var tenantMenus []licence.ManifestMenu
+if manifests != nil && manifests.Tenant != nil {
+	tenantMenus, _ = licence.FilterManifestMenus(manifests.Tenant, envelope.Payload.MenuCodes)
+}
 
 // 租户用户登录/访问受控功能时实时校验
 status, err := client.TenantValidate(ctx, "tenant-a", licence.TenantValidateOptions{
@@ -779,10 +786,10 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | 方法 | 说明 | 路由 | 参数 → 返回 |
 |---|---|---|---|
 | `Find` | 分页（按 project_id asc, version desc 排序） | `GET /api/saas-menus/find` | `*SaasMenuFindParams` → `*Page[SaasMenuManifest]` |
-| `Take` | 详情 | `GET /api/saas-menus/take?id=N` | `id int` → `*SaasMenuManifest` |
+| `Take` | 按菜单轨取详情 | `GET /api/saas-menus/take?id=N&menuKind=tenant` | `id int, menuKind string` → `*SaasMenuManifest` |
 | `Save` | 保存草稿（Id=0 新建递增版本草稿，否则更新既有 draft 行） | `POST /api/saas-menus/save` | `SaasMenuSaveInput` → `*SaasMenuSaveResult` |
-| `Publish` | 发布（结构校验通过转 published，旧 published 同事务转 archived） | `POST /api/saas-menus/publish` | `id int` → `*SaasMenuSaveResult` |
-| `Archive` | 强制归档（reason 必填；平台写审计留痕） | `POST /api/saas-menus/archive` | `id int, reason string` → 无 |
+| `Publish` | 分轨发布并返回删除编码、受影响套餐与租户 | `POST /api/saas-menus/publish` | `id int, menuKind string` → `*SaasMenuSaveResult` |
+| `Archive` | 分轨强制归档（reason 必填；平台写审计留痕） | `POST /api/saas-menus/archive` | `id int, menuKind string, reason string` → 无 |
 
 #### SaasFeatures - SaaS 功能字典（`/api/saas-features/*`）
 
@@ -819,6 +826,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Resume` | 恢复（suspended → active，即时生效，reason 必填） | `POST /api/saas-tenants/resume` | `id int, reason string` → `*StatusResult` |
 | `Revoke` | 吊销（active/suspended → revoked，不可逆，reason 必填） | `POST /api/saas-tenants/revoke` | `id int, reason string` → `*StatusResult` |
 | `Reissue` | 重签（以现载荷为基础按入参覆盖，空值沿用现载荷；直通不产生申请单） | `POST /api/saas-tenants/reissue` | `SaasTenantReissueInput` → `*SaasTenantNoResult` |
+| `SyncMenus` | 按当前 published 租户清单裁剪悬空编码并原子重签；tenantIds 为空处理全项目 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int` → 无 |
 | `BatchRenew` | 批量续期（仅 active/suspended 可续；member 逐租户生成 change 申请单走审批；platform 直通重签；ids 须全部处于写数据范围内否则整体拒绝） | `POST /api/saas-tenants/batch-renew` | `SaasTenantBatchRenewInput` → `*SaasTenantBatchRenewResult` |
 | `Applications` | 我的申请分页 | `GET /api/saas-tenants/applications/find` | `*SaasTenantApplicationFindParams` → `*Page[SaasTenantApplication]` |
 | `ApplicationTake` | 我的申请详情 | `GET /api/saas-tenants/applications/take?id=N` | `id int` → `*SaasTenantApplication` |
@@ -851,10 +859,10 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `LicenseSeatReleaseInput` | `Id`（席位 ID）必填、`Reason` 必填（释放原因，平台留痕） |
 | `VersionInput` | 新建仅允许 draft/testing 状态；发布与归档走专用接口 |
 | `ArtifactUploadInput` | `VersionId`（必填，版本须未发布/未归档）、`ArtifactType`（默认 full）、`SourceVersion` / `TargetVersion`（增量包）、`OsArch` |
-| `SaasMenuSaveInput` | `Id`=0 新建递增版本草稿、`ProjectId` / `Manifest` 必填 |
+| `SaasMenuSaveInput` | `Id`=0 新建分轨递增版本草稿、`ProjectId` / `MenuKind` / `Manifest` 必填 |
 | `SaasFeatureSaveInput` | `Id`=0 登记、`FeatureCode`（小写字母/数字开头，段间可含 `. _ -`，登记后不可改） |
-| `SaasPlanSaveInput` | `PlanCode`（创建后不可改）、`Features`（key 须命中功能字典 enabled）、`MenuCodes`（当前 published 清单 code 子集） |
-| `SaasTenantSubscribeInput` | `ProjectId` / `PlanId`（须 enabled）/ `TenantCode`（项目内唯一）/ `TenantName` / `SubscriptionType`（trial/official）/ `Environment` / `Reason` 必填；`Overrides`（个性化覆盖：features 加购/裁剪、limits、menus 增删） |
+| `SaasPlanSaveInput` | `PlanCode`（创建后不可改）、`Features`（key 须命中功能字典 enabled）、`MenuCodes`（当前 published 租户清单编码，服务端物化祖先闭包） |
+| `SaasTenantSubscribeInput` | `ProjectId` / `PlanId`（须 enabled）/ `TenantCode`（项目内唯一）/ `TenantName` / `SubscriptionType`（trial/official）/ `Environment` / `Reason` 必填；`Overrides.Menus` 只允许 `Remove` 裁剪 |
 | `SaasTenantChangeInput` | `TenantId` / `PlanId` / `SubscriptionType` / `Environment` / `Reason` 必填 |
 | `SaasTenantReissueInput` | `Id` 必填；其余字段非空覆盖（期限 0=保留原值） |
 | `SaasTenantBatchRenewInput` | `Ids` 必填、`ValidUntil`（必填且须晚于当前时间）、`Reason` |
@@ -894,7 +902,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `SaasReviewResult` | SaaS 申请审批结果（`Id`（approve 时为目标租户 ID）/ `TenantNo` / `Action`） |
 | `SaasTenantUsageItem` | 用量水位单项（`LimitKey`；`Limit` / `Value` / `ReportedAt` 为 `*int64`，nil = 未定义 / 未上报） |
 | `SaasTenantBatchRenewItem` / `SaasTenantBatchRenewSummary` / `SaasTenantBatchRenewResult` | 批量续期：单租户结果（`TenantId` / `TenantNo` / `Result`（applied/submitted/skipped/failed）/ `Message` / `ApplyNo`）、汇总计数（`Applied` / `Submitted` / `Skipped` / `Failed`）、外层结果 |
-| `SaasOverrideMenus` / `SaasOverrides` | 菜单增删（`Add` / `Remove`）；租户个性化覆盖（`Features` 加购/裁剪、`Limits`、`Menus`），供 `SaasTenantSubscribeInput.Overrides` 使用 |
+| `SaasOverrideMenus` / `SaasOverrides` | 菜单裁剪（仅 `Remove`，双轨制只裁不加）；租户个性化覆盖（`Features` 加购/裁剪、`Limits`、`Menus`），供 `SaasTenantSubscribeInput.Overrides` 使用 |
 
 **输出结构**（对齐平台 models/basic 各模型 json tag；时间戳除注明外均为毫秒）：
 

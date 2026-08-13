@@ -1,4 +1,4 @@
-version: 1
+version: 2
 contract: licenhub.licence.v1
 defaults:
   transport_fallback: false
@@ -17,6 +17,9 @@ runtime:
   - [Client.PlatformConfigSync, POST, /api/v1/platform/configs/sync, PlatformConfigRuntimeService/Sync, activation-sign-v1, "", platform_config, read, normal, true]
   - [Client.Subscribe, POST, /api/v1/events/subscribe, EventRuntimeService/Subscribe, activation-sign-v1, "", callback_event, read, normal, true]
 admin:
+  # 管理面 gRPC 统一走通用 AdminRequest{json}/AdminResponse{code,message,data_json} 信封，
+  # proto 不为单个业务动作建专用字段；菜单类参数（如 menuKind、projectId/tenantIds）经
+  # AdminRequest.json 的 JSON body 传输，与 HTTP 请求体字段保持一致。
   AdminAuthService:
     - [SignIn, POST, /api/comm/sign-in, public, "", normal]
     - [SignOut, DELETE, /api/comm/sign-out, authenticated, "", normal]
@@ -136,6 +139,7 @@ admin:
     - [ResumeSaasTenant, POST, /api/saas-tenants/resume, permission, saas.tenant.suspend, high]
     - [RevokeSaasTenant, POST, /api/saas-tenants/revoke, permission, saas.tenant.revoke, critical]
     - [ReissueSaasTenant, POST, /api/saas-tenants/reissue, permission, saas.tenant.reissue, critical]
+    - [SyncSaasTenantMenus, POST, /api/saas-tenants/sync-menus, permission, saas.tenant.update, normal]
     - [BatchRenewSaasTenants, POST, /api/saas-tenants/batch-renew, permission, saas.tenant.update, normal]
     - [FindSaasTenantApplications, GET, /api/saas-tenants/applications/find, permission, saas.tenant.read, normal]
     - [GetSaasTenantApplication, GET, /api/saas-tenants/applications/take, permission, saas.tenant.read, normal]

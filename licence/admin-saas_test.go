@@ -16,13 +16,13 @@ func TestSaasMenuSaveAndPublish(t *testing.T) {
 		hub.writeData(writer, map[string]any{"id": 5, "version": 2})
 	}
 	hub.routes["POST /api/saas-menus/publish"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
-		hub.writeData(writer, map[string]any{"id": 5, "version": 2})
+		hub.writeData(writer, map[string]any{"id": 5, "version": 2, "impactReport": map[string]any{"removedCodes": []string{"legacy"}}})
 	}
 	client := hub.newClient(t)
 	ctx := context.Background()
 
 	saved, err := client.SaasMenus.Save(ctx, SaasMenuSaveInput{
-		ProjectId: 11, Manifest: `{"version":2,"menus":[{"code":"root","type":"directory","route":{"path":"/"}}]}`,
+		ProjectId: 11, MenuKind: "tenant", Manifest: `{"menuKind":"tenant","version":2,"menus":[{"code":"root","type":"directory","route":{"path":"/"}}]}`,
 	})
 	if err != nil {
 		t.Fatalf("保存清单失败: %v", err)
@@ -38,14 +38,14 @@ func TestSaasMenuSaveAndPublish(t *testing.T) {
 		t.Fatalf("保存请求体不符: %s", string(hub.lastBody))
 	}
 
-	published, err := client.SaasMenus.Publish(ctx, 5)
+	published, err := client.SaasMenus.Publish(ctx, 5, "tenant")
 	if err != nil {
 		t.Fatalf("发布清单失败: %v", err)
 	}
-	if published.Id != 5 || published.Version != 2 {
+	if published.Id != 5 || published.Version != 2 || published.ImpactReport == nil || len(published.ImpactReport.RemovedCodes) != 1 {
 		t.Fatalf("发布结果解析不符: %+v", published)
 	}
-	if !strings.Contains(string(hub.lastBody), `"id":5`) {
+	if !strings.Contains(string(hub.lastBody), `"id":5`) || !strings.Contains(string(hub.lastBody), `"menuKind":"tenant"`) {
 		t.Fatalf("发布请求体不符: %s", string(hub.lastBody))
 	}
 }
@@ -65,14 +65,14 @@ func TestSaasMenuFind(t *testing.T) {
 	}
 	client := hub.newClient(t)
 
-	page, err := client.SaasMenus.Find(context.Background(), &SaasMenuFindParams{ProjectId: 11, Status: "published"})
+	page, err := client.SaasMenus.Find(context.Background(), &SaasMenuFindParams{ProjectId: 11, MenuKind: "tenant", Status: "published"})
 	if err != nil {
 		t.Fatalf("清单分页失败: %v", err)
 	}
 	if page.Count != 1 || len(page.Data) != 1 || page.Data[0].Version != 2 || page.Data[0].Status != "published" {
 		t.Fatalf("分页解析不符: %+v", page)
 	}
-	if hub.lastQuery.Get("projectId") != "11" || hub.lastQuery.Get("status") != "published" {
+	if hub.lastQuery.Get("projectId") != "11" || hub.lastQuery.Get("menuKind") != "tenant" || hub.lastQuery.Get("status") != "published" {
 		t.Fatalf("查询参数不符: %s", hub.lastQuery.Encode())
 	}
 }
@@ -358,6 +358,21 @@ func TestSaasTenantReissue(t *testing.T) {
 	}
 }
 
+func TestSaasTenantSyncMenus(t *testing.T) {
+	hub := newFakeHub(t)
+	hub.routes["POST /api/saas-tenants/sync-menus"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{"ids": []int{41}, "count": 1})
+	}
+	client := hub.newClient(t)
+	err := client.SaasTenants.SyncMenus(context.Background(), 11, []int{41})
+	if err != nil {
+		t.Fatalf("同步菜单失败: %v", err)
+	}
+	if !strings.Contains(string(hub.lastBody), `"projectId":11`) || !strings.Contains(string(hub.lastBody), `"tenantIds":[41]`) {
+		t.Fatalf("同步请求体不符: %s", string(hub.lastBody))
+	}
+}
+
 // TestSaasTenantBatchRenew - 批量续期：{results,summary} 结构解析
 func TestSaasTenantBatchRenew(t *testing.T) {
 
@@ -618,5 +633,29 @@ func TestProjectModules(t *testing.T) {
 	}
 	if !strings.Contains(string(hub.lastBody), `"mode":"up"`) {
 		t.Fatalf("排序请求体不符: %s", string(hub.lastBody))
+	}
+}
+
+// TestSaasOverridesMenusRemoveOnly - overrides 菜单裁剪只保留 remove：
+// SDK 侧 SaasOverrideMenus 已无 Add 字段，序列化输出不应包含 add、仅含 remove
+func TestSaasOverridesMenusRemoveOnly(t *testing.T) {
+
+	raw, err := json.Marshal(SaasOverrides{Menus: SaasOverrideMenus{Remove: []string{"legacy.menu"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"add"`) {
+		t.Fatalf("overrides 序列化不应包含 add 键: %s", raw)
+	}
+	var decoded struct {
+		Menus struct {
+			Remove []string `json:"remove"`
+		} `json:"menus"`
+	}
+	if err = json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("overrides 反序列化失败: %v", err)
+	}
+	if len(decoded.Menus.Remove) != 1 || decoded.Menus.Remove[0] != "legacy.menu" {
+		t.Fatalf("remove 序列化不符: %s", raw)
 	}
 }
