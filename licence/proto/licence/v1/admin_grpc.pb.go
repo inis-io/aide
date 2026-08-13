@@ -1320,6 +1320,9 @@ const (
 	LicenseAdminService_GetLicenseHistory_FullMethodName        = "/licenhub.licence.v1.LicenseAdminService/GetLicenseHistory"
 	LicenseAdminService_RowsActivations_FullMethodName          = "/licenhub.licence.v1.LicenseAdminService/RowsActivations"
 	LicenseAdminService_GetActivation_FullMethodName            = "/licenhub.licence.v1.LicenseAdminService/GetActivation"
+	LicenseAdminService_FindLicenseSeats_FullMethodName         = "/licenhub.licence.v1.LicenseAdminService/FindLicenseSeats"
+	LicenseAdminService_GetLicenseSeat_FullMethodName           = "/licenhub.licence.v1.LicenseAdminService/GetLicenseSeat"
+	LicenseAdminService_ReleaseLicenseSeat_FullMethodName       = "/licenhub.licence.v1.LicenseAdminService/ReleaseLicenseSeat"
 )
 
 // LicenseAdminServiceClient is the client API for LicenseAdminService service.
@@ -1344,6 +1347,9 @@ type LicenseAdminServiceClient interface {
 	GetLicenseHistory(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	RowsActivations(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	GetActivation(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	FindLicenseSeats(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	GetLicenseSeat(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	ReleaseLicenseSeat(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 }
 
 type licenseAdminServiceClient struct {
@@ -1534,6 +1540,36 @@ func (c *licenseAdminServiceClient) GetActivation(ctx context.Context, in *Admin
 	return out, nil
 }
 
+func (c *licenseAdminServiceClient) FindLicenseSeats(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, LicenseAdminService_FindLicenseSeats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *licenseAdminServiceClient) GetLicenseSeat(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, LicenseAdminService_GetLicenseSeat_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *licenseAdminServiceClient) ReleaseLicenseSeat(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, LicenseAdminService_ReleaseLicenseSeat_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LicenseAdminServiceServer is the server API for LicenseAdminService service.
 // All implementations must embed UnimplementedLicenseAdminServiceServer
 // for forward compatibility.
@@ -1556,6 +1592,9 @@ type LicenseAdminServiceServer interface {
 	GetLicenseHistory(context.Context, *AdminRequest) (*AdminResponse, error)
 	RowsActivations(context.Context, *AdminRequest) (*AdminResponse, error)
 	GetActivation(context.Context, *AdminRequest) (*AdminResponse, error)
+	FindLicenseSeats(context.Context, *AdminRequest) (*AdminResponse, error)
+	GetLicenseSeat(context.Context, *AdminRequest) (*AdminResponse, error)
+	ReleaseLicenseSeat(context.Context, *AdminRequest) (*AdminResponse, error)
 	mustEmbedUnimplementedLicenseAdminServiceServer()
 }
 
@@ -1619,6 +1658,15 @@ func (UnimplementedLicenseAdminServiceServer) RowsActivations(context.Context, *
 }
 func (UnimplementedLicenseAdminServiceServer) GetActivation(context.Context, *AdminRequest) (*AdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetActivation not implemented")
+}
+func (UnimplementedLicenseAdminServiceServer) FindLicenseSeats(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindLicenseSeats not implemented")
+}
+func (UnimplementedLicenseAdminServiceServer) GetLicenseSeat(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLicenseSeat not implemented")
+}
+func (UnimplementedLicenseAdminServiceServer) ReleaseLicenseSeat(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseLicenseSeat not implemented")
 }
 func (UnimplementedLicenseAdminServiceServer) mustEmbedUnimplementedLicenseAdminServiceServer() {}
 func (UnimplementedLicenseAdminServiceServer) testEmbeddedByValue()                             {}
@@ -1965,6 +2013,60 @@ func _LicenseAdminService_GetActivation_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LicenseAdminService_FindLicenseSeats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LicenseAdminServiceServer).FindLicenseSeats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LicenseAdminService_FindLicenseSeats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LicenseAdminServiceServer).FindLicenseSeats(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LicenseAdminService_GetLicenseSeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LicenseAdminServiceServer).GetLicenseSeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LicenseAdminService_GetLicenseSeat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LicenseAdminServiceServer).GetLicenseSeat(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LicenseAdminService_ReleaseLicenseSeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LicenseAdminServiceServer).ReleaseLicenseSeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LicenseAdminService_ReleaseLicenseSeat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LicenseAdminServiceServer).ReleaseLicenseSeat(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LicenseAdminService_ServiceDesc is the grpc.ServiceDesc for LicenseAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2043,6 +2145,18 @@ var LicenseAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetActivation",
 			Handler:    _LicenseAdminService_GetActivation_Handler,
+		},
+		{
+			MethodName: "FindLicenseSeats",
+			Handler:    _LicenseAdminService_FindLicenseSeats_Handler,
+		},
+		{
+			MethodName: "GetLicenseSeat",
+			Handler:    _LicenseAdminService_GetLicenseSeat_Handler,
+		},
+		{
+			MethodName: "ReleaseLicenseSeat",
+			Handler:    _LicenseAdminService_ReleaseLicenseSeat_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

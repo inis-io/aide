@@ -10,6 +10,11 @@ const Algorithm = "Ed25519"
 // EnvelopeVersion - 信封结构版本
 const EnvelopeVersion = 1
 
+const (
+	BindingPolicySingle = "single"
+	BindingPolicySeats  = "seats"
+)
+
 // Binding - 载荷绑定信息（实例/指纹/域名）
 type Binding struct {
 	Type  string `json:"type"`
@@ -40,6 +45,20 @@ type Payload struct {
 	IssuedAt         string           `json:"issuedAt"`
 	KeyVersion       string           `json:"keyVersion"`
 	Nonce            string           `json:"nonce"`
+	// BindingPolicy - 绑定策略：single（单机）或 seats（多机席位）
+	BindingPolicy string `json:"bindingPolicy"`
+	// SeatLimit - 席位上限；single 固定为 1，seats 至少为 2
+	SeatLimit int `json:"seatLimit"`
+}
+
+// normalizePayload - 为历史无席位字段信封补齐 single/1 解释。
+func normalizePayload(payload *Payload) {
+	if payload.BindingPolicy == "" {
+		payload.BindingPolicy = BindingPolicySingle
+	}
+	if payload.SeatLimit <= 0 {
+		payload.SeatLimit = 1
+	}
 }
 
 // Envelope - 签名信封（下发给客户端的完整许可证文件结构）
@@ -75,6 +94,7 @@ func ParseEnvelope(data []byte) (envelope Envelope, rawPayload []byte, err error
 	if err = json.Unmarshal(raw.Payload, &envelope.Payload); err != nil {
 		return Envelope{}, nil, err
 	}
+	normalizePayload(&envelope.Payload)
 	envelope.Version = raw.Version
 	envelope.Algorithm = raw.Algorithm
 	envelope.Signature = raw.Signature

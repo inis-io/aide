@@ -192,3 +192,30 @@ func (this *LicensesResource) ActivationTake(ctx context.Context, id int) (*Acti
 	}
 	return &result, nil
 }
+
+// Seats - 许可证机器席位分页：GET /api/licenses/seats/find。
+func (this *LicensesResource) Seats(ctx context.Context, params *LicenseSeatFindParams) (*Page[LicenseSeat], error) {
+	var result Page[LicenseSeat]
+	if err := this.client.get(ctx, "/api/licenses/seats/find", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SeatTake - 机器席位详情：GET /api/licenses/seats/take?id=N。
+func (this *LicensesResource) SeatTake(ctx context.Context, id int) (*LicenseSeat, error) {
+	var result LicenseSeat
+	if err := this.client.getWithQuery(ctx, "/api/licenses/seats/take", idQuery(id), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ReleaseSeat - 释放机器席位（仅平台用户，需 license.seat.release）：POST /api/licenses/seats/release。
+func (this *LicensesResource) ReleaseSeat(ctx context.Context, input LicenseSeatReleaseInput) (*StatusResult, error) {
+	var result StatusResult
+	if err := this.client.post(ctx, "/api/licenses/seats/release", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

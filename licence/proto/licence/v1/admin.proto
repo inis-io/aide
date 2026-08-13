@@ -82,6 +82,9 @@ service LicenseAdminService {
   rpc GetLicenseHistory(AdminRequest) returns (AdminResponse);
   rpc RowsActivations(AdminRequest) returns (AdminResponse);
   rpc GetActivation(AdminRequest) returns (AdminResponse);
+  rpc FindLicenseSeats(AdminRequest) returns (AdminResponse);
+  rpc GetLicenseSeat(AdminRequest) returns (AdminResponse);
+  rpc ReleaseLicenseSeat(AdminRequest) returns (AdminResponse);
 }
 
 service SigningKeyAdminService {

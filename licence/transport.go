@@ -19,6 +19,7 @@ type activateBody struct {
 	FingerprintHash string `json:"fingerprintHash"`
 	ClientPublicKey string `json:"clientPublicKey"`
 	ClientTime      int64  `json:"clientTime,omitempty"`
+	DeviceName      string `json:"deviceName,omitempty"`
 }
 
 // validateBody - 校验请求体（契约 §2.2）
@@ -38,6 +39,7 @@ type runtimeResponse struct {
 	Envelope        json.RawMessage `json:"envelope"`
 	ActivationNo    string          `json:"activationNo"`
 	ActivationToken string          `json:"activationToken"`
+	SeatNo          string          `json:"seatNo"`
 	ExpiresAt       int64           `json:"expiresAt"`
 	Message         string          `json:"message"`
 }
@@ -68,7 +70,7 @@ func (this *Client) activateLocked(ctx context.Context) error {
 	body, err := json.Marshal(activateBody{
 		LicenseNo: this.options.LicenseNo, InstanceNo: this.options.InstanceNo,
 		FingerprintHash: this.fingerprint, ClientPublicKey: publicKey,
-		ClientTime: time.Now().UnixMilli(),
+		ClientTime: time.Now().UnixMilli(), DeviceName: this.options.DeviceName,
 	})
 	if err != nil {
 		return err
@@ -102,6 +104,7 @@ func (this *Client) activateLocked(ctx context.Context) error {
 	this.mu.Lock()
 	this.state.ActivationToken = response.ActivationToken
 	this.state.ActivationNo = response.ActivationNo
+	this.state.SeatNo = response.SeatNo
 	this.state.ExpiresAt = response.ExpiresAt
 	this.mu.Unlock()
 	this.setStatus(response.Status)
@@ -166,6 +169,22 @@ func (this *Client) validateLocked(ctx context.Context) error {
 		return this.activateLocked(ctx)
 	}
 
+	// 席位释放是非自动恢复终态：保留 token/私钥/席位号，清除派生放行与信封缓存。
+	if response.Status == StatusSeatReleased {
+		this.mu.Lock()
+		this.state.Envelope = nil
+		this.state.Configs = make(map[string]ConfigItem)
+		this.state.ConfigSyncVersion = 0
+		this.state.PlatformConfigs = make(map[string]PlatformConfigItem)
+		this.state.PlatformConfigSyncVersion = 0
+		this.envelope = Envelope{}
+		clear(this.tenantCache)
+		this.mu.Unlock()
+		this.setStatus(StatusSeatReleased)
+		this.persist()
+		return errors.New("许可证机器席位已被释放，请确认容量后显式调用 Reactivate 或 Reset")
+	}
+
 	// 放行状态：滑动刷新 + 载荷变化时替换信封
 	if passThrough(response.Status) {
 		this.mu.Lock()
@@ -202,6 +221,15 @@ func (this *Client) currentLocked(ctx context.Context) (Envelope, error) {
 		return Envelope{}, err
 	}
 	this.updateClockOffset(response.ServerTime)
+	if response.Status == StatusSeatReleased {
+		this.mu.Lock()
+		this.state.Envelope = nil
+		this.envelope = Envelope{}
+		this.mu.Unlock()
+		this.setStatus(StatusSeatReleased)
+		this.persist()
+		return Envelope{}, errors.New("许可证机器席位已被释放，请确认容量后显式调用 Reactivate 或 Reset")
+	}
 
 	if response.Status != StatusValid && response.Status != StatusExpiring && response.Status != StatusGrace {
 		this.setStatus(response.Status)

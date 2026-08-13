@@ -28,6 +28,7 @@ type ActivateRequest struct {
 	FingerprintHash string                 `protobuf:"bytes,3,opt,name=fingerprint_hash,json=fingerprintHash,proto3" json:"fingerprint_hash,omitempty"`
 	ClientPublicKey string                 `protobuf:"bytes,4,opt,name=client_public_key,json=clientPublicKey,proto3" json:"client_public_key,omitempty"`
 	ClientTime      int64                  `protobuf:"varint,5,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
+	DeviceName      string                 `protobuf:"bytes,6,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -95,6 +96,13 @@ func (x *ActivateRequest) GetClientTime() int64 {
 		return x.ClientTime
 	}
 	return 0
+}
+
+func (x *ActivateRequest) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
 }
 
 type ValidateRequest struct {
@@ -236,6 +244,7 @@ type RuntimeResponse struct {
 	ActivationToken string                 `protobuf:"bytes,5,opt,name=activation_token,json=activationToken,proto3" json:"activation_token,omitempty"`
 	ExpiresAt       int64                  `protobuf:"varint,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Message         string                 `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	SeatNo          string                 `protobuf:"bytes,8,opt,name=seat_no,json=seatNo,proto3" json:"seat_no,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -315,6 +324,13 @@ func (x *RuntimeResponse) GetExpiresAt() int64 {
 func (x *RuntimeResponse) GetMessage() string {
 	if x != nil {
 		return x.Message
+	}
+	return ""
+}
+
+func (x *RuntimeResponse) GetSeatNo() string {
+	if x != nil {
+		return x.SeatNo
 	}
 	return ""
 }
@@ -1512,7 +1528,7 @@ var File_licence_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\x18licence/v1/runtime.proto\x12\x13licenhub.licence.v1\"\xc9\x01\n" +
+	"\x18licence/v1/runtime.proto\x12\x13licenhub.licence.v1\"\xea\x01\n" +
 	"\x0fActivateRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12\x1f\n" +
@@ -1521,7 +1537,9 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x10fingerprint_hash\x18\x03 \x01(\tR\x0ffingerprintHash\x12*\n" +
 	"\x11client_public_key\x18\x04 \x01(\tR\x0fclientPublicKey\x12\x1f\n" +
 	"\vclient_time\x18\x05 \x01(\x03R\n" +
-	"clientTime\"\xb1\x02\n" +
+	"clientTime\x12\x1f\n" +
+	"\vdevice_name\x18\x06 \x01(\tR\n" +
+	"deviceName\"\xb1\x02\n" +
 	"\x0fValidateRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12)\n" +
@@ -1537,7 +1555,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"6\n" +
 	"\x15CurrentLicenseRequest\x12\x1d\n" +
 	"\n" +
-	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\xf8\x01\n" +
+	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\x91\x02\n" +
 	"\x0fRuntimeResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -1547,7 +1565,8 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x10activation_token\x18\x05 \x01(\tR\x0factivationToken\x12\x1d\n" +
 	"\n" +
 	"expires_at\x18\x06 \x01(\x03R\texpiresAt\x12\x18\n" +
-	"\amessage\x18\a \x01(\tR\amessage\"\xb2\x01\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x12\x17\n" +
+	"\aseat_no\x18\b \x01(\tR\x06seatNo\"\xb2\x01\n" +
 	"\x12UpdateCheckRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12)\n" +

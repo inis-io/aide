@@ -379,6 +379,10 @@ type License struct {
 	ProjectId int `json:"projectId"`
 	// InstanceId - 部署实例ID
 	InstanceId int `json:"instanceId"`
+	// BindingPolicy - 绑定策略（single/seats）
+	BindingPolicy string `json:"bindingPolicy"`
+	// SeatLimit - 席位上限
+	SeatLimit int `json:"seatLimit"`
 	// Environment - 环境
 	Environment string `json:"environment"`
 	// LicenseType - 许可证类型
@@ -490,6 +494,8 @@ type Activation struct {
 	ActivationNo string `json:"activationNo"`
 	// LicenseId - 许可证ID
 	LicenseId int `json:"licenseId"`
+	// SeatId - 所属席位ID
+	SeatId int `json:"seatId"`
 	// InstanceId - 部署实例ID
 	InstanceId int `json:"instanceId"`
 	// FingerprintHash - 服务器指纹哈希
@@ -500,7 +506,7 @@ type Activation struct {
 	TokenHash string `json:"tokenHash"`
 	// ClientPublicKey - 客户端请求验签公钥（Ed25519 hex）
 	ClientPublicKey string `json:"clientPublicKey"`
-	// Status - 状态（active/grace/expired）
+	// Status - 状态（active/grace/expired/replaced/revoked）
 	Status string `json:"status"`
 	// ActivatedAt - 激活时间（毫秒）
 	ActivatedAt int64 `json:"activatedAt"`
@@ -516,6 +522,24 @@ type Activation struct {
 	CreateAt int64 `json:"createAt"`
 	// UpdateAt - 更新时间（毫秒）
 	UpdateAt int64 `json:"updateAt"`
+}
+
+// LicenseSeat - 许可证机器席位（平台 models/basic.LicenseSeat，只增不删）。
+type LicenseSeat struct {
+	Id                  int    `json:"id"`
+	SeatNo              string `json:"seatNo"`
+	LicenseId           int    `json:"licenseId"`
+	FingerprintHash     string `json:"fingerprintHash"`
+	DeviceName          string `json:"deviceName"`
+	Status              string `json:"status"`
+	CurrentActivationId int    `json:"currentActivationId"`
+	FirstActivatedAt    int64  `json:"firstActivatedAt"`
+	LastSeenAt          int64  `json:"lastSeenAt"`
+	ReleasedAt          int64  `json:"releasedAt"`
+	ReleasedBy          int    `json:"releasedBy"`
+	ReleaseReason       string `json:"releaseReason"`
+	CreateAt            int64  `json:"createAt"`
+	UpdateAt            int64  `json:"updateAt"`
 }
 
 // LicensePayloadView - 签发载荷视图（GET /api/licenses/take-payload 的 data）
@@ -563,6 +587,10 @@ type LicenseIssuePayload struct {
 	Environment string `json:"environment,omitempty"`
 	// InstanceId - 部署实例ID
 	InstanceId int `json:"instanceId,omitempty"`
+	// BindingPolicy - 绑定策略（single/seats）
+	BindingPolicy string `json:"bindingPolicy,omitempty"`
+	// SeatLimit - 席位上限
+	SeatLimit int `json:"seatLimit,omitempty"`
 	// ValidFrom - 生效时间（毫秒）
 	ValidFrom int64 `json:"validFrom,omitempty"`
 	// ValidUntil - 到期时间（毫秒，0=永久）
@@ -655,6 +683,20 @@ type ActivationFindParams struct {
 	LicenseId int `json:"licenseId,omitempty"`
 	// Status - 状态（审批视角生效）
 	Status string `json:"status,omitempty"`
+}
+
+// LicenseSeatFindParams - 机器席位分页查询参数。
+type LicenseSeatFindParams struct {
+	LicenseId int    `json:"licenseId"`
+	Status    string `json:"status,omitempty"`
+	Page      int    `json:"page,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
+// LicenseSeatReleaseInput - 管理员释放机器席位参数。
+type LicenseSeatReleaseInput struct {
+	Id     int    `json:"id"`
+	Reason string `json:"reason"`
 }
 
 // ============================= 签名密钥 =============================

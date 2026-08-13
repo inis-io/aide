@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"math/rand/v2"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,6 +45,8 @@ type Options struct {
 	LicenseNo string
 	// InstanceNo - 部署实例编号（可选，许可证绑定实例时上送）
 	InstanceNo string
+	// DeviceName - 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
+	DeviceName string
 	// Salt - 指纹盐（必填，与实例登记时使用的盐一致）
 	Salt string
 	// PublicKeys - 验签公钥表（必填，keyVersion -> hex 公钥，支持多版本并存轮换）
@@ -79,6 +83,8 @@ type runtimeState struct {
 	ClientSeed string `json:"clientSeed"`
 	// ActivationNo - 激活编号
 	ActivationNo string `json:"activationNo"`
+	// SeatNo - 当前机器席位编号（仅展示/排障）
+	SeatNo string `json:"seatNo,omitempty"`
 	// ExpiresAt - 激活有效期截止（毫秒，滑动窗口）
 	ExpiresAt int64 `json:"expiresAt"`
 	// Status - 最近一次服务端判定状态
@@ -154,6 +160,13 @@ func New(options Options) (*Client, error) {
 	}
 	if options.StorageDir == "" {
 		options.StorageDir = "./runtime/licence"
+	}
+	if options.DeviceName == "" {
+		options.DeviceName, _ = os.Hostname()
+	}
+	options.DeviceName = strings.TrimSpace(options.DeviceName)
+	if len(options.DeviceName) > 128 {
+		options.DeviceName = options.DeviceName[:128]
 	}
 	if options.RefreshInterval <= 0 {
 		options.RefreshInterval = 12 * time.Hour
@@ -245,6 +258,13 @@ func (this *Client) Status() string {
 	return this.state.Status
 }
 
+// SeatNo - 返回当前机器的席位编号；尚未激活或历史服务端未返回时为空。
+func (this *Client) SeatNo() string {
+	this.mu.RLock()
+	defer this.mu.RUnlock()
+	return this.state.SeatNo
+}
+
 // Envelope - 当前缓存信封（第二返回值标识是否存在）
 func (this *Client) Envelope() (Envelope, bool) {
 	this.mu.RLock()
@@ -296,6 +316,22 @@ func (this *Client) Reactivate(ctx context.Context) error {
 	return this.activateLocked(ctx)
 }
 
+// Reset - 清除本机运行状态，不通知平台释放席位。
+// 下次 Start 会以同一指纹重新激活，并由服务端复用或重新占用原席位。
+func (this *Client) Reset() error {
+	this.opMu.Lock()
+	defer this.opMu.Unlock()
+	this.mu.Lock()
+	this.state = runtimeState{Configs: make(map[string]ConfigItem), PlatformConfigs: make(map[string]PlatformConfigItem)}
+	this.envelope = Envelope{}
+	this.clockOffset = 0
+	clear(this.pendingUsage)
+	clear(this.tenantCache)
+	this.retryDelay = 0
+	this.mu.Unlock()
+	return this.store.Clear()
+}
+
 // Current - 按需拉取当前生效信封（不做滑动刷新；失败返回错误，不影响本地缓存）
 func (this *Client) Current(ctx context.Context) (Envelope, error) {
 
@@ -328,8 +364,12 @@ func (this *Client) tick(ctx context.Context) {
 
 	this.mu.RLock()
 	hasToken := this.state.ActivationToken != ""
+	status := this.state.Status
 	this.mu.RUnlock()
 
+	if status == StatusSeatLimitExceeded || status == StatusSeatReleased {
+		return
+	}
 	if !hasToken {
 		_ = this.activateLocked(ctx)
 		return
@@ -418,17 +458,21 @@ func (this *Client) restore() error {
 	// 旧版本在首次激活被拒绝时曾落盘不含信封的半成品状态。
 	// 该状态不具备离线恢复价值，按未激活处理并清理，避免解析空信封卡死启动。
 	rawEnvelope := bytes.TrimSpace(state.Envelope)
-	if len(rawEnvelope) == 0 || bytes.Equal(rawEnvelope, []byte("null")) {
+	if (len(rawEnvelope) == 0 || bytes.Equal(rawEnvelope, []byte("null"))) && state.Status != StatusSeatReleased {
 		return this.store.Clear()
 	}
 
-	envelope, rawPayload, err := ParseEnvelope(state.Envelope)
-	if err != nil {
-		return err
-	}
-	publicKey, exist := this.options.PublicKeys[envelope.Payload.KeyVersion]
-	if !exist || !Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
-		return errors.New("本地缓存信封验签失败")
+	var envelope Envelope
+	if len(rawEnvelope) > 0 && !bytes.Equal(rawEnvelope, []byte("null")) {
+		var rawPayload []byte
+		envelope, rawPayload, err = ParseEnvelope(state.Envelope)
+		if err != nil {
+			return err
+		}
+		publicKey, exist := this.options.PublicKeys[envelope.Payload.KeyVersion]
+		if !exist || !Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
+			return errors.New("本地缓存信封验签失败")
+		}
 	}
 
 	this.mu.Lock()
@@ -443,7 +487,9 @@ func (this *Client) restore() error {
 	this.mu.Unlock()
 
 	// 启动即按本地时间维度给出初始状态（等待首轮服务端判定修正）
-	this.offline()
+	if state.Status != StatusSeatReleased {
+		this.offline()
+	}
 	return nil
 }
 
@@ -451,7 +497,7 @@ func (this *Client) restore() error {
 func (this *Client) persist() {
 
 	this.mu.RLock()
-	if len(this.state.Envelope) == 0 || this.envelope.Payload.LicenseId == "" {
+	if (len(this.state.Envelope) == 0 || this.envelope.Payload.LicenseId == "") && this.state.Status != StatusSeatReleased {
 		this.mu.RUnlock()
 		// 只有已验签的完整信封才能成为可恢复状态。
 		// 首次激活被拒绝时不保存 token/客户端私钥等半成品数据。

@@ -136,6 +136,9 @@ func (this *LicenceClass) VerifyRaw(rawPayload []byte, signatureHex string, publ
 func (this *LicenceClass) Parse(data []byte) (Envelope, error) {
 	var envelope Envelope
 	err := json.Unmarshal(data, &envelope)
+	if err == nil {
+		normalizePayload(&envelope.Payload)
+	}
 	return envelope, err
 }
 

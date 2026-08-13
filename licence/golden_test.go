@@ -39,9 +39,10 @@ var goldenVectors = []goldenVector{
 			Limits:   map[string]int64{"max_users": 100, "api<call>&daily": 1000000},
 			Binding:  &Binding{Type: "fingerprint", Value: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
 			IssuedAt: "2026-08-08T12:00:00Z", KeyVersion: "license-key-2026-01", Nonce: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+			BindingPolicy: "single", SeatLimit: 1,
 		},
-		canonical: `{"licenseId":"LIC-2026-000123","userId":"USR-2026-000001","projectId":"PRJ-2026-000001","instanceId":"INS-2026-000001","environment":"production","validFrom":"2026-01-01T00:00:00Z","validUntil":"2027-01-01T00:00:00Z","maintenanceUntil":"2026-12-31T23:59:59Z","upgradeUntil":"2026-12-31T23:59:59Z","graceDays":15,"versionRange":"\u003e=2.0.0 \u003c3.0.0","features":{"ai.chat":false,"export\u003cpro\u003e\u0026":true,"report.advanced":true},"limits":{"api\u003ccall\u003e\u0026daily":1000000,"max_users":100},"binding":{"type":"fingerprint","value":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90"}`,
-		signature: "f97019aefe0b90a9561baa93301e8c52bcc570105bc61f9cf03b0a27746417f3319a6f06556435d8d078969ea6f868f670ff61bf88f0fd64f4fddc6f4aa75c0e",
+		canonical: `{"licenseId":"LIC-2026-000123","userId":"USR-2026-000001","projectId":"PRJ-2026-000001","instanceId":"INS-2026-000001","environment":"production","validFrom":"2026-01-01T00:00:00Z","validUntil":"2027-01-01T00:00:00Z","maintenanceUntil":"2026-12-31T23:59:59Z","upgradeUntil":"2026-12-31T23:59:59Z","graceDays":15,"versionRange":"\u003e=2.0.0 \u003c3.0.0","features":{"ai.chat":false,"export\u003cpro\u003e\u0026":true,"report.advanced":true},"limits":{"api\u003ccall\u003e\u0026daily":1000000,"max_users":100},"binding":{"type":"fingerprint","value":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90","bindingPolicy":"single","seatLimit":1}`,
+		signature: "d69d53f0e6cdca38ff8d7e9823100e95592417ea0c0fcbe88f626409a55a1b552b0b82f6026985eb1b13ced0578284423dd8bb61cb03375cb14068e423300408",
 	},
 	{
 		name: "最小字段永久授权",
@@ -52,9 +53,10 @@ var goldenVectors = []goldenVector{
 			GraceDays: 0, VersionRange: "",
 			Features: map[string]bool{}, Limits: map[string]int64{}, Binding: nil,
 			IssuedAt: "2026-08-08T12:00:00Z", KeyVersion: "license-key-2026-01", Nonce: "00000000000000000000000000000000",
+			BindingPolicy: "seats", SeatLimit: 5,
 		},
-		canonical: `{"licenseId":"LIC-2026-000456","userId":"USR-2026-000002","projectId":"PRJ-2026-000002","instanceId":"","environment":"trial","validFrom":"2026-01-01T00:00:00Z","validUntil":"","maintenanceUntil":"","upgradeUntil":"","graceDays":0,"versionRange":"","features":{},"limits":{},"binding":null,"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"00000000000000000000000000000000"}`,
-		signature: "f4dae4a2074e4f8c0a26ce64d1117409f1618530e2190bdea41c7894bb568582539da047d10986b99c68e617317cadd9d06e4fcb9c0adf4f23f6040416b5060e",
+		canonical: `{"licenseId":"LIC-2026-000456","userId":"USR-2026-000002","projectId":"PRJ-2026-000002","instanceId":"","environment":"trial","validFrom":"2026-01-01T00:00:00Z","validUntil":"","maintenanceUntil":"","upgradeUntil":"","graceDays":0,"versionRange":"","features":{},"limits":{},"binding":null,"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"00000000000000000000000000000000","bindingPolicy":"seats","seatLimit":5}`,
+		signature: "4bb18ffcad47f90fcd4e2264adaa633bf014bc57cafc810140acbb27cc69b2eb2b57cde14ca9019dbab8da9849b8daa7ea9a87e81f6a18572f7941eab944b10d",
 	},
 }
 

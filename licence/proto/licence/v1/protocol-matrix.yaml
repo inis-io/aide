@@ -4,7 +4,7 @@ defaults:
   transport_fallback: false
   envelope: raw_json_bytes
 runtime:
-  - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false]
+  - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, deviceName]
   - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true]
   - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true]
   - [Client.CheckUpdate, POST, /api/v1/updates/check, UpdateRuntimeService/Check, activation-sign-v1, "", update, read, normal, true]
@@ -67,6 +67,9 @@ admin:
     - [GetLicenseHistory, GET, /api/licenses/history/take, permission, license.read, normal]
     - [RowsActivations, GET, /api/licenses/activations/rows, permission, license.read, normal]
     - [GetActivation, GET, /api/licenses/activations/take, permission, license.read, normal]
+    - [FindLicenseSeats, GET, /api/licenses/seats/find, permission, license.seat.read, normal]
+    - [GetLicenseSeat, GET, /api/licenses/seats/take, permission, license.seat.read, normal]
+    - [ReleaseLicenseSeat, POST, /api/licenses/seats/release, permission, license.seat.release, high]
   SigningKeyAdminService:
     - [GetSigningPublicKey, GET, /api/signing-keys/public, authenticated, "", normal]
     - [RotateSigningKey, POST, /api/signing-keys/rotate, permission, system.signing-key.rotate, critical]

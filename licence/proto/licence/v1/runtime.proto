@@ -46,6 +46,7 @@ message ActivateRequest {
   string fingerprint_hash = 3;
   string client_public_key = 4;
   int64 client_time = 5;
+  string device_name = 6;
 }
 
 message ValidateRequest {
@@ -71,6 +72,7 @@ message RuntimeResponse {
   string activation_token = 5;
   int64 expires_at = 6;
   string message = 7;
+  string seat_no = 8;
 }
 
 message UpdateCheckRequest {

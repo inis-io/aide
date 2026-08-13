@@ -250,6 +250,12 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.license.RowsActivations(callCtx, request)
 	case http.MethodGet + " /api/licenses/activations/take":
 		response, err = this.license.GetActivation(callCtx, request)
+	case http.MethodGet + " /api/licenses/seats/find":
+		response, err = this.license.FindLicenseSeats(callCtx, request)
+	case http.MethodGet + " /api/licenses/seats/take":
+		response, err = this.license.GetLicenseSeat(callCtx, request)
+	case http.MethodPost + " /api/licenses/seats/release":
+		response, err = this.license.ReleaseLicenseSeat(callCtx, request)
 
 	case http.MethodGet + " /api/signing-keys/public":
 		response, err = this.signingKey.GetSigningPublicKey(callCtx, request)

@@ -9,6 +9,8 @@ const (
 	StatusExpired           = "EXPIRED"             // 授权已到期（含宽限期耗尽）或凭证失效
 	StatusRevoked           = "REVOKED"             // 许可证已吊销
 	StatusSuspended         = "SUSPENDED"           // 因商务或管理原因暂停
+	StatusSeatLimitExceeded = "SEAT_LIMIT_EXCEEDED" // 多机席位已满，激活失败且不自动重试
+	StatusSeatReleased      = "SEAT_RELEASED"       // 所属席位已释放，保留本机凭证但不自动重激活
 	StatusInstanceMismatch  = "INSTANCE_MISMATCH"   // 部署实例或设备绑定不匹配
 	StatusVersionNotAllowed = "VERSION_NOT_ALLOWED" // 当前项目版本不在授权范围
 	StatusFeatureNotAllowed = "FEATURE_NOT_ALLOWED" // 功能未授权

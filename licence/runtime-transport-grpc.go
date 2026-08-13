@@ -163,6 +163,9 @@ func runtimeMap(response *licencev1.RuntimeResponse) map[string]any {
 	if response.GetActivationToken() != "" {
 		result["activationToken"] = response.GetActivationToken()
 	}
+	if response.GetSeatNo() != "" {
+		result["seatNo"] = response.GetSeatNo()
+	}
 	if response.GetExpiresAt() > 0 {
 		result["expiresAt"] = response.GetExpiresAt()
 	}
@@ -260,7 +263,7 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 		}
 		request := &licencev1.ActivateRequest{
 			LicenseNo: input.LicenseNo, InstanceNo: input.InstanceNo, FingerprintHash: input.FingerprintHash,
-			ClientPublicKey: input.ClientPublicKey, ClientTime: input.ClientTime,
+			ClientPublicKey: input.ClientPublicKey, ClientTime: input.ClientTime, DeviceName: input.DeviceName,
 		}
 		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Activate_FullMethodName, request, false)
 		if err != nil {

@@ -31,6 +31,8 @@ type fakePlatform struct {
 	releasePublicKey string
 	// clientPublicKey - activate 注册的客户端验签公钥
 	clientPublicKey string
+	// deviceName - activate 上报的设备名称
+	deviceName string
 	// tokenHash - 激活令牌哈希（SHA-256 hex，库存哈希不存原文）
 	tokenHash string
 	// expiresAt - 激活有效期截止（毫秒）
@@ -39,6 +41,8 @@ type fakePlatform struct {
 	validUntil string
 	// graceDays - 宽限期（天）
 	graceDays int
+	// forceStatus - 非空时强制运行面返回指定状态。
+	forceStatus string
 	// upgradeUntil - 升级权截止（毫秒，0 = 不限）
 	upgradeUntil int64
 	// features/limits - 载荷权益
@@ -262,6 +266,7 @@ func (this *fakePlatform) handleActivate(writer http.ResponseWriter, body []byte
 		return
 	}
 	this.clientPublicKey = params.ClientPublicKey
+	this.deviceName = params.DeviceName
 	token := Licence.Nonce() + Licence.Nonce() + Licence.Nonce() // 48 字节 hex
 	sum := sha256.Sum256([]byte(token))
 	this.tokenHash = hex.EncodeToString(sum[:])
@@ -278,7 +283,7 @@ func (this *fakePlatform) handleActivate(writer http.ResponseWriter, body []byte
 	writeJson(writer, map[string]any{
 		"status": status, "serverTime": time.Now().UnixMilli(),
 		"envelope": envelope, "activationNo": "ACT-2026-000001",
-		"activationToken": token, "expiresAt": this.expiresAt,
+		"activationToken": token, "seatNo": "SEAT-2026-000001", "expiresAt": this.expiresAt,
 	})
 }
 
@@ -362,6 +367,9 @@ func (this *fakePlatform) credential(writer http.ResponseWriter, request *http.R
 
 // status - 时间维度状态判定（平台 JudgeLicenseStatus 简化镜像）
 func (this *fakePlatform) status() string {
+	if this.forceStatus != "" {
+		return this.forceStatus
+	}
 
 	if this.validUntil == "" {
 		return StatusValid
@@ -394,6 +402,7 @@ func (this *fakePlatform) issue(fingerprint string) (Envelope, error) {
 		Features:     this.features, Limits: this.limits,
 		Binding:  &Binding{Type: "fingerprint", Value: fingerprint},
 		IssuedAt: time.Now().UTC().Format(time.RFC3339), KeyVersion: "license-key-2026-01", Nonce: Licence.Nonce(),
+		BindingPolicy: BindingPolicySingle, SeatLimit: 1,
 	}
 	return Licence.Payload(payload).Seed(this.seed).Issue()
 }
@@ -678,6 +687,7 @@ func testOptions(platform *fakePlatform, dir string) Options {
 		ReleasePublicKeys: map[string]string{"release-key-2026-01": platform.releasePublicKey},
 		StorageDir:        dir,
 		Fingerprint:       "test-fingerprint",
+		DeviceName:        "test-device",
 		Version:           "2.3.1",
 		RefreshInterval:   100 * time.Millisecond,
 	}
@@ -698,6 +708,15 @@ func TestClientActivateAndRefresh(t *testing.T) {
 
 	if client.Status() != StatusValid {
 		t.Fatalf("激活后状态应为 VALID，实际 %s", client.Status())
+	}
+	if client.SeatNo() != "SEAT-2026-000001" {
+		t.Fatalf("激活后席位编号错误: %s", client.SeatNo())
+	}
+	platform.mu.Lock()
+	deviceName := platform.deviceName
+	platform.mu.Unlock()
+	if deviceName != "test-device" {
+		t.Fatalf("设备名称未随激活上报: %s", deviceName)
 	}
 	if !client.HasFeature("report.advanced") || client.HasFeature("ai.chat") {
 		t.Fatalf("HasFeature 判定错误")
@@ -968,6 +987,79 @@ func TestClientReactivate(t *testing.T) {
 	}
 	if client.Status() != StatusValid {
 		t.Fatalf("重新激活后应为 VALID，实际 %s", client.Status())
+	}
+}
+
+// TestClientReset - Reset 只清本机状态，不调用平台；再次 Start 才重新激活并恢复席位信息。
+func TestClientReset(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	dir := t.TempDir()
+	client, err := New(testOptions(platform, dir))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	client.Stop()
+
+	if err = client.Reset(); err != nil {
+		t.Fatalf("Reset 失败: %v", err)
+	}
+	if client.Status() != "" || client.SeatNo() != "" {
+		t.Fatalf("Reset 后运行状态未清空: status=%s seat=%s", client.Status(), client.SeatNo())
+	}
+	platform.mu.Lock()
+	callsAfterReset := platform.activateCalls
+	platform.mu.Unlock()
+	if callsAfterReset != 1 {
+		t.Fatalf("Reset 不应通知平台，activate 调用次数 %d", callsAfterReset)
+	}
+
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Reset 后重新 Start 失败: %v", err)
+	}
+	defer client.Stop()
+	if client.SeatNo() != "SEAT-2026-000001" {
+		t.Fatalf("重新激活后未恢复席位编号: %s", client.SeatNo())
+	}
+	platform.mu.Lock()
+	activateCalls := platform.activateCalls
+	platform.mu.Unlock()
+	if activateCalls != 2 {
+		t.Fatalf("Reset 后 Start 应重新激活，实际调用 %d 次", activateCalls)
+	}
+}
+
+// TestSeatLimitExceededStopsBackgroundActivate - 席满拒绝后后台循环不得自动抢席。
+func TestSeatLimitExceededStopsBackgroundActivate(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	platform.mu.Lock()
+	platform.forceStatus = StatusSeatLimitExceeded
+	platform.mu.Unlock()
+	if err = client.Reactivate(t.Context()); err == nil {
+		t.Fatalf("席位已满时 Reactivate 应失败")
+	}
+	platform.mu.Lock()
+	calls := platform.activateCalls
+	platform.mu.Unlock()
+	time.Sleep(350 * time.Millisecond)
+	platform.mu.Lock()
+	after := platform.activateCalls
+	platform.mu.Unlock()
+	if after != calls {
+		t.Fatalf("SEAT_LIMIT_EXCEEDED 后不应后台重试激活: before=%d after=%d", calls, after)
 	}
 }
 
