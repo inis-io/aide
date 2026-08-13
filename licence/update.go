@@ -63,6 +63,7 @@ type checkUpdateResponse struct {
 // CheckUpdate - 在线更新检查（契约：阶段五 /api/v1/updates/check）
 // 上报当前版本与架构，服务端判定授权状态、升级权（upgradeUntil）与灰度规则后
 // 返回 release-key 签名的更新清单；本方法完成清单验签与发布物签名复核。
+// 实例许可证非放行态（含 SEAT_RELEASED）时 fail-closed 返回错误，不回写本地授权状态。
 /**
  * @param osArch string - 平台架构（如 "linux/amd64"，空串 = 不区分）
  * @example：
@@ -100,7 +101,12 @@ func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo,
 		return UpdateInfo{}, errors.New("服务端故障：" + response.Message)
 	}
 	info := UpdateInfo{Status: response.Status}
-	if !passThrough(response.Status) || !response.Update {
+	// 前置闸门：实例许可证非放行态（含 SEAT_RELEASED）fail-closed 返回错误，不回写 client 状态——
+	// 授权状态收敛以 validate 循环为准，本通道只拒绝下发清单。
+	if !passThrough(response.Status) {
+		return info, errors.New("实例许可证非放行态：" + response.Status)
+	}
+	if !response.Update {
 		return info, nil
 	}
 

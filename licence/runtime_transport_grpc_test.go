@@ -307,3 +307,71 @@ func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// runtimeSeatServer - 席位映射断言用运行面假服务端：
+// Activate 捕获 deviceName 上送并返回 seatNo/activationNo/expiresAt，
+// 验证 gRPC activate 的 device_name 上送与 seat_no 回填映射
+type runtimeSeatServer struct {
+	licencev1.UnimplementedLicenseRuntimeServiceServer
+	t          *testing.T
+	deviceName string
+}
+
+func (s *runtimeSeatServer) Activate(_ context.Context, request *licencev1.ActivateRequest) (*licencev1.RuntimeResponse, error) {
+	s.deviceName = request.GetDeviceName()
+	return &licencev1.RuntimeResponse{
+		Status: StatusValid, ServerTime: time.Now().UnixMilli(),
+		ActivationNo: "ACT-2026-000007", SeatNo: "SEAT-2026-000007",
+		ExpiresAt: time.Now().UnixMilli() + 7*24*3600*1000,
+	}, nil
+}
+
+// TestGRPCRuntimeActivateMapsDeviceNameAndSeatNo - gRPC activate：
+// deviceName 随 ActivateRequest 上送，seatNo 经 runtimeMap 回填进协议无关 JSON 响应
+func TestGRPCRuntimeActivateMapsDeviceNameAndSeatNo(t *testing.T) {
+
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	seatServer := &runtimeSeatServer{t: t}
+	licencev1.RegisterLicenseRuntimeServiceServer(server, seatServer)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	seed, _, err := generateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
+	transport := &grpcRuntimeTransport{client: client, conn: conn, license: licencev1.NewLicenseRuntimeServiceClient(conn)}
+
+	body, err := json.Marshal(activateBody{
+		LicenseNo: "LIC-2026-000123", FingerprintHash: "fp-hash", ClientPublicKey: "pub", DeviceName: "dev-notebook",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, raw, err := transport.RoundTrip(context.Background(), http.MethodPost, "/api/v1/licenses/activate", body, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK {
+		t.Fatalf("code=%d", code)
+	}
+	if seatServer.deviceName != "dev-notebook" {
+		t.Fatalf("deviceName 未随 gRPC 请求上送: %q", seatServer.deviceName)
+	}
+	var response runtimeResponse
+	if err = json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SeatNo != "SEAT-2026-000007" || response.ActivationNo != "ACT-2026-000007" {
+		t.Fatalf("seatNo 回填映射不符: %s", string(raw))
+	}
+	if response.ExpiresAt <= 0 {
+		t.Fatalf("expiresAt 回填映射不符: %s", string(raw))
+	}
+}

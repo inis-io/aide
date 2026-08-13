@@ -12,6 +12,7 @@
 2. [安装](#2-安装)
 3. [快速开始：许可证激活与授权校验（运行面）](#3-快速开始许可证激活与授权校验运行面)
 4. [授权状态与降级策略](#4-授权状态与降级策略)
+   - [多机席位（一 Client 一机一席）](#41-多机席位一-client-一机一席)
 5. [在线更新（更新代理/自更新程序用）](#5-在线更新更新代理自更新程序用)
 6. [SaaS 多租户（服务商集成）](#6-saas-多租户服务商集成)
 7. [管理面（商户 CI/运维自动化，勿随交付项目分发）](#7-管理面商户-ci运维自动化勿随交付项目分发)
@@ -166,6 +167,8 @@ func main() {
 | `CLOCK_TAMPERED` | 疑似回拨系统时间 | 只告警，不停服务 |
 | `EXPIRED` | 到期/凭证失效 | 停止授权功能；SDK 会自动尝试重新激活 |
 | `REVOKED` / `SUSPENDED` | 已吊销/暂停 | 立即停止，提示联系平台方 |
+| `SEAT_LIMIT_EXCEEDED` | 多机席位已满（仅激活时返回） | 停止授权功能；SDK **不自动重试**，释放席位或扩容后显式 `Reactivate`，见 §4.1 |
+| `SEAT_RELEASED` | 管理员释放了本机席位 | 停止授权功能；SDK **不自动重激活**（保留本机凭证），确认容量后显式 `Reactivate`/`Reset`，见 §4.1 |
 | `INSTANCE_MISMATCH` | 机器指纹不匹配 | 走换机流程，见 §8 常见问题 |
 | `VERSION_NOT_ALLOWED` | 版本不在授权范围 | 提示升级/降级 |
 | `FEATURE_NOT_ALLOWED` / `LIMIT_EXCEEDED` | 功能未授权/额度超限 | 关闭入口/提示扩容 |
@@ -180,6 +183,35 @@ licence.Options{
 		// 写日志、推告警、切换降级策略
 	},
 }
+```
+
+### 4.1 多机席位（一 Client 一机一席）
+
+开发/预发许可证可配置「多机席位」（载荷 `bindingPolicy: "seats"` + `seatLimit: N`；单机许可证为 `single` + 1，历史信封缺省也按此解释）：平台为每台机器登记一条席位记录，**一个 Client 实例独占一机一席**——同机反复 `Start` 复用原席位，不同机器各占一席，占满后新机激活被拒。
+
+- **机器名称**：`Options.DeviceName` 仅供平台席位列表展示，缺省取 `os.Hostname()`（去空格、限长 128）；`client.DeviceName()` 返回实际生效值，`client.SeatNo()` 返回本机席位编号（排障用，激活后才有值）。
+- **指纹即席位身份键**：同机指纹必须长期稳定、异机必须不同。克隆镜像/容器等因子雷同场景必须注入 `Options.Fingerprint` 或 `Options.Provider` 区分，否则会出现「同机抢多席」或「异机挤一席」。
+
+席位状态码处置语义（**与 `EXPIRED` 的自动引导不同，SDK 不做任何自动恢复**）：
+
+| 状态码 | 触发时机 | SDK 行为 | 你的动作 |
+|---|---|---|---|
+| `SEAT_LIMIT_EXCEEDED` | 激活时席位已满（仅 activate 返回） | 激活失败并置状态，后台循环停摆，**不自动重试抢席** | 平台管理端释放闲置席位或联系平台方扩容，然后显式 `Reactivate` |
+| `SEAT_RELEASED` | 管理员在平台释放了本机席位（validate/current 返回） | 停止授权功能并触发 `OnStatusChange`；清除信封与派生缓存（项目/平台配置快照、配置同步水位、租户信封缓存）；**保留** activation token、客户端私钥、席位号与状态文件，**不自动 `Reactivate`**，重启后仍稳定停在该状态 | 确认容量后显式 `Reactivate`（重新绑席）或 `Reset`（清本机态后重新激活） |
+
+人工恢复路径的分工：
+
+- `Reactivate(ctx)`：**通知平台**，生成新客户端密钥对重新激活绑席（换机/令牌丢失/EXPIRED 引导/席位恢复共用）；
+- `Reset()`：**不通知平台**（平台侧席位不变），只清本机运行状态；下次 `Start` 以同一指纹重新激活，由服务端复用或重新占用原席位。
+
+> 已知时滞语义：`SEAT_RELEASED` 经 updates/saas/config/events 通道（`CheckUpdate`/`TenantSync`/`ConfigSync`/`PlatformConfigSync`/`EventSubscriber.Poll`）到达时，只 fail-closed 返回错误（`实例许可证非放行态：SEAT_RELEASED` / `许可证非放行态：SEAT_RELEASED`），**不回写 `client.Status()`**；授权状态收敛以 validate 循环为准（最长一个刷新周期 `RefreshInterval`）。
+
+平台侧席位运维走 AdminClient（商户 CI/运维自动化，见 §7 与 §20.5）：
+
+```go
+page, _ := admin.Licenses.Seats(ctx, &licence.LicenseSeatFindParams{LicenseId: 9, Status: "occupied"})
+seat, _ := admin.Licenses.SeatTake(ctx, 3)
+_, _ = admin.Licenses.ReleaseSeat(ctx, licence.LicenseSeatReleaseInput{Id: 3, Reason: "临时腾出席位"})
 ```
 
 ## 5. 在线更新（更新代理/自更新程序用）
@@ -414,6 +446,8 @@ licence.Options{
 | `StatusExpired` | `EXPIRED` | 授权已到期（含宽限期耗尽）或凭证失效 |
 | `StatusRevoked` | `REVOKED` | 许可证已吊销 |
 | `StatusSuspended` | `SUSPENDED` | 因商务或管理原因暂停 |
+| `StatusSeatLimitExceeded` | `SEAT_LIMIT_EXCEEDED` | 多机席位已满，激活失败且不自动重试 |
+| `StatusSeatReleased` | `SEAT_RELEASED` | 所属席位已释放，保留本机凭证但不自动重激活 |
 | `StatusInstanceMismatch` | `INSTANCE_MISMATCH` | 部署实例或设备绑定不匹配 |
 | `StatusVersionNotAllowed` | `VERSION_NOT_ALLOWED` | 当前项目版本不在授权范围 |
 | `StatusFeatureNotAllowed` | `FEATURE_NOT_ALLOWED` | 功能未授权 |
@@ -575,6 +609,7 @@ type Options struct {
     ServerURL          string                 // 平台地址（必填），如 "https://licen-hub.inis.cn"
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
+    DeviceName         string                 // 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
     Salt               string                 // 指纹盐（必填，与实例登记时一致）
     PublicKeys         map[string]string      // 验签公钥表（必填，keyVersion -> hex 公钥，可多版本并存轮换）
     ReleasePublicKeys  map[string]string      // release 验签公钥表（在线更新模块必填）
@@ -599,6 +634,7 @@ type Options struct {
 | `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可验签的本地缓存信封时，平台不可达也能降级启动（按本地时间维度给出 `GRACE` / `EXPIRED` 状态）；无缓存且激活失败时返回错误 |
 | `Stop` | `func (this *Client) Stop()` | 停止后台刷新循环 |
 | `Close` | `func (this *Client) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
+| `Reset` | `func (this *Client) Reset() error` | 清除本机运行状态（token/客户端私钥/信封/派生缓存全清），**不通知平台释放席位**；下次 `Start` 以同一指纹重新激活，由服务端复用或重新占用原席位 |
 
 后台循环行为（开发者零感知）：
 
@@ -606,7 +642,8 @@ type Options struct {
 - 每个请求自动携带客户端私钥签名（校时时间戳 + nonce 防重放）；
 - 断网/平台故障自动按本地缓存信封降级运行（宽限内 `GRACE`，耗尽 `EXPIRED`）；
 - 许可证被续期/调整权益后新信封自动下发、验签、替换缓存；
-- `validate` 返回 `EXPIRED` 时自动清除本地凭证并尝试重新激活。
+- `validate` 返回 `EXPIRED` 时自动清除本地凭证并尝试重新激活；
+- `SEAT_LIMIT_EXCEEDED` / `SEAT_RELEASED` 为非自动恢复终态：后台循环立即停摆，不做任何自动重试/重激活（见 §4.1）。
 - 首次激活被拒绝时不落盘无信封状态；启动时检测到旧版残留的无信封状态会按未激活自愈。
 
 ### 17.3 业务闸门方法
@@ -614,6 +651,8 @@ type Options struct {
 | 方法 | 签名 | 说明 |
 |---|---|---|
 | `Status` | `func (this *Client) Status() string` | 当前授权状态（状态码见 §12.2），业务据此放行/降级 |
+| `SeatNo` | `func (this *Client) SeatNo() string` | 当前机器的席位编号（尚未激活或历史服务端未返回时为空；仅展示/排障） |
+| `DeviceName` | `func (this *Client) DeviceName() string` | 实际生效的机器名称（`Options.DeviceName` 或其缺省主机名，与激活上送值一致） |
 | `Envelope` | `func (this *Client) Envelope() (Envelope, bool)` | 当前缓存信封（第二返回值标识是否存在） |
 | `HasFeature` | `func (this *Client) HasFeature(code string) bool` | 功能权益闸门：放行状态且载荷 `features[code]` 为 true |
 | `GetLimit` | `func (this *Client) GetLimit(key string) (int64, bool)` | 额度查询：返回载荷 `limits[key]`（未配置返回 0, false） |
@@ -679,7 +718,7 @@ type UpgradeReport struct {
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `CheckUpdate` | `func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo, error)` | 在线更新检查：上报当前版本与架构（如 `"linux/amd64"`，空串 = 不区分），服务端判定授权状态、升级权（`upgradeUntil`）与灰度规则后返回 release-key 签名的清单；本方法完成清单验签与发布物签名复核 |
+| `CheckUpdate` | `func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo, error)` | 在线更新检查：上报当前版本与架构（如 `"linux/amd64"`，空串 = 不区分），服务端判定授权状态、升级权（`upgradeUntil`）与灰度规则后返回 release-key 签名的清单；本方法完成清单验签与发布物签名复核；实例许可证非放行态（含 `SEAT_RELEASED`）时 fail-closed 返回错误，不回写本地授权状态 |
 | `VerifyManifest` | `func (this *Client) VerifyManifest(raw json.RawMessage) (*Manifest, error)` | 验签更新清单原文（在线响应与离线更新包 `manifest.json` 共用） |
 | `DownloadArtifact` | `func (this *Client) DownloadArtifact(ctx context.Context, manifest *Manifest, artifact ManifestArtifact, destPath string) error` | 下载发布物并校验（签名复核 + 大小 + SHA-256，全部通过才落盘；先写临时文件，校验通过后原子重命名，大文件下载 30 分钟长超时） |
 | `ReportUpgrade` | `func (this *Client) ReportUpgrade(ctx context.Context, report UpgradeReport) (string, error)` | 上报升级结果（创建或推进升级记录），返回升级记录编号 |
@@ -1006,6 +1045,9 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `HistoryTake` | 变更历史详情 | `GET /api/licenses/history/take?id=N` | `id int` → `*LicenseHistory` |
 | `Activations` | 激活记录列表（不分页） | `GET /api/licenses/activations/rows` | `*ActivationFindParams` → `[]Activation` |
 | `ActivationTake` | 激活记录详情 | `GET /api/licenses/activations/take?id=N` | `id int` → `*Activation` |
+| `Seats` | 许可证机器席位分页（多机席位运维，见 §4.1） | `GET /api/licenses/seats/find` | `*LicenseSeatFindParams` → `*Page[LicenseSeat]` |
+| `SeatTake` | 机器席位详情 | `GET /api/licenses/seats/take?id=N` | `id int` → `*LicenseSeat` |
+| `ReleaseSeat` | 释放机器席位（仅平台用户，需 `license.seat.release` 权限） | `POST /api/licenses/seats/release` | `LicenseSeatReleaseInput` → `*StatusResult` |
 
 #### SigningKeys - 签名密钥（`/api/signing-keys/*`）
 

@@ -171,18 +171,7 @@ func (this *Client) validateLocked(ctx context.Context) error {
 
 	// 席位释放是非自动恢复终态：保留 token/私钥/席位号，清除派生放行与信封缓存。
 	if response.Status == StatusSeatReleased {
-		this.mu.Lock()
-		this.state.Envelope = nil
-		this.state.Configs = make(map[string]ConfigItem)
-		this.state.ConfigSyncVersion = 0
-		this.state.PlatformConfigs = make(map[string]PlatformConfigItem)
-		this.state.PlatformConfigSyncVersion = 0
-		this.envelope = Envelope{}
-		clear(this.tenantCache)
-		this.mu.Unlock()
-		this.setStatus(StatusSeatReleased)
-		this.persist()
-		return errors.New("许可证机器席位已被释放，请确认容量后显式调用 Reactivate 或 Reset")
+		return this.seatReleased()
 	}
 
 	// 放行状态：滑动刷新 + 载荷变化时替换信封
@@ -222,13 +211,7 @@ func (this *Client) currentLocked(ctx context.Context) (Envelope, error) {
 	}
 	this.updateClockOffset(response.ServerTime)
 	if response.Status == StatusSeatReleased {
-		this.mu.Lock()
-		this.state.Envelope = nil
-		this.envelope = Envelope{}
-		this.mu.Unlock()
-		this.setStatus(StatusSeatReleased)
-		this.persist()
-		return Envelope{}, errors.New("许可证机器席位已被释放，请确认容量后显式调用 Reactivate 或 Reset")
+		return Envelope{}, this.seatReleased()
 	}
 
 	if response.Status != StatusValid && response.Status != StatusExpiring && response.Status != StatusGrace {
@@ -245,6 +228,26 @@ func (this *Client) currentLocked(ctx context.Context) (Envelope, error) {
 	this.mu.RLock()
 	defer this.mu.RUnlock()
 	return this.envelope, nil
+}
+
+// seatReleased - SEAT_RELEASED 统一处置（validate/current 共用，保证两条路径清理范围一致）：
+// 清除派生放行与信封缓存（信封原文、项目/平台配置快照与同步水位、租户信封缓存），
+// 置状态并落盘。红线：保留 ActivationToken/ClientSeed/SeatNo/ActivationNo——
+// 席位释放是非自动恢复终态，SDK 不自动重激活，恢复只走显式 Reactivate/Reset。
+func (this *Client) seatReleased() error {
+
+	this.mu.Lock()
+	this.state.Envelope = nil
+	this.state.Configs = make(map[string]ConfigItem)
+	this.state.ConfigSyncVersion = 0
+	this.state.PlatformConfigs = make(map[string]PlatformConfigItem)
+	this.state.PlatformConfigSyncVersion = 0
+	this.envelope = Envelope{}
+	clear(this.tenantCache)
+	this.mu.Unlock()
+	this.setStatus(StatusSeatReleased)
+	this.persist()
+	return errors.New("许可证机器席位已被释放，请确认容量后显式调用 Reactivate 或 Reset")
 }
 
 // doRequest - 统一请求出口：拼接 ServerURL + requestURI，按需附带请求签名三要素

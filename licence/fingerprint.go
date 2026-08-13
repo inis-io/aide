@@ -21,6 +21,9 @@ type factor struct {
 // FingerprintHash - 生成实例指纹哈希（契约 §7）
 // 多因子组合（机器 ID + 系统 UUID + 主板序列号）加盐 SHA-256，禁止单用 IP/MAC；
 // 单因子不可得的平台按既定降级组合（有几个用几个，全不可得则报错）。
+// 稳定性红线：指纹哈希是平台多机席位（license_seats）的身份键——同机必须长期稳定
+// （重装 SDK/重启进程不得漂移，漂移会被平台判定为新机抢占新席位），异机必须不同
+// （克隆镜像/容器场景若因子雷同，必须注入 FingerprintProvider 或 Fingerprint 区分）。
 // override 非空时直接使用（视为业务已完成采集与哈希）；provider 优先于自动采集。
 /**
  * @param salt string - 项目盐（与实例登记时使用的盐一致）

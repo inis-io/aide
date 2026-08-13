@@ -358,3 +358,93 @@ func TestVersionRelease(t *testing.T) {
 		t.Fatalf("发布请求体不符: %s", string(hub.lastBody))
 	}
 }
+
+// TestLicenseSeats - 许可证机器席位分页：query 透传 licenseId/status/分页，Page[LicenseSeat] 解析
+func TestLicenseSeats(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/licenses/seats/find"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"data": []map[string]any{{
+				"id": 3, "seatNo": "SEAT-2026-000003", "licenseId": 9,
+				"fingerprintHash": "fp-hash-3", "deviceName": "dev-notebook",
+				"status": "occupied", "currentActivationId": 31,
+				"firstActivatedAt": 1780000000000, "lastSeenAt": 1780000001000,
+			}},
+			"count": 1, "page": 2,
+		})
+	}
+	client := hub.newClient(t)
+
+	page, err := client.Licenses.Seats(context.Background(), &LicenseSeatFindParams{
+		LicenseId: 9, Status: "occupied", Page: 2, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("席位分页失败: %v", err)
+	}
+	if page.Count != 1 || len(page.Data) != 1 {
+		t.Fatalf("席位分页解析不符: %+v", page)
+	}
+	seat := page.Data[0]
+	if seat.SeatNo != "SEAT-2026-000003" || seat.DeviceName != "dev-notebook" || seat.Status != "occupied" {
+		t.Fatalf("席位字段解析不符: %+v", seat)
+	}
+	query := hub.lastQuery
+	if query.Get("licenseId") != "9" || query.Get("status") != "occupied" ||
+		query.Get("page") != "2" || query.Get("limit") != "10" {
+		t.Fatalf("席位查询参数不符: %s", query.Encode())
+	}
+}
+
+// TestLicenseSeatTake - 机器席位详情：GET /api/licenses/seats/take?id=N
+func TestLicenseSeatTake(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/licenses/seats/take"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"id": 3, "seatNo": "SEAT-2026-000003", "licenseId": 9,
+			"fingerprintHash": "fp-hash-3", "deviceName": "dev-notebook",
+			"status": "released", "releasedAt": 1780000002000, "releasedBy": 1,
+			"releaseReason": "临时腾出席位",
+		})
+	}
+	client := hub.newClient(t)
+
+	seat, err := client.Licenses.SeatTake(context.Background(), 3)
+	if err != nil {
+		t.Fatalf("席位详情失败: %v", err)
+	}
+	if seat.SeatNo != "SEAT-2026-000003" || seat.Status != "released" || seat.ReleaseReason != "临时腾出席位" {
+		t.Fatalf("席位详情解析不符: %+v", seat)
+	}
+	if hub.lastQuery.Get("id") != "3" {
+		t.Fatalf("席位详情查询参数不符: %s", hub.lastQuery.Encode())
+	}
+}
+
+// TestLicenseReleaseSeat - 释放机器席位：POST {id,reason}，返回 {id,status}
+func TestLicenseReleaseSeat(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["POST /api/licenses/seats/release"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{"id": 3, "status": "released"})
+	}
+	client := hub.newClient(t)
+
+	result, err := client.Licenses.ReleaseSeat(context.Background(), LicenseSeatReleaseInput{
+		Id: 3, Reason: "临时腾出席位",
+	})
+	if err != nil {
+		t.Fatalf("释放席位失败: %v", err)
+	}
+	if result.Id != 3 || result.Status != "released" {
+		t.Fatalf("释放结果解析不符: %+v", result)
+	}
+	var sent map[string]any
+	if err = json.Unmarshal(hub.lastBody, &sent); err != nil {
+		t.Fatalf("请求体不是 JSON: %v", err)
+	}
+	if sent["id"] != float64(3) || sent["reason"] != "临时腾出席位" {
+		t.Fatalf("释放请求体不符: %s", string(hub.lastBody))
+	}
+}

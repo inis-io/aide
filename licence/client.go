@@ -265,6 +265,12 @@ func (this *Client) SeatNo() string {
 	return this.state.SeatNo
 }
 
+// DeviceName - 实际生效的机器名称（Options.DeviceName 或其缺省主机名，New 时已归一化）。
+// 与激活上送、平台席位列表展示的值一致，仅展示/排障用途。
+func (this *Client) DeviceName() string {
+	return this.options.DeviceName
+}
+
 // Envelope - 当前缓存信封（第二返回值标识是否存在）
 func (this *Client) Envelope() (Envelope, bool) {
 	this.mu.RLock()

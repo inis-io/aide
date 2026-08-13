@@ -82,6 +82,27 @@
   两种协议共用同一激活记录、公钥、token 与 nonce 防重放存储。
 - 日志不得输出完整 token、JWT、私钥、请求签名和指纹；指纹最多记录前 8 位。
 
+## 多机席位约定（开发/预发许可证）
+
+- 信封载荷含 `bindingPolicy`（`single` 单机 / `seats` 多机席位）与 `seatLimit`（席位上限，
+  single 固定 1）；历史无席位字段的信封按 `single`/1 缺省解释（`normalizePayload`），
+  与平台签发端字节级镜像。
+- 席位身份键是实例指纹哈希（平台 `license_seats` 登记键）：同机必须长期稳定、异机必须
+  不同；克隆镜像/容器等因子雷同场景必须注入 `Options.Fingerprint` 或 `Provider` 区分。
+- `Options.DeviceName` 仅供平台席位列表展示（缺省 `os.Hostname()`，去空格限长 128）；
+  proto 契约为 `ActivateRequest.device_name`（上送）与 `RuntimeResponse.seat_no`（回填），
+  HTTP 对应字段 `deviceName`/`seatNo`，双协议映射必须同时维护。
+- `SEAT_LIMIT_EXCEEDED`（仅 activate 返回）与 `SEAT_RELEASED`（validate/current 返回）是
+  非自动恢复终态：后台循环停摆（tick 特判），SDK 不自动重试/重激活。
+- `SEAT_RELEASED` 处置红线：只清除信封与派生缓存（项目/平台配置快照、配置同步水位、
+  租户信封缓存），**保留** activation token、客户端私钥（ClientSeed）、SeatNo、ActivationNo
+  与状态文件（restore/persist 有对应特判，重启后稳定停在该状态）；恢复只走显式
+  `Reactivate`（通知平台重新绑席）或 `Reset`（只清本机态，不通知平台释放席位）。
+  validate/current 两条路径必须共用同一处置（`seatReleased()`），清理范围禁止分叉。
+- 已知时滞语义：`SEAT_RELEASED` 经 updates/saas/config/events 通道到达时只 fail-closed
+  返回错误、不回写 `client.state.Status`，授权状态收敛以 validate 循环为准（最长一个
+  刷新周期）。
+
 ## 测试与协议一致性
 
 - 纯业务/签名 golden 测试只维护一套；传输测试必须以同一组用例分别跑 HTTP `httptest` 与 gRPC
