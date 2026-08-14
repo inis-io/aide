@@ -82,6 +82,12 @@ func (runtimeSaasServer) Sync(context.Context, *licencev1.TenantSyncRequest) (*l
 		TenantManifest:   &licencev1.TenantManifest{Version: 3, MenusJson: []byte(`[{"code":"workspace"}]`)},
 	}, nil
 }
+func (runtimeSaasServer) Search(context.Context, *licencev1.TenantSearchRequest) (*licencev1.TenantSearchResponse, error) {
+	return &licencev1.TenantSearchResponse{
+		Status:  StatusValid,
+		Tenants: []*licencev1.TenantSearchItem{{TenantCode: "mes-east", TenantName: "华东工厂"}},
+	}, nil
+}
 func (runtimeSaasServer) Validate(context.Context, *licencev1.TenantValidateRequest) (*licencev1.TenantResponse, error) {
 	return &licencev1.TenantResponse{Status: StatusValid}, nil
 }
@@ -291,7 +297,7 @@ func TestGRPCRuntimeTransportMapsAllRoutes(t *testing.T) {
 	}{
 		{"activate", http.MethodPost, "/api/v1/licenses/activate", `{"licenseNo":"LIC-1"}`, false}, {"validate", http.MethodPost, "/api/v1/licenses/validate", `{"licenseNo":"LIC-1"}`, true}, {"current", http.MethodGet, "/api/v1/licenses/current?licenseNo=LIC-1", "", true},
 		{"update-check", http.MethodPost, "/api/v1/updates/check", `{"licenseNo":"LIC-1"}`, true}, {"update-report", http.MethodPost, "/api/v1/updates/report", `{"licenseNo":"LIC-1"}`, true}, {"update-logs", http.MethodPost, "/api/v1/updates/logs", `{"licenseNo":"LIC-1"}`, true},
-		{"tenant-sync", http.MethodPost, "/api/v1/saas/tenants/sync", `{"licenseNo":"LIC-1"}`, true}, {"tenant-validate", http.MethodPost, "/api/v1/saas/tenants/validate", `{"licenseNo":"LIC-1","tenantCode":"t1"}`, true}, {"tenant-current", http.MethodGet, "/api/v1/saas/tenants/current?licenseNo=LIC-1&tenantCode=t1", "", true}, {"config-sync", http.MethodPost, "/api/v1/projects/configs/sync", `{"licenseNo":"LIC-1"}`, true}, {"platform-config-sync", http.MethodPost, "/api/v1/platform/configs/sync", `{"licenseNo":"LIC-1"}`, true},
+		{"tenant-sync", http.MethodPost, "/api/v1/saas/tenants/sync", `{"licenseNo":"LIC-1"}`, true}, {"tenant-search", http.MethodPost, "/api/v1/saas/tenants/search", `{"licenseNo":"LIC-1","prefix":"mes"}`, true}, {"tenant-validate", http.MethodPost, "/api/v1/saas/tenants/validate", `{"licenseNo":"LIC-1","tenantCode":"t1"}`, true}, {"tenant-current", http.MethodGet, "/api/v1/saas/tenants/current?licenseNo=LIC-1&tenantCode=t1", "", true}, {"config-sync", http.MethodPost, "/api/v1/projects/configs/sync", `{"licenseNo":"LIC-1"}`, true}, {"platform-config-sync", http.MethodPost, "/api/v1/platform/configs/sync", `{"licenseNo":"LIC-1"}`, true},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {

@@ -384,6 +384,7 @@ var UpdateRuntimeService_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	SaasRuntimeService_Sync_FullMethodName     = "/licenhub.licence.v1.SaasRuntimeService/Sync"
+	SaasRuntimeService_Search_FullMethodName   = "/licenhub.licence.v1.SaasRuntimeService/Search"
 	SaasRuntimeService_Validate_FullMethodName = "/licenhub.licence.v1.SaasRuntimeService/Validate"
 	SaasRuntimeService_Current_FullMethodName  = "/licenhub.licence.v1.SaasRuntimeService/Current"
 )
@@ -395,6 +396,7 @@ const (
 // SaasRuntimeService - SaaS 租户运行面。
 type SaasRuntimeServiceClient interface {
 	Sync(ctx context.Context, in *TenantSyncRequest, opts ...grpc.CallOption) (*TenantSyncResponse, error)
+	Search(ctx context.Context, in *TenantSearchRequest, opts ...grpc.CallOption) (*TenantSearchResponse, error)
 	Validate(ctx context.Context, in *TenantValidateRequest, opts ...grpc.CallOption) (*TenantResponse, error)
 	Current(ctx context.Context, in *TenantCurrentRequest, opts ...grpc.CallOption) (*TenantResponse, error)
 }
@@ -411,6 +413,16 @@ func (c *saasRuntimeServiceClient) Sync(ctx context.Context, in *TenantSyncReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TenantSyncResponse)
 	err := c.cc.Invoke(ctx, SaasRuntimeService_Sync_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *saasRuntimeServiceClient) Search(ctx context.Context, in *TenantSearchRequest, opts ...grpc.CallOption) (*TenantSearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TenantSearchResponse)
+	err := c.cc.Invoke(ctx, SaasRuntimeService_Search_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -444,6 +456,7 @@ func (c *saasRuntimeServiceClient) Current(ctx context.Context, in *TenantCurren
 // SaasRuntimeService - SaaS 租户运行面。
 type SaasRuntimeServiceServer interface {
 	Sync(context.Context, *TenantSyncRequest) (*TenantSyncResponse, error)
+	Search(context.Context, *TenantSearchRequest) (*TenantSearchResponse, error)
 	Validate(context.Context, *TenantValidateRequest) (*TenantResponse, error)
 	Current(context.Context, *TenantCurrentRequest) (*TenantResponse, error)
 	mustEmbedUnimplementedSaasRuntimeServiceServer()
@@ -458,6 +471,9 @@ type UnimplementedSaasRuntimeServiceServer struct{}
 
 func (UnimplementedSaasRuntimeServiceServer) Sync(context.Context, *TenantSyncRequest) (*TenantSyncResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedSaasRuntimeServiceServer) Search(context.Context, *TenantSearchRequest) (*TenantSearchResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Search not implemented")
 }
 func (UnimplementedSaasRuntimeServiceServer) Validate(context.Context, *TenantValidateRequest) (*TenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Validate not implemented")
@@ -500,6 +516,24 @@ func _SaasRuntimeService_Sync_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SaasRuntimeServiceServer).Sync(ctx, req.(*TenantSyncRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SaasRuntimeService_Search_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TenantSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SaasRuntimeServiceServer).Search(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SaasRuntimeService_Search_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SaasRuntimeServiceServer).Search(ctx, req.(*TenantSearchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -550,6 +584,10 @@ var SaasRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Sync",
 			Handler:    _SaasRuntimeService_Sync_Handler,
+		},
+		{
+			MethodName: "Search",
+			Handler:    _SaasRuntimeService_Search_Handler,
 		},
 		{
 			MethodName: "Validate",

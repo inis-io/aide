@@ -441,6 +441,7 @@ func ParseTenantEnvelope(data []byte) (envelope TenantEnvelope, rawPayload []byt
 | 方法 | 签名 | 说明 |
 |---|---|---|
 | `TenantSync` | `func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *TenantManifests, error)` | 租户授权全量/增量同步（每小时 + 启动时调用）。`sinceTime` 为增量水位线（毫秒，0 = 全量），返回本次同步时间与 `platform`、`tenant` 双轨项目菜单清单（某一轨未发布时对应字段为 nil）。放行租户的信封验签后写入本地缓存；平台不可达时返回错误，本地缓存继续可用 |
+| `TenantSearch` | `func (this *Client) TenantSearch(ctx context.Context, prefix string) ([]TenantSearchItem, error)` | 按至少 3 位租户编码前缀搜索当前许可证项目下可登录租户，最多返回 20 条；HTTP 与 gRPC 均使用实例激活签名，不提供匿名跨项目枚举 |
 | `TenantValidate` | `func (this *Client) TenantValidate(ctx context.Context, tenantCode string, options TenantValidateOptions) (string, error)` | 单租户实时校验（租户用户登录/访问受控功能时调用）。放行返回状态码并把信封写入本地缓存；非放行只返回状态码 |
 | `TenantCurrent` | `func (this *Client) TenantCurrent(ctx context.Context, tenantCode string) (*TenantEnvelope, error)` | 取租户当前生效信封（不更新缓存水位，仅按需拉取） |
 | `TenantStatus` | `func (this *Client) TenantStatus(tenantCode string) string` | 租户本地状态：有缓存信封时按信封做时间维度本地判定，无信封时返回缓存的服务端判定（平台不可达时的降级判定依据；无缓存返回空串） |
@@ -449,6 +450,7 @@ func ParseTenantEnvelope(data []byte) (envelope TenantEnvelope, rawPayload []byt
 ```go
 // 启动时 + 每小时同步一次（增量水位线）
 syncTime, manifests, err := client.TenantSync(ctx, 0) // 之后传上次返回的 syncTime
+tenants, _ := client.TenantSearch(ctx, "mes")          // 登录页远程下拉
 envelope, _ := client.TenantCurrent(ctx, "tenant-a")
 // manifests 整体或其中未发布的轨都可能为 nil（服务端省略 manifests 键 / 该轨未发布），取值前必须判空
 var tenantMenus []licence.ManifestMenu

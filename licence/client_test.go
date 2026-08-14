@@ -197,6 +197,8 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleUpdateLogs(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/saas/tenants/sync":
 		this.handleTenantSync(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/saas/tenants/search":
+		this.handleTenantSearch(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/projects/configs/sync":
 		this.handleConfigSync(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/platform/configs/sync":
@@ -619,6 +621,30 @@ func (this *fakePlatform) handleTenantSync(writer http.ResponseWriter, request *
 	writeJson(writer, map[string]any{
 		"status": StatusValid, "serverTime": time.Now().UnixMilli(), "syncTime": time.Now().UnixMilli(),
 		"manifests": map[string]any{"platform": nil, "tenant": map[string]any{"version": 1, "menus": []any{}}}, "tenants": tenants,
+	})
+}
+
+// handleTenantSearch - 按租户编码前缀搜索可登录租户。
+func (this *fakePlatform) handleTenantSearch(writer http.ResponseWriter, request *http.Request, body []byte) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	if !this.credential(writer, request, body) {
+		return
+	}
+	var params struct {
+		Prefix string `json:"prefix"`
+	}
+	_ = json.Unmarshal(body, &params)
+	items := make([]map[string]any, 0)
+	for code, tenant := range this.tenants {
+		if strings.HasPrefix(strings.ToLower(code), strings.ToLower(params.Prefix)) && passThrough(this.tenantStatus(tenant)) {
+			items = append(items, map[string]any{"tenantCode": code, "tenantName": code + " 租户"})
+		}
+	}
+	writeJson(writer, map[string]any{
+		"status": StatusValid, "serverTime": time.Now().UnixMilli(), "tenants": items,
 	})
 }
 

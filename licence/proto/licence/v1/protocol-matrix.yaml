@@ -11,6 +11,7 @@ runtime:
   - [Client.ReportUpdate, POST, /api/v1/updates/report, UpdateRuntimeService/Report, activation-sign-v1, "", update, write, normal, true]
   - [Client.AppendUpdateLogs, POST, /api/v1/updates/logs, UpdateRuntimeService/AppendLogs, activation-sign-v1, "", update, write, normal, true]
   - [Client.SyncTenants, POST, /api/v1/saas/tenants/sync, SaasRuntimeService/Sync, activation-sign-v1, "", saas_tenant, read, normal, true]
+  - [Client.TenantSearch, POST, /api/v1/saas/tenants/search, SaasRuntimeService/Search, activation-sign-v1, "", saas_tenant, read, normal, true]
   - [Client.ValidateTenant, POST, /api/v1/saas/tenants/validate, SaasRuntimeService/Validate, activation-sign-v1, "", saas_tenant, write, normal, true]
   - [Client.CurrentTenant, GET, /api/v1/saas/tenants/current, SaasRuntimeService/Current, activation-sign-v1, "", saas_tenant, read, normal, true]
   - [Client.SyncConfigs, POST, /api/v1/projects/configs/sync, ProjectConfigRuntimeService/Sync, activation-sign-v1, "", project, read, normal, true]

@@ -13,7 +13,7 @@
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`；服务端共同消费该契约，
   禁止在 Licen Hub 仓库复制第二份 proto。
 - 跨项目落地方案见
-  [`../../licen-hub/docs/plan/Licence-SDK-HTTP与gRPC双协议跨项目落地方案.md`](../../licen-hub/docs/plan/Licence-SDK-HTTP与gRPC双协议跨项目落地方案.md)。
+  [`../../licen-hub/docs/md/Licence-SDK-HTTP与gRPC双协议跨项目落地方案.md`](../../licen-hub/docs/md/Licence-SDK-HTTP与gRPC双协议跨项目落地方案.md)。
 
 ## 权威契约与跨项目关系
 

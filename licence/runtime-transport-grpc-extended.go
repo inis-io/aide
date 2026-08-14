@@ -19,6 +19,11 @@ type tenantSyncBody struct {
 	SinceTime int64  `json:"sinceTime"`
 }
 
+type tenantSearchBody struct {
+	LicenseNo string `json:"licenseNo"`
+	Prefix    string `json:"prefix"`
+}
+
 type tenantValidateBody struct {
 	LicenseNo  string           `json:"licenseNo"`
 	TenantCode string           `json:"tenantCode"`
@@ -208,6 +213,32 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 			items = append(items, row)
 		}
 		result["tenants"] = items
+		if response.GetMessage() != "" {
+			result["message"] = response.GetMessage()
+		}
+		return marshalMap(result)
+
+	case http.MethodPost + " /api/v1/saas/tenants/search":
+		var input tenantSearchBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.TenantSearchRequest{LicenseNo: input.LicenseNo, Prefix: input.Prefix}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.SaasRuntimeService_Search_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.saas.Search(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		items := make([]map[string]any, 0, len(response.GetTenants()))
+		for _, item := range response.GetTenants() {
+			items = append(items, map[string]any{"tenantCode": item.GetTenantCode(), "tenantName": item.GetTenantName()})
+		}
+		result := map[string]any{"status": response.GetStatus(), "serverTime": response.GetServerTime(), "tenants": items}
 		if response.GetMessage() != "" {
 			result["message"] = response.GetMessage()
 		}

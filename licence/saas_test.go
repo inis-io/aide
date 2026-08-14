@@ -78,6 +78,35 @@ func TestTenantSync(t *testing.T) {
 	}
 }
 
+// TestTenantSearch - HTTP 传输按前三位搜索并只返回可登录租户。
+func TestTenantSearch(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	withTenant(platform, "mes-east", fakeTenant{})
+	withTenant(platform, "mes-west", fakeTenant{status: StatusSuspended})
+	withTenant(platform, "other", fakeTenant{})
+
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Stop()
+
+	items, err := client.TenantSearch(t.Context(), "mes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].TenantCode != "mes-east" || items[0].TenantName != "mes-east 租户" {
+		t.Fatalf("搜索结果异常: %+v", items)
+	}
+	if _, err = client.TenantSearch(t.Context(), "me"); err == nil {
+		t.Fatal("不足 3 位的前缀应被拒绝")
+	}
+}
+
 // TestTenantValidate - 单租户实时校验：放行携带信封并刷新缓存
 func TestTenantValidate(t *testing.T) {
 

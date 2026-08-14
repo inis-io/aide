@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 // TenantInfo - 租户运行状态（sync 下发项；放行租户携带已验签信封）
@@ -61,6 +62,12 @@ type TenantValidateOptions struct {
 	Usage map[string]int64
 }
 
+// TenantSearchItem - 租户编码前缀搜索结果。
+type TenantSearchItem struct {
+	TenantCode string `json:"tenantCode"`
+	TenantName string `json:"tenantName"`
+}
+
 // tenantCacheItem - 租户信封缓存项
 type tenantCacheItem struct {
 	// status - 最近一次同步/校验的租户状态
@@ -89,6 +96,14 @@ type tenantResponse struct {
 	ServerTime int64           `json:"serverTime"`
 	Envelope   json.RawMessage `json:"envelope"`
 	Message    string          `json:"message"`
+}
+
+// tenantSearchResponse - 租户编码前缀搜索响应。
+type tenantSearchResponse struct {
+	Status     string             `json:"status"`
+	ServerTime int64              `json:"serverTime"`
+	Tenants    []TenantSearchItem `json:"tenants"`
+	Message    string             `json:"message"`
 }
 
 // TenantSync - 租户授权全量/增量同步（每小时 + 启动时调用）
@@ -144,6 +159,47 @@ func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *Te
 		this.mu.Unlock()
 	}
 	return response.SyncTime, response.Manifests, nil
+}
+
+// TenantSearch - 按租户编码前缀搜索当前许可证项目下可登录的租户。
+// prefix 至少 3 位；服务端固定限制返回条数，避免登录页枚举全部租户。
+func (this *Client) TenantSearch(ctx context.Context, prefix string) ([]TenantSearchItem, error) {
+
+	prefix = strings.TrimSpace(prefix)
+	if len(prefix) < 3 || len(prefix) > 64 {
+		return nil, errors.New("租户编码搜索前缀长度必须为 3 到 64 位")
+	}
+
+	this.opMu.Lock()
+	defer this.opMu.Unlock()
+
+	body, err := json.Marshal(map[string]any{"licenseNo": this.options.LicenseNo, "prefix": prefix})
+	if err != nil {
+		return nil, err
+	}
+	code, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/saas/tenants/search", body, true)
+	if err != nil {
+		return nil, err
+	}
+	if code == http.StatusNotFound {
+		return nil, errors.New("租户或项目信息无效")
+	}
+
+	var response tenantSearchResponse
+	if err = json.Unmarshal(raw, &response); err != nil {
+		return nil, err
+	}
+	this.updateClockOffset(response.ServerTime)
+	if response.Status == StatusError {
+		return nil, errors.New("服务端故障：" + response.Message)
+	}
+	if !passThrough(response.Status) {
+		return nil, errors.New("实例许可证非放行态：" + response.Status)
+	}
+	if response.Tenants == nil {
+		return []TenantSearchItem{}, nil
+	}
+	return response.Tenants, nil
 }
 
 // FilterManifestMenus - 按签名载荷 menuCodes 过滤租户清单，保持清单原顺序与 parentCode。
