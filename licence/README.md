@@ -11,6 +11,7 @@
 1. [开始前：你需要从平台方拿到什么](#1-开始前你需要从平台方拿到什么)
 2. [安装](#2-安装)
 3. [快速开始：许可证激活与授权校验（运行面）](#3-快速开始许可证激活与授权校验运行面)
+   - [装机自动申领与激活码兑换（Provision / Redeem）](#31-装机自动申领与激活码兑换provision--redeem)
 4. [授权状态与降级策略](#4-授权状态与降级策略)
    - [多机席位（一 Client 一机一席）](#41-多机席位一-client-一机一席)
 5. [在线更新（更新代理/自更新程序用）](#5-在线更新更新代理自更新程序用)
@@ -29,6 +30,7 @@
 15. [实例指纹](#15-实例指纹)
 16. [安全存储接口](#16-安全存储接口)
 17. [运行面客户端 Client](#17-运行面客户端-client)
+   - [装机自动申领与激活码兑换（包级函数）](#174-装机自动申领与激活码兑换包级函数)
 18. [在线更新模块](#18-在线更新模块)
 19. [SaaS 多租户接口](#19-saas-多租户接口)
 20. [管理面客户端 AdminClient](#20-管理面客户端-adminclient)
@@ -154,6 +156,49 @@ func main() {
 - 每个请求自动携带客户端私钥签名（时间戳 + nonce 防重放），开发者零感知；
 - 断网/平台故障自动按本地缓存信封降级运行（宽限内 `GRACE`，耗尽 `EXPIRED`）；
 - 许可证被续期/调整权益后，新信封自动下发、验签、替换缓存。
+
+### 3.1 装机自动申领与激活码兑换（Provision / Redeem）
+
+面向**私有化/交付装机**场景：客户机器上只跑你的程序，程序启动时调用包级函数自动拿证，**零人工/零管理端操作**。两种获取方式共用同一套参数与返回：
+
+| 函数 | 适用 | 平台侧 |
+|---|---|---|
+| `Provision` | 免费版自动申领（装机即激活） | 管理员预置 `inis` 项目 + 免费自动授权模板；客户机器免密申领 |
+| `Redeem` | 商业版激活码兑换 | 管理员预置商用模板并向客户发放激活码；客户机器输入码即激活 |
+
+```go
+result, err := licence.Provision(ctx, licence.ProvisionOptions{
+    ServerURL:      "https://licen-hub.inis.cn", // 平台地址（官方二进制内写死）
+    TemplateCode:   "INIS-AUTO",                 // 免费模板编码（官方二进制内写死）
+    ProvisionToken: "tmpl-token",                // 签发令牌（官方二进制内写死，服务端常数时间比对）
+})
+if err != nil {
+    // 业务拒绝是 *licence.ProvisionError，errors.As 后按 Status 降级
+    var denied *licence.ProvisionError
+    if errors.As(err, &denied) {
+        switch denied.Status {
+        case "RATE_LIMITED":   /* 稍后重试 */
+        case "QUOTA_EXCEEDED": /* 今日发放额用完 */
+        }
+    }
+    return err
+}
+
+// 用申领结果直接构造运行面客户端，并自动激活
+client, err := licence.New(licence.Options{
+    ServerURL:  "https://licen-hub.inis.cn",
+    LicenseNo:  result.LicenseNo,
+    Salt:       result.Salt,
+    PublicKeys: map[string]string{"license-key-2026-01": "<平台导出的公钥 hex>"},
+})
+if err = client.Start(ctx); err != nil {
+    panic(err)
+}
+```
+
+**安装唯一标识（install.sn）**：申领/兑换按机器持久化一个 UUID v4 到 `StorageDir/install.sn`（默认 `./runtime/licence/install.sn`）。同机重装/换证复用一个 SN，平台据此幂等复用或有界续签；SDK 首次使用自动生成，也可用 `ProvisionOptions.InstallSN` 显式覆盖。该文件独立于按 licenseNo 命名的状态文件，跨许可证生命周期稳定。
+
+> **商业版与免费版同一套后端能力**：`RedeemOptions` 内嵌 `ProvisionOptions`，除激活码外语义完全一致；免费自动激活额度不足时引导客户买码，程序内零改动切换。
 
 ## 4. 授权状态与降级策略
 
@@ -679,6 +724,47 @@ if client.HasFeature("report.advanced") { /* 开放高级报表 */ }
 if maxUsers, ok := client.GetLimit("max_users"); ok { /* 额度内 */ }
 if !client.CheckVersion("2.3.1") { /* 当前版本不在授权范围 */ }
 ```
+
+### 17.4 装机自动申领与激活码兑换（包级函数 Provision / Redeem）
+
+> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用，拿证后再构造运行面客户端。传输层与运行面复用同一 HTTP/gRPC 双实现，申领/兑换为匿名凭证（`withSign=false`，不请求签名）；业务码统一放 200/nil-error 的 `status` 字段，两协议线格式一致。
+
+```go
+type ProvisionOptions struct {
+    ServerURL      string        // 平台地址（必填）
+    TemplateCode   string        // 模板编码（必填，官方二进制写死）
+    ProvisionToken string        // 签发令牌（必填，匿名申领凭证，官方二进制写死）
+    StorageDir     string        // install.sn 持久化目录（默认 ./runtime/licence）
+    InstallSN      string        // 安装唯一标识（可选，为空懒生成 UUID v4 并持久化）
+    DeviceName     string        // 机器名称（可选，缺省取 os.Hostname）
+    Transport      Transport     // 传输协议（默认 HTTP；可选 TransportGRPC）
+    GRPC           GRPCOptions   // gRPC 连接配置（仅 TransportGRPC 生效）
+    HTTPTimeout    time.Duration // 单次请求超时（默认 15 秒）
+}
+type RedeemOptions struct {
+    ProvisionOptions
+    Code string // 激活码（必填）
+}
+type ProvisionResult struct {
+    LicenseNo     string // 许可证编号（New 必填）
+    Salt          string // 指纹盐（New 必填，与申领模板一致）
+    BindingPolicy string // single / seats
+    SeatLimit     int
+    ExpiresAt     int64  // 有效期截止（毫秒）
+    Reissued      bool   // 同 SN 有界续签
+}
+type ProvisionError struct { // 业务拒绝，errors.As 断言
+    Status  string // PROVISION_DISABLED / TEMPLATE_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
+    Message string // 平台提示
+}
+```
+
+| 函数 | 签名 | 说明 |
+|---|---|---|
+| `Provision` | `func Provision(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error)` | 免费版装机自动申领；业务拒绝返回 `*ProvisionError` |
+| `Redeem` | `func Redeem(ctx context.Context, opts RedeemOptions) (ProvisionResult, error)` | 商业激活码兑换，语义同上 |
+
+`install.sn` 生命周期：显式 `InstallSN` 优先；否则读 `StorageDir/install.sn` 幂等复用；不存在则懒生成 UUID v4 原子落盘（`MkdirAll 0700` + tmp/rename + `0600`）。卸载清理删除该文件属预期行为（重装生成新 SN，视为新装机）。
 
 ## 18. 在线更新模块
 
