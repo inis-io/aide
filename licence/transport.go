@@ -32,6 +32,38 @@ type validateBody struct {
 	ClientTime      int64            `json:"clientTime,omitempty"`
 }
 
+// provisionBody - 装机免费自动申领请求体（契约 §6.1；templateCode/provisionToken 官方二进制内写死）
+type provisionBody struct {
+	TemplateCode    string `json:"templateCode"`
+	ProvisionToken  string `json:"provisionToken"`
+	InstallSN       string `json:"installSN"`
+	FingerprintHash string `json:"fingerprintHash,omitempty"`
+	DeviceName      string `json:"deviceName,omitempty"`
+	ClientTime      int64  `json:"clientTime,omitempty"`
+}
+
+// redeemBody - 商业激活码兑换请求体（契约 §6.2）
+type redeemBody struct {
+	Code            string `json:"code"`
+	InstallSN       string `json:"installSN"`
+	FingerprintHash string `json:"fingerprintHash,omitempty"`
+	DeviceName      string `json:"deviceName,omitempty"`
+	ClientTime      int64  `json:"clientTime,omitempty"`
+}
+
+// provisionResponse - 装机自动申领/激活码兑换统一响应（契约 §6；status 为业务状态码）
+type provisionResponse struct {
+	Status        string `json:"status"`
+	ServerTime    int64  `json:"serverTime"`
+	LicenseNo     string `json:"licenseNo"`
+	Salt          string `json:"salt"`
+	BindingPolicy string `json:"bindingPolicy"`
+	SeatLimit     int    `json:"seatLimit"`
+	ExpiresAt     int64  `json:"expiresAt"`
+	Reissued      bool   `json:"reissued"`
+	Message       string `json:"message"`
+}
+
 // runtimeResponse - 运行面统一响应（契约 §2；envelope 为原文，验签后替换缓存）
 type runtimeResponse struct {
 	Status          string          `json:"status"`

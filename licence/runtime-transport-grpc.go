@@ -152,6 +152,32 @@ func marshalMap(value map[string]any) (int, []byte, error) {
 	return http.StatusOK, raw, err
 }
 
+func provisionMap(response *licencev1.ProvisionResponse) map[string]any {
+	result := map[string]any{"status": response.GetStatus(), "serverTime": response.GetServerTime()}
+	if response.GetLicenseNo() != "" {
+		result["licenseNo"] = response.GetLicenseNo()
+	}
+	if response.GetSalt() != "" {
+		result["salt"] = response.GetSalt()
+	}
+	if response.GetBindingPolicy() != "" {
+		result["bindingPolicy"] = response.GetBindingPolicy()
+	}
+	if response.GetSeatLimit() > 0 {
+		result["seatLimit"] = response.GetSeatLimit()
+	}
+	if response.GetExpiresAt() > 0 {
+		result["expiresAt"] = response.GetExpiresAt()
+	}
+	if response.GetReissued() {
+		result["reissued"] = true
+	}
+	if response.GetMessage() != "" {
+		result["message"] = response.GetMessage()
+	}
+	return result
+}
+
 func runtimeMap(response *licencev1.RuntimeResponse) map[string]any {
 	result := map[string]any{"status": response.GetStatus(), "serverTime": response.GetServerTime()}
 	if len(response.GetEnvelopeJson()) > 0 {
@@ -315,6 +341,50 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return code, nil, mapped
 		}
 		return marshalMap(runtimeMap(response))
+
+	case http.MethodPost + " /api/v1/licenses/provision":
+		var input provisionBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.ProvisionRequest{
+			TemplateCode: input.TemplateCode, ProvisionToken: input.ProvisionToken,
+			InstallSn: input.InstallSN, FingerprintHash: input.FingerprintHash,
+			DeviceName: input.DeviceName, ClientTime: input.ClientTime,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Provision_FullMethodName, request, false)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.license.Provision(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		return marshalMap(provisionMap(response))
+
+	case http.MethodPost + " /api/v1/licenses/redeem":
+		var input redeemBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.RedeemRequest{
+			Code: input.Code, InstallSn: input.InstallSN,
+			FingerprintHash: input.FingerprintHash, DeviceName: input.DeviceName,
+			ClientTime: input.ClientTime,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Redeem_FullMethodName, request, false)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.license.Redeem(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		return marshalMap(provisionMap(response))
 	}
 	return this.roundTripExtended(ctx, method, path, requestURI, body, withSign)
 }

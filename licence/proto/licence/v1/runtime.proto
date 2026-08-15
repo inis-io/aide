@@ -9,6 +9,10 @@ service LicenseRuntimeService {
   rpc Activate(ActivateRequest) returns (RuntimeResponse);
   rpc Validate(ValidateRequest) returns (RuntimeResponse);
   rpc Current(CurrentLicenseRequest) returns (RuntimeResponse);
+  // Provision - 装机免费自动申领（匿名 Public；官方二进制内写死模板编码与签发令牌）
+  rpc Provision(ProvisionRequest) returns (ProvisionResponse);
+  // Redeem - 商业激活码兑换（匿名 Public）
+  rpc Redeem(RedeemRequest) returns (ProvisionResponse);
 }
 
 // UpdateRuntimeService - 在线更新运行面。
@@ -61,6 +65,39 @@ message ValidateRequest {
 
 message CurrentLicenseRequest {
   string license_no = 1;
+}
+
+// ProvisionRequest - 装机免费自动申领请求。
+// template_code 与 provision_token 由官方二进制内写死；install_sn 为安装唯一标识。
+message ProvisionRequest {
+  string template_code = 1;
+  string provision_token = 2;
+  string install_sn = 3;
+  string fingerprint_hash = 4;
+  string device_name = 5;
+  int64 client_time = 6;
+}
+
+// RedeemRequest - 商业激活码兑换请求。
+message RedeemRequest {
+  string code = 1;
+  string install_sn = 2;
+  string fingerprint_hash = 3;
+  string device_name = 4;
+  int64 client_time = 5;
+}
+
+// ProvisionResponse - 装机自动申领/激活码兑换统一响应。
+message ProvisionResponse {
+  string status = 1;
+  int64 server_time = 2;
+  string license_no = 3;
+  string salt = 4;
+  string binding_policy = 5;
+  int32 seat_limit = 6;
+  int64 expires_at = 7;
+  bool reissued = 8;
+  string message = 9;
 }
 
 // RuntimeResponse - 许可证运行面统一响应。

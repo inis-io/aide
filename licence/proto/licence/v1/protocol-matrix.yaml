@@ -5,6 +5,8 @@ defaults:
   envelope: raw_json_bytes
 runtime:
   - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, deviceName]
+  - [Client.Provision, POST, /api/v1/licenses/provision, LicenseRuntimeService/Provision, public, "", license, write, normal, false]
+  - [Client.Redeem, POST, /api/v1/licenses/redeem, LicenseRuntimeService/Redeem, public, "", license, write, normal, false]
   - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true]
   - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true]
   - [Client.CheckUpdate, POST, /api/v1/updates/check, UpdateRuntimeService/Check, activation-sign-v1, "", update, read, normal, true]
