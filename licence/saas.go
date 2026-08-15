@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -145,6 +146,9 @@ func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *Te
 		return 0, nil, errors.New("实例许可证非放行态：" + response.Status)
 	}
 
+	// 全量同步时以本次响应整体替换缓存（清除已删除租户）；增量同步合并覆盖。
+	// 整体替换采用原子 swap，避免与请求路径的 TenantStatus/TenantFeature 并发读竞态。
+	entries := make(map[string]tenantCacheItem, len(response.Tenants))
 	for _, item := range response.Tenants {
 		cached := tenantCacheItem{status: item.Status}
 		if passThrough(item.Status) && len(item.Envelope) > 0 {
@@ -154,11 +158,35 @@ func (this *Client) TenantSync(ctx context.Context, sinceTime int64) (int64, *Te
 			}
 			cached.envelope = envelope
 		}
-		this.mu.Lock()
-		this.tenantCache[item.TenantCode] = cached
-		this.mu.Unlock()
+		entries[item.TenantCode] = cached
 	}
+	this.mu.Lock()
+	if sinceTime == 0 {
+		this.tenantCache = entries
+	} else {
+		if this.tenantCache == nil {
+			this.tenantCache = make(map[string]tenantCacheItem)
+		}
+		for code, cached := range entries {
+			this.tenantCache[code] = cached
+		}
+	}
+	this.mu.Unlock()
 	return response.SyncTime, response.Manifests, nil
+}
+
+// TenantCodes - 返回本地租户缓存中的编码列表（升序）。
+// 缓存由 TenantSync 全量/增量写入；全量同步（sinceTime=0）后即 Hub 当前租户全集。
+// 供对账/枚举使用：不发起网络请求，读取的是最近一次同步的结果。
+func (this *Client) TenantCodes() []string {
+	this.mu.RLock()
+	codes := make([]string, 0, len(this.tenantCache))
+	for code := range this.tenantCache {
+		codes = append(codes, code)
+	}
+	this.mu.RUnlock()
+	sort.Strings(codes)
+	return codes
 }
 
 // TenantSearch - 按租户编码前缀搜索当前许可证项目下可登录的租户。
