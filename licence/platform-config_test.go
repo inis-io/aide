@@ -32,11 +32,11 @@ func (this *fakePlatform) handlePlatformConfigSync(writer http.ResponseWriter, r
 		writeJson(writer, map[string]any{"status": StatusError, "serverTime": time.Now().UnixMilli(), "message": "项目与许可证归属不一致"})
 		return
 	}
+	// 服务端契约：恒下发权威全量快照（无变更重同步也不返回空集）。
+	// 与真实后端 licen-hub platform-config.go 一致：sinceVersion 仅作水位提示，不裁剪下发。
 	configs := make([]PlatformConfigItem, 0, len(this.platformConfigs))
 	for _, item := range this.platformConfigs {
-		if item.Version > params.SinceVersion {
-			configs = append(configs, item)
-		}
+		configs = append(configs, item)
 	}
 	payload := PlatformConfigPayload{
 		ProjectId: "PRJ-2026-000001", SyncVersion: this.platformConfigSyncVersion,
@@ -226,6 +226,9 @@ func TestPlatformConfigSyncCacheAndPersistence(t *testing.T) {
 	if rate = client.PlatformConfigMust("security.rate_limit"); rate.Value != "120" || rate.Version != 4 {
 		t.Fatalf("新平台配置未写入快照: %+v", rate)
 	}
+	if _, exists = client.PlatformConfig("security.api_token"); !exists {
+		t.Fatal("未变更平台配置在增量同步后被误删")
+	}
 
 	// 重启恢复
 	restored, err := New(testOptions(platform, dir))
@@ -237,6 +240,48 @@ func TestPlatformConfigSyncCacheAndPersistence(t *testing.T) {
 	}
 	if rate, exists = restored.PlatformConfig("security.rate_limit"); !exists || rate.Value != "120" {
 		t.Fatalf("持久化平台配置恢复失败: exists=%v rate=%+v", exists, rate)
+	}
+}
+
+// TestPlatformConfigNoChangeResyncKeepsSnapshot - 无变更重同步不得清空平台配置快照。
+// 回归：服务端水位相等时若返回空集，客户端全量替换会清空快照（真实缺陷）。
+func TestPlatformConfigNoChangeResyncKeepsSnapshot(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.platformConfigs["app.region"] = PlatformConfigItem{
+		Key: "app.region", Label: "部署区域", Type: "select",
+		Value: "ap-southeast-1", DefaultValue: "ap-east-1", Version: 3,
+	}
+	platform.platformConfigs["security.api_token"] = PlatformConfigItem{
+		Key: "security.api_token", Label: "接口令牌", Type: "password",
+		Value: "S3cr3t", Sensitive: true, Version: 2,
+	}
+	platform.platformConfigSyncVersion = 3
+	dir := t.TempDir()
+	client, err := New(testOptions(platform, dir))
+	if err != nil {
+		t.Fatalf("创建客户端失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("启动客户端失败: %v", err)
+	}
+	client.Stop()
+
+	if _, err = client.PlatformConfigSync(t.Context()); err != nil {
+		t.Fatalf("首次同步失败: %v", err)
+	}
+	if _, exists := client.PlatformConfig("app.region"); !exists {
+		t.Fatal("首次同步后配置缺失")
+	}
+
+	// 无变更重同步：水位相等，服务端仍返回全量快照，客户端不得清空。
+	if _, err = client.PlatformConfigSync(t.Context()); err != nil {
+		t.Fatalf("无变更重同步失败: %v", err)
+	}
+	if _, exists := client.PlatformConfig("app.region"); !exists {
+		t.Fatal("无变更重同步清空了平台配置快照")
+	}
+	if _, exists := client.PlatformConfig("security.api_token"); !exists {
+		t.Fatal("无变更重同步清空了敏感配置")
 	}
 }
 
