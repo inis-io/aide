@@ -21,12 +21,8 @@ func newRedisBroker(config Config) (Broker, error) {
 		Addr: config.Redis.Addr, Username: config.Redis.Username, Password: config.Redis.Password,
 		DB: config.Redis.DB, PoolSize: config.Redis.PoolSize,
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
-		return nil, fmt.Errorf("taskx: Redis 连接失败: %w", err)
-	}
+	// 懒连接：不在此处 Ping，连接错误推迟到首次 Enqueue/Claim（与 cachex 的 RedisStore 语义一致，
+	// 避免 Init 期阻塞；Redis 连通性探测由调用方负责，如 backend 的 redisAvailable）。
 	return &redisBroker{client: client, prefix: config.Redis.Prefix, leaseTTL: config.LeaseTTL}, nil
 }
 
