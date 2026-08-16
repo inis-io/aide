@@ -141,7 +141,7 @@ type Client struct {
  * @example：
  * 	client, err := licence.New(licence.Options{
  * 		ServerURL: "https://license.example.com", LicenseNo: "LIC-2026-000123",
- * 		Salt: "my-project-salt", PublicKeys: map[string]string{"license-key-2026-01": "..."},
+ * 		Salt: "my-project-salt", PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "..."},
  * 	})
  */
 func New(options Options) (*Client, error) {

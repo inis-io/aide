@@ -329,7 +329,7 @@ type Options struct {
 client, err := licence.New(licence.Options{
     ServerURL: "https://licen-hub.inis.cn", LicenseNo: "LIC-2026-000123",
     Salt: "my-project-salt",
-    PublicKeys: map[string]string{"license-key-2026-01": "<平台导出的公钥 hex>"},
+    PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "<平台按项目导出的公钥 hex>"},
     Version: "2.3.1",
 })
 if err = client.Start(context.Background()); err != nil {
@@ -721,7 +721,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Find` | 许可证分页 | `GET /api/licenses/find` | `*LicenseFindParams` → `*Page[License]` |
 | `Take` | 许可证详情 | `GET /api/licenses/take?id=N` | `id int` → `*License` |
 | `TakePayload` | 查看签发载荷（载荷/签名原文，可用本包 `Parse` + 公钥验签） | `GET /api/licenses/take-payload?id=N` | `id int` → `*LicensePayloadView` |
-| `PublicKey` | 当前验签公钥（任意登录用户可读） | `GET /api/licenses/public-key` | 无 → `*SigningKeyPublic` |
+| `PublicKey` | 项目验签公钥表（任意登录用户可读；projectId 必填，返回全版本 `keys[]` 含历史轮换密钥） | `GET /api/licenses/public-key?projectId=` | `projectId int` → `*LicensePublicKey` |
 | `Apply` | 提交授权申请（member 自助） | `POST /api/licenses/apply` | `LicenseApplyInput` → `*ApplyResult` |
 | `Cancel` | 撤回授权申请（仅本人 pending 可撤回） | `POST /api/licenses/cancel` | `id int` → 无 |
 | `Applications` | 授权申请列表（不分页） | `GET /api/licenses/applications/rows` | `*LicenseApplicationFindParams` → `[]LicenseApplication` |
@@ -743,8 +743,8 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 | 方法 | 说明 | 路由 | 参数 → 返回 |
 |---|---|---|---|
-| `Public` | 导出公钥（任意登录用户可读）。`purpose` 仅支持 `license` / `release`；`keyVersion` 留空取当前版本；release 支持按版本导出历史公钥，license 仅保留当前版本 | `GET /api/signing-keys/public?purpose=&keyVersion=` | `purpose string, keyVersion string` → `*SigningKeyPublic` |
-| `Rotate` | 轮换签名密钥（高风险，需 `system.signing-key.rotate` 权限）。release 保留历史版本供旧发布物验签；license 仅切换当前版本 | `POST /api/signing-keys/rotate` | `purpose string` → `*SigningKeyPublic` |
+| `Public` | 导出公钥（任意登录用户可读）。`purpose` 仅支持 `license` / `release`；`projectId` 仅 license 用途必填（密钥按项目隔离）；`keyVersion` 留空取当前版本，release 支持按版本导出历史公钥，license 仅保留当前版本 | `GET /api/signing-keys/public?purpose=&keyVersion=&projectId=` | `purpose string, keyVersion string, projectId int` → `*SigningKeyPublic` |
+| `Rotate` | 轮换签名密钥（高风险，需 `system.signing-key.rotate` 权限）。`projectId` 仅 license 用途必填（按项目轮换）；`reason` 为轮换原因（审计留痕）。release 保留历史版本供旧发布物验签；license 仅切换当前版本 | `POST /api/signing-keys/rotate` | `purpose string, projectId int, reason string` → `*SigningKeyPublic` |
 
 #### Artifacts - 项目发布物（`/api/project-artifacts/*`）
 
@@ -917,6 +917,8 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `LicensePayloadView` | 签发载荷视图（`LicenseNo` / `Payload` / `Signature` / `KeyVersion`） |
 | `LicenseSeat` | 机器席位（`SeatNo` / `FingerprintHash` / `DeviceName` / `Status`（occupied/released）/ `CurrentActivationId` / `FirstActivatedAt` / `LastSeenAt` / `ReleasedAt` / `ReleasedBy` / `ReleaseReason`） |
 | `SigningKeyPublic` | 公钥导出（`Purpose` / `KeyVersion` / `Algorithm` / `PublicKey`） |
+| `LicensePublicKey` | 项目验签公钥表（`Algorithm` / `ProjectId` / `ProjectNo` / `Keys []SigningKeyItem`，全版本含历史轮换） |
+| `SigningKeyItem` | 单版本验签公钥条目（`KeyVersion` / `PublicKey`） |
 | `ProjectVersion` | 版本（状态：draft/testing/released/archived；灰度：`GrayMode` 空=全量/whitelist/percent + `GrayInstances` / `GrayPercent`） |
 | `ProjectArtifact` | 发布物（`Url` / `Sha256` / `Signature` / `IsLocked`，签名即锁定） |
 | `ArtifactVerifyResult` | 发布物验签结果（`HashMatch` / `SignatureValid` / `Valid`） |

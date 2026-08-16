@@ -48,7 +48,7 @@
 | **平台地址 `ServerURL`** | 授权平台的访问地址 | 平台方提供，如 `https://licen-hub.inis.cn` |
 | **许可证编号 `licenseNo`** | 你的部署实例对应的许可证，格式 `LIC-{年}-XXXXXX` | 平台管理端「我的许可证」页签发后可见（先完成注册 → 资格审核 → 建项目/实例 → 授权申请 → 平台审批签发） |
 | **指纹盐 `Salt`** | 实例指纹的盐值 | 你在平台登记部署实例时自己定的盐；二者必须一致 |
-| **验签公钥 `PublicKeys`** | 平台 license-key 的 Ed25519 公钥（hex），用于验证许可证信封是真的 | 管理端登录后 `GET /api/licenses/public-key` 导出（或找平台方索取），内置到你的程序里 |
+| **验签公钥 `PublicKeys`** | 平台 license-key 的 Ed25519 公钥（hex），用于验证许可证信封是真的 | 管理端登录后**按项目**导出 `GET /api/licenses/public-key?projectId=X`，返回全版本 `keys[]`（含历史轮换密钥），逐字内置到你的程序里 |
 | **release 公钥 `ReleasePublicKeys`** | release-key 公钥（hex），验证更新清单与发布物 | 同上，`GET /api/signing-keys/public?purpose=release`；**只用在线更新功能时才需要** |
 | **管理面账号密码** | 平台后台账号 | **仅 CI/运维自动化才需要**（查项目、申请授权、导公钥等）；禁止随交付项目分发 |
 
@@ -113,8 +113,8 @@ func main() {
 		ServerURL: "https://licen-hub.inis.cn",     // 平台地址（必填）
 		LicenseNo: "LIC-2026-000123",               // 许可证编号（必填）
 		Salt:      "my-project-salt",               // 指纹盐，与实例登记一致（必填）
-		PublicKeys: map[string]string{              // 验签公钥（必填，内置）
-			"license-key-2026-01": "79b5562e8fe6…（从平台导出的公钥 hex）",
+		PublicKeys: map[string]string{              // 验签公钥表（必填：项目全版本并存，从平台按项目导出）
+			"license-key-INIS-202608-1a2b3c": "79b5562e8fe6…（从平台导出的公钥 hex）",
 		},
 		ReleasePublicKeys: map[string]string{       // release 公钥（用在线更新才填）
 			"release-key-2026-01": "…",
@@ -189,7 +189,7 @@ client, err := licence.New(licence.Options{
     ServerURL:  "https://licen-hub.inis.cn",
     LicenseNo:  result.LicenseNo,
     Salt:       result.Salt,
-    PublicKeys: map[string]string{"license-key-2026-01": "<平台导出的公钥 hex>"},
+    PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "<平台按项目导出的公钥 hex>"},
 })
 if err = client.Start(ctx); err != nil {
     panic(err)
@@ -394,7 +394,7 @@ admin, err := licence.NewAdmin(licence.AdminOptions{
 
 projects, _ := admin.Projects.Find(ctx, &licence.ProjectFindParams{Page: 1})
 artifact, _ := admin.Artifacts.Upload(ctx, licence.ArtifactUploadInput{VersionId: 12}, "app.tar.gz", file)
-pub, _ := admin.SigningKeys.Public(ctx, "license", "")   // 导出验签公钥
+pub, _ := admin.SigningKeys.Public(ctx, "license", "", projectId)   // 按项目导出验签公钥（license 用途必填 projectId）
 verify, _ := admin.Artifacts.VerifyWithFile(ctx, 3, "app.tar.gz", file) // 服务端代验
 ```
 
@@ -430,14 +430,14 @@ licence.Options{
 `StorageDir`（默认 `./runtime/licence`）下的 `licence-<licenseNo>.state`，AES-256-GCM 加密（密钥派生自盐+指纹），权限 0600。token、私钥、信封都在里面。SDK 只有在拿到并验签完整许可证信封后才会落盘；首次激活被拒绝不保存半成品状态，升级时遇到旧版无信封状态会自动清理并重新激活。想接系统密钥库（DPAPI/Keychain/keyring）就实现 `licence.Store` 接口注入。
 
 **Q：平台轮换密钥了怎么办？**
-`PublicKeys`/`ReleasePublicKeys` 是 map，把新旧公钥都放进去即可平滑过渡（SDK 按载荷 `keyVersion` 自动选钥）。
+`PublicKeys`/`ReleasePublicKeys` 是 map，把新旧公钥都放进去即可平滑过渡（SDK 按载荷 `keyVersion` 自动选钥）。轮换后重新从项目接入配置导出 `keys[]` 全量同步即可，**历史版本务必保留**——旧缓存信封离线降级恢复时仍按历史 keyVersion 验签。
 
 ## 9. 排错速查
 
 | 现象 | 先查什么 |
 |---|---|
 | `Start` 报「许可证或实例信息无效」 | `licenseNo` 是否正确；许可证是否已签发且未吊销 |
-| `Start` 报「未内置 keyVersion=… 的验签公钥」 | 公钥 map 的 key 必须等于平台的 `keyVersion`（如 `license-key-2026-01`） |
+| `Start` 报「未内置 keyVersion=… 的验签公钥」 | 公钥 map 的 key 必须等于平台的 `keyVersion`（形如 `license-key-INIS-202608-1a2b3c`，从项目导出 `keys[]` 逐字复制，勿拼接猜测） |
 | `信封验签失败` | 公钥是否配对、是否最新；找平台方重新导出 |
 | 一直 `GRACE` | 交付机网络到平台不通，或许可证已过 `validUntil` |
 | `INSTANCE_MISMATCH` | 换了机器/指纹源变了；检查 `Salt` 是否与实例登记一致 |
@@ -447,7 +447,7 @@ licence.Options{
 
 1. 平台方开通账号 → 资格审核通过
 2. 建项目 → 登记实例（记下你的指纹盐）→ 申请授权 → 平台签发
-3. 拿到 `licenseNo` + 导出 `PublicKeys`（用更新功能再导出 `ReleasePublicKeys`）
+3. 拿到 `licenseNo` + 按项目导出 `PublicKeys`（`GET /api/licenses/public-key?projectId=X` 全版本 `keys[]`；用更新功能再导出 `ReleasePublicKeys`）
 4. `licence.New` + `Start` → 用 `HasFeature/GetLimit/CheckVersion` 做业务闸门
 5.（可选）`CheckUpdate`/`DownloadArtifact`/`ReportUpgrade` 接在线更新
 6.（可选 SaaS）`TenantSync`/`TenantValidate` 接多租户
@@ -712,7 +712,7 @@ type Options struct {
 client, err := licence.New(licence.Options{
 	ServerURL: "https://licen-hub.inis.cn", LicenseNo: "LIC-2026-000123",
 	Salt: "my-project-salt",
-	PublicKeys: map[string]string{"license-key-2026-01": "<平台导出的公钥 hex>"},
+	PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "<平台按项目导出的公钥 hex>"},
 	Version: "2.3.1",
 })
 if err = client.Start(context.Background()); err != nil {
@@ -1125,7 +1125,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Find` | 许可证分页 | `GET /api/licenses/find` | `*LicenseFindParams` → `*Page[License]` |
 | `Take` | 许可证详情 | `GET /api/licenses/take?id=N` | `id int` → `*License` |
 | `TakePayload` | 查看签发载荷（载荷/签名原文，可用本包 `Parse` + 公钥验签） | `GET /api/licenses/take-payload?id=N` | `id int` → `*LicensePayloadView` |
-| `PublicKey` | 当前验签公钥（任意登录用户可读） | `GET /api/licenses/public-key` | 无 → `*SigningKeyPublic` |
+| `PublicKey` | 项目验签公钥表（任意登录用户可读；projectId 必填，返回全版本 `keys[]` 含历史轮换密钥） | `GET /api/licenses/public-key?projectId=` | `projectId int` → `*LicensePublicKey` |
 | `Apply` | 提交授权申请（member 自助） | `POST /api/licenses/apply` | `LicenseApplyInput` → `*ApplyResult` |
 | `Cancel` | 撤回授权申请（仅本人 pending 可撤回） | `POST /api/licenses/cancel` | `id int` → 无 |
 | `Applications` | 授权申请列表（不分页） | `GET /api/licenses/applications/rows` | `*LicenseApplicationFindParams` → `[]LicenseApplication` |
@@ -1147,8 +1147,8 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 | 方法 | 说明 | 路由 | 参数 → 返回 |
 |---|---|---|---|
-| `Public` | 导出公钥（任意登录用户可读）。`purpose` 仅支持 `license` / `release`；`keyVersion` 留空取当前版本；release 支持按版本导出历史公钥，license 仅保留当前版本 | `GET /api/signing-keys/public?purpose=&keyVersion=` | `purpose string, keyVersion string` → `*SigningKeyPublic` |
-| `Rotate` | 轮换签名密钥（高风险，需 `system.signing-key.rotate` 权限）。release 保留历史版本供旧发布物验签；license 仅切换当前版本 | `POST /api/signing-keys/rotate` | `purpose string` → `*SigningKeyPublic` |
+| `Public` | 导出公钥（任意登录用户可读）。`purpose` 仅支持 `license` / `release`；`projectId` 仅 license 用途必填（密钥按项目隔离）；`keyVersion` 留空取当前版本，release 支持按版本导出历史公钥，license 仅保留当前版本 | `GET /api/signing-keys/public?purpose=&keyVersion=&projectId=` | `purpose string, keyVersion string, projectId int` → `*SigningKeyPublic` |
+| `Rotate` | 轮换签名密钥（高风险，需 `system.signing-key.rotate` 权限）。`projectId` 仅 license 用途必填（按项目轮换）；`reason` 为轮换原因（审计留痕）。release 保留历史版本供旧发布物验签；license 仅切换当前版本 | `POST /api/signing-keys/rotate` | `purpose string, projectId int, reason string` → `*SigningKeyPublic` |
 
 #### Artifacts - 项目发布物（`/api/project-artifacts/*`）
 

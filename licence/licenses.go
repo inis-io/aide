@@ -51,11 +51,13 @@ func (this *LicensesResource) TakePayload(ctx context.Context, id int) (*License
 	return &result, nil
 }
 
-// PublicKey - 当前验签公钥（任意登录用户可读）：GET /api/licenses/public-key
-func (this *LicensesResource) PublicKey(ctx context.Context) (*SigningKeyPublic, error) {
+// PublicKey - 项目许可证验签公钥表（任意登录用户可读）：GET /api/licenses/public-key?projectId=X
+// projectId 必填（许可证密钥按项目隔离）；返回全版本公钥表（含历史 rotated keys），
+// 装机端据此生成完整 PublicKeys map（与信封载荷 keyVersion 精确对应）。
+func (this *LicensesResource) PublicKey(ctx context.Context, projectId int) (*LicensePublicKey, error) {
 
-	var result SigningKeyPublic
-	if err := this.client.get(ctx, "/api/licenses/public-key", nil, &result); err != nil {
+	var result LicensePublicKey
+	if err := this.client.get(ctx, "/api/licenses/public-key", map[string]any{"projectId": projectId}, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

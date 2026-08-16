@@ -185,6 +185,7 @@ func TestLicenseTakePayload(t *testing.T) {
 }
 
 // TestSigningKeyPublic - 公钥导出：purpose/keyVersion 查询参数透传与结果解析
+// release 用途不携带 projectId（全局密钥）；license 用途必带 projectId（项目级密钥）。
 func TestSigningKeyPublic(t *testing.T) {
 
 	hub := newFakeHub(t)
@@ -196,7 +197,7 @@ func TestSigningKeyPublic(t *testing.T) {
 	}
 	client := hub.newClient(t)
 
-	key, err := client.SigningKeys.Public(context.Background(), "release", "release-key-2026-01")
+	key, err := client.SigningKeys.Public(context.Background(), "release", "release-key-2026-01", 0)
 	if err != nil {
 		t.Fatalf("公钥导出失败: %v", err)
 	}
@@ -206,6 +207,65 @@ func TestSigningKeyPublic(t *testing.T) {
 	query := hub.lastQuery
 	if query.Get("purpose") != "release" || query.Get("keyVersion") != "release-key-2026-01" {
 		t.Fatalf("查询参数不符: %s", query.Encode())
+	}
+	if query.Get("projectId") != "" {
+		t.Fatalf("release 用途不应携带 projectId: %s", query.Encode())
+	}
+}
+
+// TestSigningKeyPublicLicense - license 用途公钥导出：projectId 透传
+func TestSigningKeyPublicLicense(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/signing-keys/public"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"purpose": "license", "keyVersion": "license-key-INIS-202608-abc123",
+			"algorithm": "Ed25519", "publicKey": "cafebabe",
+		})
+	}
+	client := hub.newClient(t)
+
+	key, err := client.SigningKeys.Public(context.Background(), "license", "", 3)
+	if err != nil {
+		t.Fatalf("license 公钥导出失败: %v", err)
+	}
+	if key.Purpose != "license" || key.PublicKey != "cafebabe" {
+		t.Fatalf("公钥解析不符: %+v", key)
+	}
+	query := hub.lastQuery
+	if query.Get("projectId") != "3" {
+		t.Fatalf("license 用途应携带 projectId=3: %s", query.Encode())
+	}
+}
+
+// TestLicensePublicKey - 项目公钥表导出：projectId 透传 + keys[] 全版本解析
+func TestLicensePublicKey(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/licenses/public-key"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"algorithm": "Ed25519", "projectId": 3, "projectNo": "INIS",
+			"keys": []map[string]any{
+				{"keyVersion": "license-key-2026-01", "publicKey": "deadbeef"},
+				{"keyVersion": "license-key-INIS-202608-abc123", "publicKey": "cafebabe"},
+			},
+		})
+	}
+	client := hub.newClient(t)
+
+	pub, err := client.Licenses.PublicKey(context.Background(), 3)
+	if err != nil {
+		t.Fatalf("项目公钥表导出失败: %v", err)
+	}
+	if pub.ProjectId != 3 || pub.ProjectNo != "INIS" || len(pub.Keys) != 2 {
+		t.Fatalf("公钥表解析不符: %+v", pub)
+	}
+	if pub.Keys[1].KeyVersion != "license-key-INIS-202608-abc123" || pub.Keys[1].PublicKey != "cafebabe" {
+		t.Fatalf("公钥表条目不符: %+v", pub.Keys)
+	}
+	query := hub.lastQuery
+	if query.Get("projectId") != "3" {
+		t.Fatalf("projectId 查询参数不符: %s", query.Encode())
 	}
 }
 

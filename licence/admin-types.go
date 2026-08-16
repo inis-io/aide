@@ -713,6 +713,27 @@ type SigningKeyPublic struct {
 	PublicKey string `json:"publicKey"`
 }
 
+// LicensePublicKey - 项目许可证验签公钥表（GET /api/licenses/public-key 的 data）
+// keys 为全版本公钥表（含历史 rotated keys），装机端据此内置完整 PublicKeys map。
+type LicensePublicKey struct {
+	// Algorithm - 签名算法（Ed25519）
+	Algorithm string `json:"algorithm"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId"`
+	// ProjectNo - 项目编号
+	ProjectNo string `json:"projectNo"`
+	// Keys - 全版本公钥表（keyVersion -> publicKey）
+	Keys []SigningKeyItem `json:"keys"`
+}
+
+// SigningKeyItem - 单版本验签公钥条目
+type SigningKeyItem struct {
+	// KeyVersion - 密钥版本标识
+	KeyVersion string `json:"keyVersion"`
+	// PublicKey - 公钥（hex）
+	PublicKey string `json:"publicKey"`
+}
+
 // ============================= 项目版本 =============================
 
 // ProjectVersion - 项目版本（平台 models/basic.ProjectVersion）
