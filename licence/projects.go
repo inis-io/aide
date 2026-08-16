@@ -87,3 +87,38 @@ func (this *ProjectsResource) Restore(ctx context.Context, ids []int) (*IdsResul
 	}
 	return &result, nil
 }
+
+// AutoProvisionConfig - 项目装机自动授权配置（只读）：GET /api/projects/auto-provision-config?id=X
+// 返回项目显式值（null=继承平台）+ 平台级默认（含内置回退 90/1000/20/5），权限 project.read。
+func (this *ProjectsResource) AutoProvisionConfig(ctx context.Context, id int) (*ProjectAutoProvisionConfig, error) {
+
+	var result ProjectAutoProvisionConfig
+	if err := this.client.get(ctx, "/api/projects/auto-provision-config", map[string]any{"id": id}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SaveAutoProvision - 保存项目装机自动授权配置（全量替换）：PUT /api/projects/save-auto-provision
+// Enabled 必填；5 项参数 nil=恢复继承平台（落库 NULL），显式 0=不限制。权限 project.update。
+func (this *ProjectsResource) SaveAutoProvision(ctx context.Context, input SaveProjectAutoProvisionInput) (*IdResult, error) {
+
+	var result IdResult
+	if err := this.client.put(ctx, "/api/projects/save-auto-provision", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ToggleAutoProvision - 切换项目装机自动授权开关（单字段直改）：PUT /api/projects/toggle-auto-provision
+// enabled 显式传 true/false。权限 project.update；全量配置（含运维参数）用 SaveAutoProvision。
+func (this *ProjectsResource) ToggleAutoProvision(ctx context.Context, id int, enabled bool) (*IdResult, error) {
+
+	var result IdResult
+	if err := this.client.put(ctx, "/api/projects/toggle-auto-provision", map[string]any{
+		"id": id, "autoProvisionEnabled": enabled,
+	}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

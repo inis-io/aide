@@ -173,6 +173,18 @@ type Project struct {
 	LicenseMode string `json:"licenseMode"`
 	// ExpirePolicy - 到期策略
 	ExpirePolicy string `json:"expirePolicy"`
+	// AutoProvisionEnabled - 装机自动授权开关（*bool，缺失=关闭）
+	AutoProvisionEnabled *bool `json:"autoProvisionEnabled"`
+	// ProvisionTrialMaxDays - 装机试用期上限(天)，null=继承平台
+	ProvisionTrialMaxDays *int `json:"provisionTrialMaxDays"`
+	// ProvisionDefaultQuota - 装机默认模板配额，null=继承平台
+	ProvisionDefaultQuota *int `json:"provisionDefaultQuota"`
+	// ProvisionRatePerIP - 装机单IP小时限流，null=继承平台
+	ProvisionRatePerIP *int `json:"provisionRatePerIp"`
+	// ProvisionRatePerSN - 装机单SN小时限流，null=继承平台
+	ProvisionRatePerSN *int `json:"provisionRatePerSn"`
+	// ProvisionDailyCap - 装机每日发放上限(0=不限制)，null=继承平台
+	ProvisionDailyCap *int `json:"provisionDailyCap"`
 	// Uid - 操作人用户ID
 	Uid int `json:"uid"`
 	// Remark - 备注
@@ -214,8 +226,74 @@ type ProjectInput struct {
 	LicenseMode string `json:"licenseMode,omitempty"`
 	// ExpirePolicy - 到期策略
 	ExpirePolicy string `json:"expirePolicy,omitempty"`
+	// AutoProvisionEnabled - 装机自动授权开关（*bool：nil=不提交，false=显式关闭）
+	AutoProvisionEnabled *bool `json:"autoProvisionEnabled,omitempty"`
+	// ProvisionTrialMaxDays - 装机试用期上限(天)，nil=不提交/继承平台
+	ProvisionTrialMaxDays *int `json:"provisionTrialMaxDays,omitempty"`
+	// ProvisionDefaultQuota - 装机默认模板配额，nil=不提交/继承平台
+	ProvisionDefaultQuota *int `json:"provisionDefaultQuota,omitempty"`
+	// ProvisionRatePerIP - 装机单IP小时限流，nil=不提交/继承平台
+	ProvisionRatePerIP *int `json:"provisionRatePerIp,omitempty"`
+	// ProvisionRatePerSN - 装机单SN小时限流，nil=不提交/继承平台
+	ProvisionRatePerSN *int `json:"provisionRatePerSn,omitempty"`
+	// ProvisionDailyCap - 装机每日发放上限(0=不限制)，nil=不提交/继承平台
+	ProvisionDailyCap *int `json:"provisionDailyCap,omitempty"`
 	// Remark - 备注
 	Remark string `json:"remark,omitempty"`
+}
+
+// ProjectAutoProvisionConfig - 项目装机自动授权配置（GET /api/projects/auto-provision-config）
+// 项目显式值 null=继承平台；Platform 为平台级默认（含内置回退 90/1000/20/5），仅作「继承」提示。
+type ProjectAutoProvisionConfig struct {
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId"`
+	// Enabled - 项目级开关是否开启
+	Enabled bool `json:"enabled"`
+	// TrialMaxDays - 项目显式试用期上限(天)，null=继承平台
+	TrialMaxDays *int `json:"trialMaxDays"`
+	// DefaultQuota - 项目显式默认模板配额，null=继承平台
+	DefaultQuota *int `json:"defaultQuota"`
+	// RatePerIp - 项目显式单IP小时限流，null=继承平台
+	RatePerIp *int `json:"ratePerIp"`
+	// RatePerSn - 项目显式单SN小时限流，null=继承平台
+	RatePerSn *int `json:"ratePerSn"`
+	// DailyCap - 项目显式每日发放上限(0=不限制)，null=继承平台
+	DailyCap *int `json:"dailyCap"`
+	// Platform - 平台级默认（含内置回退）
+	Platform ProjectAutoProvisionPlatform `json:"platform"`
+}
+
+// ProjectAutoProvisionPlatform - 平台级装机参数默认值（继承来源；当前仅 seed/DB 可调）
+type ProjectAutoProvisionPlatform struct {
+	// GlobalTrialMaxDays - 平台装机试用期上限(天)（内置回退 90）
+	GlobalTrialMaxDays int `json:"globalTrialMaxDays"`
+	// DefaultTemplateQuota - 平台装机默认模板配额（内置回退 1000）
+	DefaultTemplateQuota int `json:"defaultTemplateQuota"`
+	// ProvisionRatePerIP - 平台装机单IP小时限流（内置回退 20）
+	ProvisionRatePerIP int `json:"provisionRatePerIp"`
+	// ProvisionRatePerSN - 平台装机单SN小时限流（内置回退 5）
+	ProvisionRatePerSN int `json:"provisionRatePerSn"`
+	// DailyGlobalCap - 平台装机每日全局发放上限（0=不限制）
+	DailyGlobalCap int `json:"dailyGlobalCap"`
+}
+
+// SaveProjectAutoProvisionInput - 保存项目装机自动授权配置（PUT /api/projects/save-auto-provision，全量替换）
+// Enabled 必填；5 项参数 nil=恢复继承平台（落库 NULL），显式 0=不限制。
+type SaveProjectAutoProvisionInput struct {
+	// Id - 项目ID（必填）
+	Id int `json:"id"`
+	// Enabled - 项目级开关（必填，false=关闭）
+	Enabled bool `json:"enabled"`
+	// TrialMaxDays - 装机试用期上限(天)，nil=恢复继承平台
+	TrialMaxDays *int `json:"trialMaxDays,omitempty"`
+	// DefaultQuota - 装机默认模板配额，nil=恢复继承平台
+	DefaultQuota *int `json:"defaultQuota,omitempty"`
+	// RatePerIp - 装机单IP小时限流，nil=恢复继承平台
+	RatePerIp *int `json:"ratePerIp,omitempty"`
+	// RatePerSn - 装机单SN小时限流，nil=恢复继承平台
+	RatePerSn *int `json:"ratePerSn,omitempty"`
+	// DailyCap - 装机每日发放上限(0=不限制)，nil=恢复继承平台
+	DailyCap *int `json:"dailyCap,omitempty"`
 }
 
 // ProjectFindParams - 项目查询参数（平台 types.ProjectFind + 控制器 In/Like/Between 清单）

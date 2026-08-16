@@ -508,3 +508,104 @@ func TestLicenseReleaseSeat(t *testing.T) {
 		t.Fatalf("释放请求体不符: %s", string(hub.lastBody))
 	}
 }
+
+// TestProjectAutoProvisionConfig - 项目装机自动授权配置读取：?id=X 透传，可空参数(null=继承)与平台默认解析
+func TestProjectAutoProvisionConfig(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/projects/auto-provision-config"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"projectId": 3, "enabled": true,
+			"trialMaxDays": nil, "defaultQuota": 1500,
+			"ratePerIp": nil, "ratePerSn": nil, "dailyCap": nil,
+			"platform": map[string]any{
+				"globalTrialMaxDays": 90, "defaultTemplateQuota": 1000,
+				"provisionRatePerIp": 20, "provisionRatePerSn": 5, "dailyGlobalCap": 0,
+			},
+		})
+	}
+	client := hub.newClient(t)
+
+	cfg, err := client.Projects.AutoProvisionConfig(context.Background(), 3)
+	if err != nil {
+		t.Fatalf("配置读取失败: %v", err)
+	}
+	if cfg.ProjectId != 3 || !cfg.Enabled {
+		t.Fatalf("配置解析不符: %+v", cfg)
+	}
+	if cfg.TrialMaxDays != nil {
+		t.Fatalf("trialMaxDays 应为 null（继承平台）: %+v", cfg)
+	}
+	if cfg.DefaultQuota == nil || *cfg.DefaultQuota != 1500 {
+		t.Fatalf("defaultQuota 解析不符: %+v", cfg)
+	}
+	if cfg.Platform.GlobalTrialMaxDays != 90 || cfg.Platform.ProvisionRatePerSN != 5 || cfg.Platform.DailyGlobalCap != 0 {
+		t.Fatalf("平台默认解析不符: %+v", cfg.Platform)
+	}
+	if hub.lastQuery.Get("id") != "3" {
+		t.Fatalf("配置读取应携带 ?id=3: %s", hub.lastQuery.Encode())
+	}
+}
+
+// TestProjectSaveAutoProvision - 保存项目装机自动授权配置：PUT JSON body，
+// enabled=false 显式上送、nil 参数 omitempty 不上送（平台 decode 得 nil → 落库 NULL = 恢复继承平台）
+func TestProjectSaveAutoProvision(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["PUT /api/projects/save-auto-provision"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{"id": 3})
+	}
+	client := hub.newClient(t)
+
+	trial, cap := 120, 0
+	result, err := client.Projects.SaveAutoProvision(context.Background(), SaveProjectAutoProvisionInput{
+		Id: 3, Enabled: false, TrialMaxDays: &trial, DailyCap: &cap,
+	})
+	if err != nil {
+		t.Fatalf("保存失败: %v", err)
+	}
+	if result.Id != 3 {
+		t.Fatalf("保存结果不符: %+v", result)
+	}
+
+	var sent map[string]any
+	if err = json.Unmarshal(hub.lastBody, &sent); err != nil {
+		t.Fatalf("请求体不是 JSON: %v", err)
+	}
+	if v, ok := sent["enabled"].(bool); !ok || v {
+		t.Fatalf("enabled=false 应显式上送: %s", string(hub.lastBody))
+	}
+	if sent["id"] != float64(3) {
+		t.Fatalf("save 应携带 id: %s", string(hub.lastBody))
+	}
+	if sent["trialMaxDays"] != float64(120) || sent["dailyCap"] != float64(0) {
+		t.Fatalf("参数值上送不符: %s", string(hub.lastBody))
+	}
+	if _, ok := sent["defaultQuota"]; ok {
+		t.Fatalf("nil 参数（继承平台）不应上送: %s", string(hub.lastBody))
+	}
+}
+
+// TestProjectToggleAutoProvision - 切换项目装机自动授权开关：PUT {id, autoProvisionEnabled}
+func TestProjectToggleAutoProvision(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["PUT /api/projects/toggle-auto-provision"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{"id": 3, "autoProvisionEnabled": true})
+	}
+	client := hub.newClient(t)
+
+	result, err := client.Projects.ToggleAutoProvision(context.Background(), 3, true)
+	if err != nil {
+		t.Fatalf("切换开关失败: %v", err)
+	}
+	if result.Id != 3 {
+		t.Fatalf("切换结果不符: %+v", result)
+	}
+	if !strings.Contains(string(hub.lastBody), `"autoProvisionEnabled":true`) {
+		t.Fatalf("切换请求体不符: %s", string(hub.lastBody))
+	}
+	if !strings.Contains(string(hub.lastBody), `"id":3`) {
+		t.Fatalf("切换请求体应携带 id: %s", string(hub.lastBody))
+	}
+}
