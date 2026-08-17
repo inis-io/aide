@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -174,9 +175,28 @@ func (this *Client) DownloadArtifact(ctx context.Context, manifest *Manifest, ar
 		return errors.New("发布物签名验签失败：" + artifact.ArtifactNo)
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, artifact.Url, nil)
+	// 阶段五：平台 local 驱动下发的是鉴权代理相对路径（/api/v1/artifacts/download?..），
+	// 需用 ServerURL 拼接并附带运行面签名头（复用 activation token 鉴权，随下载请求实时签名）；
+	// OSS/COS 预签名绝对 URL 或兼容直链保持原样裸 GET。
+	targetURL := artifact.Url
+	if strings.HasPrefix(artifact.Url, "/") {
+		if this.options.ServerURL == "" {
+			return errors.New("平台代理下载需要配置 ServerURL")
+		}
+		targetURL = strings.TrimRight(this.options.ServerURL, "/") + artifact.Url
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return err
+	}
+	if strings.HasPrefix(artifact.Url, "/") {
+		headers, err := this.signHeaders(http.MethodGet, artifact.Url, nil)
+		if err != nil {
+			return err
+		}
+		for name, value := range headers {
+			request.Header.Set(name, value)
+		}
 	}
 	// 大文件下载独立长超时（不占用运行面短超时）
 	downloader := &http.Client{Timeout: 30 * time.Minute}
