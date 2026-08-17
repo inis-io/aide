@@ -3,6 +3,7 @@ package licence
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -85,6 +86,48 @@ func TestCheckUpdateMultiArch(t *testing.T) {
 	}
 	if miss.Available {
 		t.Fatalf("windows/amd64 未声明应不命中: %+v", miss.Manifest)
+	}
+}
+
+// TestNewUpdaterDefaultOSArch - 缺省 OSArch 必须是 GOOS/GOARCH 斜杠格式（与平台架构字典一致）。
+// 历史缺省为连字符（linux-amd64），与平台声明的 linux/amd64 等值失配，
+// 导致 selectVersion/selectArtifact 全跳过、自动更新静默失效——回归测试。
+func TestNewUpdaterDefaultOSArch(t *testing.T) {
+	platform := newFakePlatform(t)
+	want := runtime.GOOS + "/" + runtime.GOARCH
+	platform.mu.Lock()
+	platform.versions = append(platform.versions, fakeVersion{
+		version: "2.4.0", buildNumber: "20260808.1", sourceRange: ">=2.0.0",
+		osArch: []string{want}, releasedAt: time.Now().Add(-time.Hour).UnixMilli(),
+		artifactData: []byte("fake-default-osarch"),
+	})
+	platform.mu.Unlock()
+
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	// 不传 OSArch，验证缺省归一化为斜杠格式
+	updater, err := NewUpdater(client, UpdaterOptions{})
+	if err != nil {
+		t.Fatalf("NewUpdater 失败: %v", err)
+	}
+	if updater.options.OSArch != want {
+		t.Fatalf("缺省 OSArch 应为 %q（斜杠，与平台架构字典一致），实际 %q", want, updater.options.OSArch)
+	}
+
+	// 缺省 OSArch 应能命中平台声明的同架构版本（等值匹配不失配）
+	info, err := updater.CheckNow(t.Context())
+	if err != nil {
+		t.Fatalf("CheckNow 失败: %v", err)
+	}
+	if !info.Available || info.Manifest == nil {
+		t.Fatalf("缺省 OSArch %q 应命中同架构已发布版本: %+v", want, info)
 	}
 }
 

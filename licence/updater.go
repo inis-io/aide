@@ -26,11 +26,12 @@ const (
 // 接入最小形态：
 //
 //	updater, _ := licence.NewUpdater(client, licence.UpdaterOptions{
-//		OSArch: runtime.GOOS + "-" + runtime.GOARCH,
+//		OSArch: runtime.GOOS + "/" + runtime.GOARCH,
 //	})
 //	go updater.Start(ctx) // 之后检查/下载/替换/重启/上报全自动
 type UpdaterOptions struct {
-	// OSArch - 平台架构（选包依据，必填；缺省 runtime.GOOS + "-" + runtime.GOARCH）
+	// OSArch - 平台架构（选包依据，必填；缺省 runtime.GOOS + "/" + runtime.GOARCH，
+	// 格式须与平台架构字典一致，如 "linux/amd64"——历史缺省曾用连字符，已修正）
 	OSArch string
 	// Mode - 应用模式：ApplySelfBinary（默认，替换当前 exe）| ApplyDirectory（整体替换 TargetPath）
 	Mode ApplyMode
@@ -90,7 +91,7 @@ func NewUpdater(client *Client, options UpdaterOptions) (*Updater, error) {
 		return nil, errors.New("client 不能为空")
 	}
 	if options.OSArch == "" {
-		options.OSArch = runtime.GOOS + "-" + runtime.GOARCH
+		options.OSArch = runtime.GOOS + "/" + runtime.GOARCH
 	}
 	if options.Mode == "" {
 		options.Mode = ApplySelfBinary
