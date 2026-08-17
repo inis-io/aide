@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,18 @@ import (
 	"testing"
 	"time"
 )
+
+// TestMain - 包级安全桩：流水线走到 pending_restart 后 executeRestart 会按
+// auto/respawn 真实拉起「测试二进制自身」，造成自再生进程洪峰与 .exe 文件锁。
+// 在测试进程统一把 startProcess/exitProcess 换成安全短路，杜绝误拉起/误退出；
+// respawn 专项测试内部再局部覆盖为断言桩（defer 恢复回本桩）。
+func TestMain(m *testing.M) {
+	startProcess = func(string, []string, *os.ProcAttr) (*os.Process, error) {
+		return nil, errors.New("test: startProcess stub")
+	}
+	exitProcess = func(code int) {}
+	os.Exit(m.Run())
+}
 
 // ============================= 测试辅助 =============================
 
@@ -731,6 +744,171 @@ func TestFindSingleFileRejects(t *testing.T) {
 	_ = os.Remove(filepath.Join(dir, "b.bin"))
 	if got, err := findSingleFile(dir); err != nil || got != filepath.Join(dir, "a.bin") {
 		t.Fatalf("单文件应返回该文件: %v %v", got, err)
+	}
+}
+
+// ============================= update.available 事件提示 =============================
+
+// TestUpdaterEventHintTriggersCheck - 订阅 update.available 事件触发立即检查：
+// 事件经长轮询到达 → checkTick 执行 CheckNow（更新可用时 lastInfo 携带清单），
+// 未配置自动更新时不触发流水线（无上报），事件水位推进
+func TestUpdaterEventHintTriggersCheck(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	platform.versions = []fakeVersion{{
+		version: "2.4.0", buildNumber: "2026081801", sourceRange: ">=2.0.0",
+		artifacts: []fakeArtifact{{fileName: "app.zip",
+			data: buildZip(t, map[string]string{"bin/app.exe": "new"})}},
+	}}
+	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{AutoCheck: boolPtr(false)})
+	sub := updater.EventUpdates()
+
+	if _, err := platform.pushEvent(EventUpdateAvailable, map[string]any{"version": "2.4.0"}); err != nil {
+		t.Fatalf("推送 update.available 事件失败: %v", err)
+	}
+	delivered, err := sub.Poll(t.Context())
+	if err != nil {
+		t.Fatalf("Poll 事件失败: %v", err)
+	}
+	if delivered != 1 {
+		t.Fatalf("应分发 1 条事件，实际 %d", delivered)
+	}
+
+	updater.mu.RLock()
+	info := updater.lastInfo
+	updater.mu.RUnlock()
+	if !info.Available || info.Manifest == nil {
+		t.Fatalf("事件应触发 CheckNow 并发现可用更新，实际 %+v", info)
+	}
+	if got := reportStatuses(t, platform); len(got) != 0 {
+		t.Fatalf("未配置自动更新不应触发流水线上报，实际 %v", got)
+	}
+}
+
+// TestUpdaterEventHintAutoApplies - 事件提示 + 清单 auto 策略放行时自动执行流水线
+func TestUpdaterEventHintAutoApplies(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	platform.versions = []fakeVersion{{
+		version: "2.4.0", buildNumber: "2026081801", sourceRange: ">=2.0.0",
+		artifacts: []fakeArtifact{{fileName: "app.zip",
+			data: buildZip(t, map[string]string{"bin/new.txt": "new-content"})}},
+		policy: &ManifestUpdatePolicy{Auto: true},
+	}}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatalf("建目标目录失败: %v", err)
+	}
+	_, updater := newTestUpdater(t, platform, dir, UpdaterOptions{
+		Mode: ApplyDirectory, TargetPath: target, AutoCheck: boolPtr(false), RestartDelay: 1,
+	})
+	sub := updater.EventUpdates()
+
+	origExit := exitProcess
+	exitProcess = func(code int) {}
+	defer func() { exitProcess = origExit }()
+
+	if _, err := platform.pushEvent(EventUpdateAvailable, map[string]any{"version": "2.4.0"}); err != nil {
+		t.Fatalf("推送事件失败: %v", err)
+	}
+	if delivered, err := sub.Poll(t.Context()); err != nil || delivered != 1 {
+		t.Fatalf("Poll 应分发并推进水位: %v %v", err, delivered)
+	}
+
+	if got := readFileString(t, filepath.Join(target, "bin", "new.txt")); got != "new-content" {
+		t.Fatalf("auto 策略应经事件提示自动执行流水线，新文件未落位: %q", got)
+	}
+	statuses := reportStatuses(t, platform)
+	if len(statuses) < 2 || statuses[0] != UpgradeDownloading {
+		t.Fatalf("上报轨迹应以 downloading 开头，实际 %v", statuses)
+	}
+}
+
+// ============================= respawn / callback 重启 =============================
+
+// TestUpdaterRespawn - respawn：同 argv/env 拉起自身（argv[0] 为自身 exe），父进程退出 0
+func TestUpdaterRespawn(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
+	origExit := exitProcess
+	origStart := startProcess
+	defer func() { exitProcess = origExit; startProcess = origStart }()
+
+	var exited *int
+	exitProcess = func(code int) { exited = &code }
+	startProcess = func(name string, argv []string, attr *os.ProcAttr) (*os.Process, error) {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatalf("os.Executable 失败: %v", err)
+		}
+		if name != exe || argv[0] != exe {
+			t.Fatalf("respawn 应以自身 exe 拉起: name=%q argv[0]=%q", name, argv[0])
+		}
+		if len(attr.Env) == 0 || attr.Files == nil {
+			t.Fatalf("respawn 应继承环境变量与 stdio")
+		}
+		return &os.Process{Pid: 12345}, nil
+	}
+
+	updater.executeRestart(t.Context(), "respawn")
+	if exited == nil || *exited != 0 {
+		t.Fatalf("respawn 成功后父进程应退出 0，实际 %v", exited)
+	}
+}
+
+// TestUpdaterRespawnFallbackToExitCode - respawn 启动失败退化为 exit-code（依赖守护兜底）
+func TestUpdaterRespawnFallbackToExitCode(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
+	origExit := exitProcess
+	origStart := startProcess
+	defer func() { exitProcess = origExit; startProcess = origStart }()
+
+	var exited *int
+	exitProcess = func(code int) { exited = &code }
+	startProcess = func(string, []string, *os.ProcAttr) (*os.Process, error) {
+		return nil, errors.New("启动失败")
+	}
+
+	updater.executeRestart(t.Context(), "respawn")
+	if exited == nil || *exited != updater.options.RestartExitCode {
+		t.Fatalf("respawn 失败应退化为 exit-code(%d)，实际 %v", updater.options.RestartExitCode, exited)
+	}
+}
+
+// TestUpdaterCallbackNoExit - callback 模式仅通知不退出（重启时机客户自控）
+func TestUpdaterCallbackNoExit(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
+	origExit := exitProcess
+	defer func() { exitProcess = origExit }()
+
+	exitProcess = func(code int) { t.Fatalf("callback 模式不应退出进程: %d", code) }
+	updater.executeRestart(t.Context(), "callback")
+}
+
+// TestUpdaterAutoRespawnsWhenNoDaemon - auto 模式：测试环境无守护（detectDaemon=false）→ respawn
+func TestUpdaterAutoRespawnsWhenNoDaemon(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
+	origExit := exitProcess
+	origStart := startProcess
+	defer func() { exitProcess = origExit; startProcess = origStart }()
+
+	var exited *int
+	exitProcess = func(code int) { exited = &code }
+	startProcess = func(string, []string, *os.ProcAttr) (*os.Process, error) {
+		return &os.Process{Pid: 12345}, nil
+	}
+
+	updater.executeRestart(t.Context(), "auto")
+	if exited == nil || *exited != 0 {
+		t.Fatalf("auto 无守护应 respawn 后退出 0，实际 %v", exited)
 	}
 }
 

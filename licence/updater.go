@@ -232,6 +232,17 @@ func (this *Updater) Rollback(ctx context.Context) error {
 	return this.rollback(ctx)
 }
 
+// EventUpdates - 返回近实时更新提示订阅器：收到 `update.available` 事件即触发一次
+// 立即检查（CheckNow），策略放行时自动执行流水线；仅作提示，灰度与升级权仍以 check 判定为准。
+// 需调用方执行 sub.Run(ctx)（或自行循环 Poll）；周期检查仍是保底通道（设计 §4.4）。
+func (this *Updater) EventUpdates() *EventSubscriber {
+	return this.client.Subscribe(CallbackOptions{}).
+		OnEvent(EventUpdateAvailable, func(ctx context.Context, event *CallbackEvent) (Ack, error) {
+			this.checkTick(ctx)
+			return AckSuccess, nil
+		})
+}
+
 // Pending - 查询是否存在「已替换待重启」的更新（客户 UI 显示「重启以完成更新」）
 func (this *Updater) Pending() (UpdateInfo, bool) {
 

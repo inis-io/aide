@@ -99,6 +99,9 @@ const (
 	EventPlatformConfigUpdated = "platform.config.updated"
 	// EventPlatformConfigDefinitionChanged - 平台配置项定义已变更，data: {configKey, version}
 	EventPlatformConfigDefinitionChanged = "platform.config.definition.changed"
+	// EventUpdateAvailable - 项目发布新版本（hint），data: {version}；仅作近实时提示，
+	// 灰度与升级权仍以 updates/check 判定为准（设计 §4.4）
+	EventUpdateAvailable = "update.available"
 )
 
 // CallbackEvent - 分发给业务回调的事件对象
