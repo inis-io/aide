@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,7 +93,7 @@ type fakeVersion struct {
 	buildNumber  string
 	sourceRange  string
 	minUpgrade   string
-	osArch       string
+	osArch       []string
 	releasedAt   int64
 	grayMode     string
 	grayPercent  int
@@ -482,7 +483,8 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 			compareSemver(mustParseSemver(params.Version), mustParseSemver(version.minUpgrade)) < 0 {
 			continue
 		}
-		if version.osArch != "" && params.OsArch != "" && version.osArch != params.OsArch {
+		// 版本声明了平台架构且不包含客户端上报架构时跳过（多架构版本：数组包含即命中）
+		if len(version.osArch) > 0 && params.OsArch != "" && !slices.Contains(version.osArch, params.OsArch) {
 			continue
 		}
 		// 升级权：发布时间晚于 upgradeUntil 则无权升级
@@ -556,10 +558,15 @@ func (this *fakePlatform) signManifestArtifacts(version fakeVersion) ([]Manifest
 	if err != nil {
 		return nil, err
 	}
+	// 回退分支无独立发布物 osArch，取版本声明的首个架构作为该发布物架构
+	arch := ""
+	if len(version.osArch) > 0 {
+		arch = version.osArch[0]
+	}
 	return []ManifestArtifact{{
 		ArtifactNo: artifactNo, FileName: "app-" + version.version + ".tar.gz",
 		Url: this.server.URL + "/files/" + version.version,
-		Size: int64(len(version.artifactData)), OsArch: version.osArch,
+		Size: int64(len(version.artifactData)), OsArch: arch,
 		Sha256: sha256Hex, Signature: sign, KeyVersion: "release-key-2026-01",
 	}}, nil
 }

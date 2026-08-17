@@ -48,6 +48,46 @@ func TestCheckUpdateAvailable(t *testing.T) {
 	}
 }
 
+// TestCheckUpdateMultiArch - 版本声明多架构（osArch 数组）：客户端上报其一即命中，
+// 未声明的架构不命中（多架构 contains 匹配语义，镜像平台 selectVersion）。
+func TestCheckUpdateMultiArch(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.mu.Lock()
+	platform.versions = append(platform.versions, fakeVersion{
+		version: "2.4.0", buildNumber: "20260808.1", sourceRange: ">=2.0.0",
+		osArch: []string{"linux/amd64", "linux/arm64"},
+		releasedAt: time.Now().Add(-time.Hour).UnixMilli(), artifactData: []byte("fake-multi-arch"),
+	})
+	platform.mu.Unlock()
+
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	// 命中：版本声明包含客户端上报架构
+	info, err := client.CheckUpdate(t.Context(), "linux/arm64")
+	if err != nil {
+		t.Fatalf("CheckUpdate(arm64) 失败: %v", err)
+	}
+	if !info.Available || info.Manifest == nil || info.Manifest.Payload.Version != "2.4.0" {
+		t.Fatalf("arm64 应命中 2.4.0: %+v", info.Manifest)
+	}
+
+	// 未命中：版本未声明该架构
+	miss, err := client.CheckUpdate(t.Context(), "windows/amd64")
+	if err != nil {
+		t.Fatalf("CheckUpdate(windows) 失败: %v", err)
+	}
+	if miss.Available {
+		t.Fatalf("windows/amd64 未声明应不命中: %+v", miss.Manifest)
+	}
+}
+
 // TestCheckUpdateNone - 当前已是最新版本时返回无更新
 func TestCheckUpdateNone(t *testing.T) {
 

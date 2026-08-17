@@ -846,8 +846,8 @@ type ProjectVersion struct {
 	SourceVersionRange string `json:"sourceVersionRange"`
 	// MinUpgradeVersion - 最低可升级版本
 	MinUpgradeVersion string `json:"minUpgradeVersion"`
-	// OsArch - 平台架构（如 linux/amd64）
-	OsArch string `json:"osArch"`
+	// OsArch - 平台架构（多值，如 [linux/amd64,linux/arm64]）
+	OsArch []string `json:"osArch"`
 	// MigrationVersion - 数据库迁移版本
 	MigrationVersion string `json:"migrationVersion"`
 	// ConfigChanges - 配置变更说明
@@ -916,8 +916,8 @@ type VersionInput struct {
 	SourceVersionRange string `json:"sourceVersionRange,omitempty"`
 	// MinUpgradeVersion - 最低可升级版本
 	MinUpgradeVersion string `json:"minUpgradeVersion,omitempty"`
-	// OsArch - 平台架构
-	OsArch string `json:"osArch,omitempty"`
+	// OsArch - 平台架构（多值，如 [linux/amd64,linux/arm64]）
+	OsArch []string `json:"osArch,omitempty"`
 	// MigrationVersion - 数据库迁移版本
 	MigrationVersion string `json:"migrationVersion,omitempty"`
 	// ConfigChanges - 配置变更说明
