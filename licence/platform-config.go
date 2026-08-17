@@ -137,7 +137,7 @@ func (this *Client) platformConfigSyncLocked(ctx context.Context, sinceVersion i
 	return envelope, nil
 }
 
-// PlatformConfig - 读取已同步的平台配置条目副本
+// PlatformConfig - 读取已同步的平台配置条目副本（读命中累计消费埋点，异步上报，不阻塞读取）
 func (this *Client) PlatformConfig(key string) (PlatformConfigItem, bool) {
 	this.mu.RLock()
 	item, exists := this.state.PlatformConfigs[key]
@@ -145,6 +145,7 @@ func (this *Client) PlatformConfig(key string) (PlatformConfigItem, bool) {
 	if !exists {
 		return PlatformConfigItem{}, false
 	}
+	this.trackConfigConsumption(key)
 	item.Options = append(json.RawMessage(nil), item.Options...)
 	item.Rules = append(json.RawMessage(nil), item.Rules...)
 	return item, true

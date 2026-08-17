@@ -683,7 +683,8 @@ var SaasRuntimeService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	PlatformConfigRuntimeService_Sync_FullMethodName = "/licenhub.licence.v1.PlatformConfigRuntimeService/Sync"
+	PlatformConfigRuntimeService_Sync_FullMethodName                    = "/licenhub.licence.v1.PlatformConfigRuntimeService/Sync"
+	PlatformConfigRuntimeService_ReportConfigConsumption_FullMethodName = "/licenhub.licence.v1.PlatformConfigRuntimeService/ReportConfigConsumption"
 )
 
 // PlatformConfigRuntimeServiceClient is the client API for PlatformConfigRuntimeService service.
@@ -693,6 +694,8 @@ const (
 // PlatformConfigRuntimeService - 平台配置运行面。
 type PlatformConfigRuntimeServiceClient interface {
 	Sync(ctx context.Context, in *PlatformConfigSyncRequest, opts ...grpc.CallOption) (*PlatformConfigSyncResponse, error)
+	// ReportConfigConsumption - 运行面配置消费上报（SDK 读 key 后批量异步上报，gate 验签防重放）。
+	ReportConfigConsumption(ctx context.Context, in *ConfigConsumptionReportRequest, opts ...grpc.CallOption) (*ConfigConsumptionReportResponse, error)
 }
 
 type platformConfigRuntimeServiceClient struct {
@@ -713,6 +716,16 @@ func (c *platformConfigRuntimeServiceClient) Sync(ctx context.Context, in *Platf
 	return out, nil
 }
 
+func (c *platformConfigRuntimeServiceClient) ReportConfigConsumption(ctx context.Context, in *ConfigConsumptionReportRequest, opts ...grpc.CallOption) (*ConfigConsumptionReportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigConsumptionReportResponse)
+	err := c.cc.Invoke(ctx, PlatformConfigRuntimeService_ReportConfigConsumption_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PlatformConfigRuntimeServiceServer is the server API for PlatformConfigRuntimeService service.
 // All implementations must embed UnimplementedPlatformConfigRuntimeServiceServer
 // for forward compatibility.
@@ -720,6 +733,8 @@ func (c *platformConfigRuntimeServiceClient) Sync(ctx context.Context, in *Platf
 // PlatformConfigRuntimeService - 平台配置运行面。
 type PlatformConfigRuntimeServiceServer interface {
 	Sync(context.Context, *PlatformConfigSyncRequest) (*PlatformConfigSyncResponse, error)
+	// ReportConfigConsumption - 运行面配置消费上报（SDK 读 key 后批量异步上报，gate 验签防重放）。
+	ReportConfigConsumption(context.Context, *ConfigConsumptionReportRequest) (*ConfigConsumptionReportResponse, error)
 	mustEmbedUnimplementedPlatformConfigRuntimeServiceServer()
 }
 
@@ -732,6 +747,9 @@ type UnimplementedPlatformConfigRuntimeServiceServer struct{}
 
 func (UnimplementedPlatformConfigRuntimeServiceServer) Sync(context.Context, *PlatformConfigSyncRequest) (*PlatformConfigSyncResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedPlatformConfigRuntimeServiceServer) ReportConfigConsumption(context.Context, *ConfigConsumptionReportRequest) (*ConfigConsumptionReportResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportConfigConsumption not implemented")
 }
 func (UnimplementedPlatformConfigRuntimeServiceServer) mustEmbedUnimplementedPlatformConfigRuntimeServiceServer() {
 }
@@ -773,6 +791,24 @@ func _PlatformConfigRuntimeService_Sync_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PlatformConfigRuntimeService_ReportConfigConsumption_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigConsumptionReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlatformConfigRuntimeServiceServer).ReportConfigConsumption(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlatformConfigRuntimeService_ReportConfigConsumption_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlatformConfigRuntimeServiceServer).ReportConfigConsumption(ctx, req.(*ConfigConsumptionReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PlatformConfigRuntimeService_ServiceDesc is the grpc.ServiceDesc for PlatformConfigRuntimeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -783,6 +819,10 @@ var PlatformConfigRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Sync",
 			Handler:    _PlatformConfigRuntimeService_Sync_Handler,
+		},
+		{
+			MethodName: "ReportConfigConsumption",
+			Handler:    _PlatformConfigRuntimeService_ReportConfigConsumption_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

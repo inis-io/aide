@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -73,6 +74,11 @@ type Options struct {
 	GRPC GRPCOptions
 	// OnStatusChange - 状态变化回调（可选，放行与降级策略在此挂接）
 	OnStatusChange func(oldStatus string, newStatus string)
+	// DisableConsumptionReport - 关闭平台配置读取埋点上报（默认 false=开启）。
+	// 开启时 PlatformConfig 读命中会累计计数并异步上报平台，供管理端「运行面消费」展示。
+	DisableConsumptionReport bool
+	// ConsumptionReportInterval - 消费埋点上报间隔（默认 30 秒；累计达 50 个 key 时提前触发）
+	ConsumptionReportInterval time.Duration
 }
 
 // runtimeState - 持久化运行状态（加密存储，token 仅此一份）
@@ -123,6 +129,12 @@ type Client struct {
 	pendingUsage map[string]int64
 	// tenantCache - SaaS 租户信封缓存（sync/validate 写入，TenantStatus/TenantFeature 读取）
 	tenantCache map[string]tenantCacheItem
+	// consumptionMu - 消费埋点互斥（PlatformConfig 读取累计与后台 flush 并发安全）
+	consumptionMu sync.Mutex
+	// pendingConsumption - 待上报平台配置消费计数（key -> 累计读取次数）
+	pendingConsumption map[string]int
+	// flushing - 消费上报是否在跑（防并发 flush，阈值提前触发时用）
+	flushing atomic.Bool
 	// retryDelay - 网络故障退避（请求未达服务端时拉长下轮间隔，恢复后清除）
 	retryDelay time.Duration
 
@@ -170,6 +182,9 @@ func New(options Options) (*Client, error) {
 	if options.HTTPTimeout <= 0 {
 		options.HTTPTimeout = 15 * time.Second
 	}
+	if options.ConsumptionReportInterval <= 0 {
+		options.ConsumptionReportInterval = 30 * time.Second
+	}
 
 	fingerprint, err := FingerprintHash(options.Salt, options.Fingerprint, options.Provider)
 	if err != nil {
@@ -190,8 +205,9 @@ func New(options Options) (*Client, error) {
 		state: runtimeState{
 			PlatformConfigs: make(map[string]PlatformConfigItem),
 		},
-		pendingUsage: make(map[string]int64),
-		tenantCache:  make(map[string]tenantCacheItem),
+		pendingUsage:        make(map[string]int64),
+		tenantCache:         make(map[string]tenantCacheItem),
+		pendingConsumption:  make(map[string]int),
 	}
 	client.transport, err = newRuntimeTransport(client)
 	if err != nil {
@@ -227,6 +243,9 @@ func (this *Client) Start(ctx context.Context) error {
 	loopCtx, cancel := context.WithCancel(context.Background())
 	this.cancel = cancel
 	go this.loop(loopCtx)
+	if !this.options.DisableConsumptionReport {
+		go this.consumptionLoop(loopCtx)
+	}
 	return nil
 }
 

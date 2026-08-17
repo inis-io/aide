@@ -383,6 +383,32 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return code, nil, mapped
 		}
 		return marshalMap(provisionMap(response))
+
+	case http.MethodPost + " /api/v1/platform/configs/consume":
+		var input platformConfigConsumeBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		items := make([]*licencev1.ConfigConsumptionItem, 0, len(input.Items))
+		for _, item := range input.Items {
+			items = append(items, &licencev1.ConfigConsumptionItem{Key: item.Key, Count: int32(item.Count)})
+		}
+		request := &licencev1.ConfigConsumptionReportRequest{LicenseNo: input.LicenseNo, Items: items}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlatformConfigRuntimeService_ReportConfigConsumption_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.platformConfig.ReportConfigConsumption(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		result := map[string]any{"status": response.GetStatus(), "serverTime": response.GetServerTime()}
+		if response.GetMessage() != "" {
+			result["message"] = response.GetMessage()
+		}
+		return marshalMap(result)
 	}
 	return this.roundTripExtended(ctx, method, path, requestURI, body, withSign)
 }

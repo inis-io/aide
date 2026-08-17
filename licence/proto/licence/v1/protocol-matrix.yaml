@@ -17,6 +17,7 @@ runtime:
   - [Client.ValidateTenant, POST, /api/v1/saas/tenants/validate, SaasRuntimeService/Validate, activation-sign-v1, "", saas_tenant, write, normal, true]
   - [Client.CurrentTenant, GET, /api/v1/saas/tenants/current, SaasRuntimeService/Current, activation-sign-v1, "", saas_tenant, read, normal, true]
   - [Client.PlatformConfigSync, POST, /api/v1/platform/configs/sync, PlatformConfigRuntimeService/Sync, activation-sign-v1, "", platform_config, read, normal, true]
+  - [Client.PlatformConfigConsume, POST, /api/v1/platform/configs/consume, PlatformConfigRuntimeService/ReportConfigConsumption, activation-sign-v1, "", platform_config, write, normal, true]
   - [Client.Subscribe, POST, /api/v1/events/subscribe, EventRuntimeService/Subscribe, activation-sign-v1, "", callback_event, read, normal, true]
 admin:
   # 管理面 gRPC 统一走通用 AdminRequest{json}/AdminResponse{code,message,data_json} 信封，

@@ -37,6 +37,8 @@ service SaasRuntimeService {
 // PlatformConfigRuntimeService - 平台配置运行面。
 service PlatformConfigRuntimeService {
   rpc Sync(PlatformConfigSyncRequest) returns (PlatformConfigSyncResponse);
+  // ReportConfigConsumption - 运行面配置消费上报（SDK 读 key 后批量异步上报，gate 验签防重放）。
+  rpc ReportConfigConsumption(ConfigConsumptionReportRequest) returns (ConfigConsumptionReportResponse);
 }
 
 // EventRuntimeService - 运行面事件订阅（项目级 callback_events 长轮询 / 服务端流）。
@@ -237,6 +239,25 @@ message PlatformConfigSyncResponse {
   int64 server_time = 2;
   bytes envelope_json = 3;
   string message = 4;
+}
+
+// ConfigConsumptionItem - 单配置键消费计数。
+message ConfigConsumptionItem {
+  string key = 1;
+  int32 count = 2;
+}
+
+// ConfigConsumptionReportRequest - 配置消费上报请求。
+message ConfigConsumptionReportRequest {
+  string license_no = 1;
+  repeated ConfigConsumptionItem items = 2;
+}
+
+// ConfigConsumptionReportResponse - 配置消费上报响应。
+message ConfigConsumptionReportResponse {
+  string status = 1;
+  int64 server_time = 2;
+  string message = 3;
 }
 
 // EventSubscribeRequest - 事件订阅请求。
