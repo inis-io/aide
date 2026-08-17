@@ -56,10 +56,6 @@ type fakePlatform struct {
 	versions []fakeVersion
 	// tenants - SaaS 租户
 	tenants map[string]fakeTenant
-	// configs - 项目配置
-	configs map[string]ConfigItem
-	// configSyncVersion - 项目配置全局增量水位
-	configSyncVersion int
 	// platformConfigs - 平台配置
 	platformConfigs map[string]PlatformConfigItem
 	// platformConfigSyncVersion - 平台配置全局增量水位
@@ -164,7 +160,6 @@ func newFakePlatform(t *testing.T) *fakePlatform {
 		features:        map[string]bool{"report.advanced": true, "ai.chat": false},
 		limits:          map[string]int64{"max_users": 100},
 		tenants:         make(map[string]fakeTenant),
-		configs:         make(map[string]ConfigItem),
 		platformConfigs: make(map[string]PlatformConfigItem),
 	}
 	releaseSeed, releasePublicKey, err := generateKeyPair()
@@ -199,8 +194,6 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleTenantSync(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/saas/tenants/search":
 		this.handleTenantSearch(writer, request, body)
-	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/projects/configs/sync":
-		this.handleConfigSync(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/platform/configs/sync":
 		this.handlePlatformConfigSync(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/saas/tenants/validate":

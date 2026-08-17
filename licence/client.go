@@ -91,10 +91,6 @@ type runtimeState struct {
 	Status string `json:"status"`
 	// Envelope - 当前缓存信封原文（验签基于载荷原文）
 	Envelope json.RawMessage `json:"envelope"`
-	// Configs - 已验签的项目配置快照
-	Configs map[string]ConfigItem `json:"configs,omitempty"`
-	// ConfigSyncVersion - 项目配置增量同步水位
-	ConfigSyncVersion int `json:"configSyncVersion,omitempty"`
 	// PlatformConfigs - 已验签的平台配置快照（按 Key）
 	PlatformConfigs map[string]PlatformConfigItem `json:"platformConfigs,omitempty"`
 	// PlatformConfigSyncVersion - 平台配置增量同步水位
@@ -192,7 +188,6 @@ func New(options Options) (*Client, error) {
 		options: options,
 		store:   store, fingerprint: fingerprint,
 		state: runtimeState{
-			Configs:         make(map[string]ConfigItem),
 			PlatformConfigs: make(map[string]PlatformConfigItem),
 		},
 		pendingUsage: make(map[string]int64),
@@ -328,7 +323,7 @@ func (this *Client) Reset() error {
 	this.opMu.Lock()
 	defer this.opMu.Unlock()
 	this.mu.Lock()
-	this.state = runtimeState{Configs: make(map[string]ConfigItem), PlatformConfigs: make(map[string]PlatformConfigItem)}
+	this.state = runtimeState{PlatformConfigs: make(map[string]PlatformConfigItem)}
 	this.envelope = Envelope{}
 	this.clockOffset = 0
 	clear(this.pendingUsage)
@@ -482,9 +477,6 @@ func (this *Client) restore() error {
 	}
 
 	this.mu.Lock()
-	if state.Configs == nil {
-		state.Configs = make(map[string]ConfigItem)
-	}
 	if state.PlatformConfigs == nil {
 		state.PlatformConfigs = make(map[string]PlatformConfigItem)
 	}

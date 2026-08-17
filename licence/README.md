@@ -242,14 +242,14 @@ licence.Options{
 | 状态码 | 触发时机 | SDK 行为 | 你的动作 |
 |---|---|---|---|
 | `SEAT_LIMIT_EXCEEDED` | 激活时席位已满（仅 activate 返回） | 激活失败并置状态，后台循环停摆，**不自动重试抢席** | 平台管理端释放闲置席位或联系平台方扩容，然后显式 `Reactivate` |
-| `SEAT_RELEASED` | 管理员在平台释放了本机席位（validate/current 返回） | 停止授权功能并触发 `OnStatusChange`；清除信封与派生缓存（项目/平台配置快照、配置同步水位、租户信封缓存）；**保留** activation token、客户端私钥、席位号与状态文件，**不自动 `Reactivate`**，重启后仍稳定停在该状态 | 确认容量后显式 `Reactivate`（重新绑席）或 `Reset`（清本机态后重新激活） |
+| `SEAT_RELEASED` | 管理员在平台释放了本机席位（validate/current 返回） | 停止授权功能并触发 `OnStatusChange`；清除信封与派生缓存（平台配置快照、配置同步水位、租户信封缓存）；**保留** activation token、客户端私钥、席位号与状态文件，**不自动 `Reactivate`**，重启后仍稳定停在该状态 | 确认容量后显式 `Reactivate`（重新绑席）或 `Reset`（清本机态后重新激活） |
 
 人工恢复路径的分工：
 
 - `Reactivate(ctx)`：**通知平台**，生成新客户端密钥对重新激活绑席（换机/令牌丢失/EXPIRED 引导/席位恢复共用）；
 - `Reset()`：**不通知平台**（平台侧席位不变），只清本机运行状态；下次 `Start` 以同一指纹重新激活，由服务端复用或重新占用原席位。
 
-> 已知时滞语义：`SEAT_RELEASED` 经 updates/saas/config/events 通道（`CheckUpdate`/`TenantSync`/`ConfigSync`/`PlatformConfigSync`/`EventSubscriber.Poll`）到达时，只 fail-closed 返回错误（`实例许可证非放行态：SEAT_RELEASED` / `许可证非放行态：SEAT_RELEASED`），**不回写 `client.Status()`**；授权状态收敛以 validate 循环为准（最长一个刷新周期 `RefreshInterval`）。
+> 已知时滞语义：`SEAT_RELEASED` 经 updates/saas/events 通道（`CheckUpdate`/`TenantSync`/`PlatformConfigSync`/`EventSubscriber.Poll`）到达时，只 fail-closed 返回错误（`实例许可证非放行态：SEAT_RELEASED` / `许可证非放行态：SEAT_RELEASED`），**不回写 `client.Status()`**；授权状态收敛以 validate 循环为准（最长一个刷新周期 `RefreshInterval`）。
 
 平台侧席位运维走 AdminClient（商户 CI/运维自动化，见 §7 与 §20.5）：
 
@@ -315,7 +315,7 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 fail-open / fail-closed 由你按业务决策（建议写进你自己的集成文档）。
 
-### 6.1 回调通知与项目配置同步（事件订阅 · 事件推送）
+### 6.1 回调通知与配置同步（事件订阅 · 事件推送）
 
 先在平台的「项目管理 → 部署实例」为每个实例登记 `notify_url`（建议 `POST /licence/callback`），然后在项目中挂载同一个回调接收器：
 
@@ -327,10 +327,6 @@ handler.OnEvent("saas.*", func(ctx context.Context, event *licence.CallbackEvent
 	go func() { _, _, _ = client.TenantSync(context.Background(), 0) }()
 	return licence.AckSuccess, nil
 })
-handler.OnEvent("project.config.*", func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
-	go func() { _, _ = client.ConfigSync(context.Background()) }()
-	return licence.AckSuccess, nil
-})
 handler.OnEvent("platform.config.*", func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
 	go func() { _, _ = client.PlatformConfigSync(context.Background()) }()
 	return licence.AckSuccess, nil
@@ -340,7 +336,7 @@ http.Handle("/licence/callback", handler)
 
 回调会先做原文验签、正负 5 分钟时间窗检查、nonce 防重放和 `deliveryNo` 幂等去重。业务回调应快速返回：`success`/`ok` 表示成功，`ignored` 表示无需处理，`retry` 要求平台重试，`rejected` 表示永久拒绝。未注册的事件自动返回 `ignored`。
 
-**没有 `notify_url`（或想内网直连）也能收到事件**：用 `Client.Subscribe` 主动订阅项目事件（HTTP 长轮询 / gRPC 服务端流，双传输任选）。订阅信封由平台现场重签，复用与回调完全相同的验签与去重管线；收到 `saas.tenant.created` 等事件后同样调 `TenantSync` / `ConfigSync` 拉全量：
+**没有 `notify_url`（或想内网直连）也能收到事件**：用 `Client.Subscribe` 主动订阅项目事件（HTTP 长轮询 / gRPC 服务端流，双传输任选）。订阅信封由平台现场重签，复用与回调完全相同的验签与去重管线；收到 `saas.tenant.created` 等事件后同样调 `TenantSync` / `PlatformConfigSync` 拉全量：
 
 ```go
 sub := client.Subscribe(licence.CallbackOptions{}).
@@ -353,8 +349,8 @@ sub := client.Subscribe(licence.CallbackOptions{}).
         _, _, _ = client.TenantSync(context.Background(), 0) // 推送即失效信号：收到后拉完整租户信封
         return licence.AckSuccess, nil
     }).
-    OnEvent(licence.EventProjectConfigUpdated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
-        _, _ = client.ConfigSync(context.Background())
+    OnEvent(licence.EventPlatformConfigUpdated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+        _, _ = client.PlatformConfigSync(context.Background())
         return licence.AckSuccess, nil
     })
 sub.SetWatermark(lastEventId) // 可选：跳过已消费的历史事件
@@ -363,15 +359,7 @@ n, err := sub.Poll(ctx)       // 一轮长轮询拉取并分发，返回条数�
 
 订阅器按 `eventId` 单调推进水位，`deliveryNo` 稳定为 `SUB-{eventNo}` 跨轮去重；非放行态统一返回 `许可证非放行态：{status}`。接口明细见 §19.6。
 
-回调只是「变更信号」，全量事实仍通过拉取收敛。项目配置同步后可直接读本地快照：
-
-```go
-_, err := client.ConfigSync(ctx)
-raw, ok := client.Config("app.theme") // 返回 json.RawMessage 副本
-raw = client.ConfigMust("app.theme")   // 不存在时 panic
-```
-
-平台配置（平台级键值，与项目配置相互独立）同理：
+回调只是「变更信号」，全量事实仍通过拉取收敛。配置同步后可直接读本地快照：
 
 ```go
 _, err := client.PlatformConfigSync(ctx)
@@ -379,7 +367,7 @@ item, ok := client.PlatformConfig("platform.some.key") // 返回条目副本（�
 item = client.PlatformConfigMust("platform.some.key")   // 不存在时 panic
 ```
 
-配置快照与许可证状态一起经 `Store` 加密持久化；建议除了回调驱动的即时同步，再做周期性 `ConfigSync` / `PlatformConfigSync` 兜底。
+配置快照与许可证状态一起经 `Store` 加密持久化；建议除了回调驱动的即时同步，再做周期性 `PlatformConfigSync` 兜底。
 
 ## 7. 管理面（商户 CI/运维自动化，勿随交付项目分发）
 
@@ -922,28 +910,9 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
 | `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
 
-事件名常量：SaaS 套餐 / 租户 / 菜单清单 / 项目配置 / 平台配置全部 11 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasTenantCreated`、`EventSaasMenuPublished`、`EventProjectConfigUpdated`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`project.config.*`、`saas.*`）一次捕获该族全部动作。
+事件名常量：SaaS 套餐 / 租户 / 菜单清单 / 平台配置全部 9 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasTenantCreated`、`EventSaasMenuPublished`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`platform.config.*`、`saas.*`）一次捕获该族全部动作。
 
-### 19.4 项目配置同步
-
-| 方法 | 签名 | 说明 |
-|---|---|---|
-| `ConfigSync` | `func (this *Client) ConfigSync(ctx context.Context) (*ConfigEnvelope, error)` | 使用持久化水位增量拉取，验签后按服务端全量 key 清单删除失效项并持久化快照 |
-| `Config` | `func (this *Client) Config(key string) (json.RawMessage, bool)` | 返回本地配置原文的副本 |
-| `ConfigMust` | `func (this *Client) ConfigMust(key string) json.RawMessage` | 配置不存在时 panic |
-
-**数据结构**（与平台 `app/common/sign/config.go` 字节级镜像，字段顺序即签名内容，只许追加）：
-
-| 类型 | 说明 |
-|---|---|
-| `ConfigItem` | 项目配置下发条目：`ConfigKey` / `Name` / `Content`（`json.RawMessage` 原文）/ `Version`（增量版本号） |
-| `ConfigPayload` | 同步载荷：`ProjectId` / `SyncVersion` / `Keys`（全量 key 清单，本地据此删除失效项）/ `Configs` / `IssuedAt` / `KeyVersion` / `Nonce` |
-| `ConfigEnvelope` | 签名信封（与许可证信封同构） |
-| `ParseConfigEnvelope` | `func ParseConfigEnvelope(data []byte) (ConfigEnvelope, []byte, error)` 解析并返回 payload 原文 |
-
-`ConfigPayload` / `ConfigEnvelope` 与平台字节级镜像，验签必须使用 `ParseConfigEnvelope` 返回的 payload 原文。回调事件 `project.config.*` 只是失效信号，客户端收到后应调用 `ConfigSync`，并以周期性同步兜底。
-
-### 19.5 平台配置同步
+### 19.4 平台配置同步
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
@@ -1333,7 +1302,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `client.go` / `transport.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存 |
 | `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
-| `callback.go` / `config.go` | 回调接收：验签、防重放、幂等分发；项目配置签名同步与本地快照 |
+| `callback.go` | 回调接收：验签、防重放、幂等分发 |
 | `events.go` | 事件订阅：`EventSubscriber` 增量拉取、水位推进、HTTP/gRPC 双传输 |
 | `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |

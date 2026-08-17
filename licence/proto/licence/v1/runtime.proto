@@ -31,9 +31,8 @@ service SaasRuntimeService {
 }
 
 // ProjectConfigRuntimeService - 项目配置运行面。
-service ProjectConfigRuntimeService {
-  rpc Sync(ProjectConfigSyncRequest) returns (ProjectConfigSyncResponse);
-}
+// 已于配置系统合并时下线（项目配置并入平台配置）；服务整体移除，消息字段号以 reserved 锁定。
+// service ProjectConfigRuntimeService { ... }
 
 // PlatformConfigRuntimeService - 平台配置运行面。
 service PlatformConfigRuntimeService {
@@ -218,16 +217,13 @@ message TenantResponse {
   string message = 4;
 }
 
+// ProjectConfigSyncRequest/Response 已随项目配置运行面下线，字段号以 reserved 锁定禁止复用。
 message ProjectConfigSyncRequest {
-  string license_no = 1;
-  int32 since_version = 2;
+  reserved 1, 2;
 }
 
 message ProjectConfigSyncResponse {
-  string status = 1;
-  int64 server_time = 2;
-  bytes envelope_json = 3;
-  string message = 4;
+  reserved 1, 2, 3, 4;
 }
 
 message PlatformConfigSyncRequest {

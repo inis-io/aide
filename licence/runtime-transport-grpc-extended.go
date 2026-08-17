@@ -9,11 +9,6 @@ import (
 	licencev1 "github.com/inis-io/aide/licence/proto/licence/v1"
 )
 
-type configSyncBody struct {
-	LicenseNo    string `json:"licenseNo"`
-	SinceVersion int    `json:"sinceVersion"`
-}
-
 type tenantSyncBody struct {
 	LicenseNo string `json:"licenseNo"`
 	SinceTime int64  `json:"sinceTime"`
@@ -51,31 +46,6 @@ type updateLogsBody struct {
 
 func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method, path, requestURI string, body []byte, withSign bool) (int, []byte, error) {
 	switch method + " " + path {
-	case http.MethodPost + " /api/v1/projects/configs/sync":
-		var input configSyncBody
-		if err := json.Unmarshal(body, &input); err != nil {
-			return 0, nil, err
-		}
-		request := &licencev1.ProjectConfigSyncRequest{LicenseNo: input.LicenseNo, SinceVersion: int32(input.SinceVersion)}
-		callCtx, cancel, err := this.invokeContext(ctx, licencev1.ProjectConfigRuntimeService_Sync_FullMethodName, request, withSign)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer cancel()
-		response, err := this.config.Sync(callCtx, request)
-		if err != nil {
-			code, mapped := grpcHTTPCode(err)
-			return code, nil, mapped
-		}
-		result := map[string]any{"status": response.GetStatus(), "serverTime": response.GetServerTime()}
-		if len(response.GetEnvelopeJson()) > 0 {
-			result["envelope"] = json.RawMessage(response.GetEnvelopeJson())
-		}
-		if response.GetMessage() != "" {
-			result["message"] = response.GetMessage()
-		}
-		return marshalMap(result)
-
 	case http.MethodPost + " /api/v1/platform/configs/sync":
 		var input platformConfigSyncBody
 		if err := json.Unmarshal(body, &input); err != nil {

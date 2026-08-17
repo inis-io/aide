@@ -9,7 +9,7 @@ import (
 
 // EventSubscriber - 项目事件订阅器：拉取项目 callback_events 并复用 CallbackHandler 分发管线。
 // 订阅信封由平台现场重签（occurredAt 重新盖戳、nonce 每次新鲜、deliveryNo 稳定为 SUB-{eventNo}），
-// 客户端按 eventId 单调推进水位；收到事件后通常调 TenantSync / ConfigSync 拉取完整信封（推送即失效信号）。
+// 客户端按 eventId 单调推进水位；收到事件后通常调 TenantSync / PlatformConfigSync 拉取完整信封（推送即失效信号）。
 type EventSubscriber struct {
 	client    *Client
 	handler   *CallbackHandler

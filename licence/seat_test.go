@@ -1,7 +1,6 @@
 package licence
 
 import (
-	"encoding/json"
 	"os"
 	"strings"
 	"sync"
@@ -11,17 +10,13 @@ import (
 
 // ============================= SEAT_RELEASED 全链路语义 =============================
 
-// seedDerivedCaches - 向假平台注入租户/项目配置/平台配置，并同步进客户端派生缓存
-// （供 SEAT_RELEASED 清理范围断言：三条派生缓存都必须被清空）
+// seedDerivedCaches - 向假平台注入租户/平台配置，并同步进客户端派生缓存
+// （供 SEAT_RELEASED 清理范围断言：两条派生缓存都必须被清空）
 func seedDerivedCaches(t *testing.T, platform *fakePlatform, client *Client) {
 
 	t.Helper()
 	platform.mu.Lock()
 	platform.tenants["mall"] = fakeTenant{validUntil: "", graceDays: 7, features: map[string]bool{"order": true}}
-	platform.configs["app.theme"] = ConfigItem{
-		ConfigKey: "app.theme", Name: "主题", Content: json.RawMessage(`{"color":"blue"}`), Version: 1,
-	}
-	platform.configSyncVersion = 1
 	platform.platformConfigs["site.title"] = PlatformConfigItem{
 		Key: "site.title", Label: "站点标题", Type: "input", Value: "演示站", Version: 1,
 	}
@@ -31,14 +26,8 @@ func seedDerivedCaches(t *testing.T, platform *fakePlatform, client *Client) {
 	if _, _, err := client.TenantSync(t.Context(), 0); err != nil {
 		t.Fatalf("租户同步失败: %v", err)
 	}
-	if _, err := client.ConfigSync(t.Context()); err != nil {
-		t.Fatalf("项目配置同步失败: %v", err)
-	}
 	if _, err := client.PlatformConfigSync(t.Context()); err != nil {
 		t.Fatalf("平台配置同步失败: %v", err)
-	}
-	if _, ok := client.Config("app.theme"); !ok {
-		t.Fatalf("项目配置未进缓存")
 	}
 	if _, ok := client.PlatformConfig("site.title"); !ok {
 		t.Fatalf("平台配置未进缓存")
@@ -58,7 +47,7 @@ func assertSeatReleasedState(t *testing.T, client *Client, dir string) {
 	}
 	client.mu.RLock()
 	token, seed, seatNo, activationNo := client.state.ActivationToken, client.state.ClientSeed, client.state.SeatNo, client.state.ActivationNo
-	configVersion, platformVersion := client.state.ConfigSyncVersion, client.state.PlatformConfigSyncVersion
+	platformVersion := client.state.PlatformConfigSyncVersion
 	client.mu.RUnlock()
 	if token == "" || seed == "" {
 		t.Fatalf("SEAT_RELEASED 必须保留 token 与客户端私钥")
@@ -68,9 +57,6 @@ func assertSeatReleasedState(t *testing.T, client *Client, dir string) {
 	}
 	if _, exist := client.Envelope(); exist {
 		t.Fatalf("SEAT_RELEASED 必须清除缓存信封")
-	}
-	if _, ok := client.Config("app.theme"); ok || configVersion != 0 {
-		t.Fatalf("项目配置快照与水位未清空: %v", configVersion)
 	}
 	if _, ok := client.PlatformConfig("site.title"); ok || platformVersion != 0 {
 		t.Fatalf("平台配置快照与水位未清空: %v", platformVersion)

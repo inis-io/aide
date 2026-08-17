@@ -95,11 +95,7 @@ const (
 	EventSaasMenuArchived = "saas.menu.archived"
 	// EventSaasTenantMenusTrimmed - 租户悬空菜单已裁剪并重签，data: {tenantId, tenantCode, removedCodes}
 	EventSaasTenantMenusTrimmed = "saas.tenant.menus-trimmed"
-	// EventProjectConfigUpdated - 项目配置已更新（新建或保存），data: {configKey, version}
-	EventProjectConfigUpdated = "project.config.updated"
-	// EventProjectConfigDeleted - 项目配置已删除，data: {configKey, version}
-	EventProjectConfigDeleted = "project.config.deleted"
-	// EventPlatformConfigUpdated - 平台配置值（规则）已更新，data: {configKey, projectId}
+	// EventPlatformConfigUpdated - 平台配置值已更新，data: {configKey, projectId}
 	EventPlatformConfigUpdated = "platform.config.updated"
 	// EventPlatformConfigDefinitionChanged - 平台配置项定义已变更，data: {configKey, version}
 	EventPlatformConfigDefinitionChanged = "platform.config.definition.changed"

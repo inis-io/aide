@@ -115,9 +115,7 @@ type GRPCOptions struct {
 | `EventSaasMenuPublished` | `saas.menu.published` | SaaS 菜单清单已发布，回调 `data` 含 `{manifestId, menuKind, version, removedCodes}` |
 | `EventSaasMenuArchived` | `saas.menu.archived` | SaaS 菜单清单已归档，回调 `data` 含 `{manifestId, menuKind, version}` |
 | `EventSaasTenantMenusTrimmed` | `saas.tenant.menus-trimmed` | 租户菜单已按最新租户清单裁剪并重签，回调 `data` 含 `{tenantId, tenantCode, removedCodes}` |
-| `EventProjectConfigUpdated` | `project.config.updated` | 项目配置已更新（新建或保存），回调 `data` 含 `{configKey, version}` |
-| `EventProjectConfigDeleted` | `project.config.deleted` | 项目配置已删除，回调 `data` 含 `{configKey, version}` |
-| `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值（规则）已更新，回调 `data` 含 `{configKey, projectId}` |
+| `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值已更新，回调 `data` 含 `{configKey, projectId}` |
 | `EventPlatformConfigDefinitionChanged` | `platform.config.definition.changed` | 平台配置项定义已变更，回调 `data` 含 `{configKey, version}`（新增/修改）；删除/恢复路径当前为 `{configIds}`（批量删）或 `{configId}`（逐项），口径待统一，下游应以事件为失效信号、按 `PlatformConfigSync` 拉全量收敛 |
 
 ---
@@ -502,30 +500,11 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
 | `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
 
-已知事件名常量见 §2.4（`EventSaasPlanUpdated`、`EventProjectConfigUpdated` 等，均可直接传入 `OnEvent`）；按事件族订阅可用前缀通配（如 `saas.plan.*`、`project.config.*`、`saas.*`）一次捕获该族全部动作。
+已知事件名常量见 §2.4（`EventSaasPlanUpdated`、`EventPlatformConfigUpdated` 等，均可直接传入 `OnEvent`）；按事件族订阅可用前缀通配（如 `saas.plan.*`、`platform.config.*`、`saas.*`）一次捕获该族全部动作。
 
 平台登记位置：「项目管理 → 部署实例 → 回调地址（`notify_url`）」。
 
-### 9.4 项目配置同步
-
-| 方法 | 签名 | 说明 |
-|---|---|---|
-| `ConfigSync` | `func (this *Client) ConfigSync(ctx context.Context) (*ConfigEnvelope, error)` | 使用持久化水位增量拉取，验签后按服务端全量 key 清单删除失效项并持久化快照 |
-| `Config` | `func (this *Client) Config(key string) (json.RawMessage, bool)` | 返回本地配置原文的副本 |
-| `ConfigMust` | `func (this *Client) ConfigMust(key string) json.RawMessage` | 配置不存在时 panic |
-
-**数据结构**（与平台 `app/common/sign/config.go` 字节级镜像，字段顺序即签名内容，只许追加）：
-
-| 类型 | 说明 |
-|---|---|
-| `ConfigItem` | 项目配置下发条目：`ConfigKey` / `Name` / `Content`（`json.RawMessage` 原文）/ `Version`（增量版本号） |
-| `ConfigPayload` | 同步载荷：`ProjectId` / `SyncVersion` / `Keys`（全量 key 清单，本地据此删除失效项）/ `Configs` / `IssuedAt` / `KeyVersion` / `Nonce` |
-| `ConfigEnvelope` | 签名信封（与许可证信封同构） |
-| `ParseConfigEnvelope` | `func ParseConfigEnvelope(data []byte) (ConfigEnvelope, []byte, error)` 解析并返回 payload 原文 |
-
-`ConfigPayload` / `ConfigEnvelope` 与平台字节级镜像，验签必须使用 `ParseConfigEnvelope` 返回的 payload 原文。回调事件 `project.config.*` 只是失效信号，客户端收到后应调用 `ConfigSync`，并以周期性同步兜底。
-
-### 9.5 平台配置同步
+### 9.4 平台配置同步
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
@@ -573,8 +552,8 @@ sub := client.Subscribe(licence.CallbackOptions{}). // 默认复用 client.Publi
         _, _, _ = client.TenantSync(ctx, 0) // 推送即失效信号：收到后拉完整租户信封
         return licence.AckSuccess, nil
     }).
-    OnEvent(licence.EventProjectConfigUpdated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
-        _, _ = client.ConfigSync(ctx)
+    OnEvent(licence.EventPlatformConfigUpdated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+        _, _ = client.PlatformConfigSync(ctx)
         return licence.AckSuccess, nil
     })
 
@@ -957,7 +936,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `client.go` / `transport.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存 |
 | `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
-| `callback.go` / `config.go` | 回调验签、防重放与幂等分发；项目配置签名同步与本地快照 |
+| `callback.go` | 回调验签、防重放与幂等分发 |
 | `events.go` | 运行面事件订阅：`EventSubscriber` 增量拉取、水位推进、HTTP/gRPC 双传输 `SubscribeEvents` |
 | `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |

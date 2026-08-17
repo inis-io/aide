@@ -263,15 +263,13 @@ func (this *Client) currentLocked(ctx context.Context) (Envelope, error) {
 }
 
 // seatReleased - SEAT_RELEASED 统一处置（validate/current 共用，保证两条路径清理范围一致）：
-// 清除派生放行与信封缓存（信封原文、项目/平台配置快照与同步水位、租户信封缓存），
+// 清除派生放行与信封缓存（信封原文、平台配置快照与同步水位、租户信封缓存），
 // 置状态并落盘。红线：保留 ActivationToken/ClientSeed/SeatNo/ActivationNo——
 // 席位释放是非自动恢复终态，SDK 不自动重激活，恢复只走显式 Reactivate/Reset。
 func (this *Client) seatReleased() error {
 
 	this.mu.Lock()
 	this.state.Envelope = nil
-	this.state.Configs = make(map[string]ConfigItem)
-	this.state.ConfigSyncVersion = 0
 	this.state.PlatformConfigs = make(map[string]PlatformConfigItem)
 	this.state.PlatformConfigSyncVersion = 0
 	this.envelope = Envelope{}
