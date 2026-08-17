@@ -298,6 +298,13 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 	case http.MethodPut + " /api/project-versions/restore":
 		response, err = this.version.RestoreVersions(callCtx, request)
 
+	case http.MethodGet + " /api/project-upgrade-records/rows":
+		response, err = this.version.RowsUpgradeRecords(callCtx, request)
+	case http.MethodGet + " /api/project-upgrade-records/find":
+		response, err = this.version.FindUpgradeRecords(callCtx, request)
+	case http.MethodGet + " /api/project-upgrade-records/take":
+		response, err = this.version.GetUpgradeRecord(callCtx, request)
+
 	case http.MethodGet + " /api/project-modules/rows":
 		response, err = this.module.RowsProjectModules(callCtx, request)
 	case http.MethodGet + " /api/project-modules/find":

@@ -115,6 +115,10 @@ service VersionAdminService {
   rpc RemoveVersions(AdminRequest) returns (AdminResponse);
   rpc DeleteVersions(AdminRequest) returns (AdminResponse);
   rpc RestoreVersions(AdminRequest) returns (AdminResponse);
+  // 升级执行记录（只读，运行面 updates/report 写入）
+  rpc RowsUpgradeRecords(AdminRequest) returns (AdminResponse);
+  rpc FindUpgradeRecords(AdminRequest) returns (AdminResponse);
+  rpc GetUpgradeRecord(AdminRequest) returns (AdminResponse);
 }
 
 service ProjectModuleAdminService {

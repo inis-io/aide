@@ -185,6 +185,10 @@ type Project struct {
 	ProvisionRatePerSN *int `json:"provisionRatePerSn"`
 	// ProvisionDailyCap - 装机每日发放上限(0=不限制)，null=继承平台
 	ProvisionDailyCap *int `json:"provisionDailyCap"`
+	// UpdateAuto - 项目级自动更新默认开关（nil=跟随全局默认 false）
+	UpdateAuto *bool `json:"updateAuto"`
+	// UpdateRestartMode - 项目级默认重启方式（空=SDK 自适应）
+	UpdateRestartMode string `json:"updateRestartMode"`
 	// Uid - 操作人用户ID
 	Uid int `json:"uid"`
 	// Remark - 备注
@@ -238,6 +242,10 @@ type ProjectInput struct {
 	ProvisionRatePerSN *int `json:"provisionRatePerSn,omitempty"`
 	// ProvisionDailyCap - 装机每日发放上限(0=不限制)，nil=不提交/继承平台
 	ProvisionDailyCap *int `json:"provisionDailyCap,omitempty"`
+	// UpdateAuto - 项目级自动更新默认开关（nil=不提交）
+	UpdateAuto *bool `json:"updateAuto,omitempty"`
+	// UpdateRestartMode - 项目级默认重启方式（空=不提交；可选 auto/exit-code/respawn/callback）
+	UpdateRestartMode string `json:"updateRestartMode,omitempty"`
 	// Remark - 备注
 	Remark string `json:"remark,omitempty"`
 }
@@ -864,6 +872,12 @@ type ProjectVersion struct {
 	GrayInstances []int `json:"grayInstances"`
 	// GrayPercent - 灰度百分比（0-100）
 	GrayPercent int `json:"grayPercent"`
+	// AutoUpdate - 允许 SDK 自动更新（nil=跟随项目默认）
+	AutoUpdate *bool `json:"autoUpdate"`
+	// ForceUpdate - 强制更新（客户端不得跳过）
+	ForceUpdate bool `json:"forceUpdate"`
+	// RestartMode - 建议重启方式（空=跟随项目/auto/exit-code/respawn/callback）
+	RestartMode string `json:"restartMode"`
 	// Uid - 操作人用户ID
 	Uid int `json:"uid"`
 	// Remark - 备注
@@ -926,6 +940,12 @@ type VersionInput struct {
 	GrayInstances []int `json:"grayInstances,omitempty"`
 	// GrayPercent - 灰度百分比（0-100）
 	GrayPercent int `json:"grayPercent,omitempty"`
+	// AutoUpdate - 允许 SDK 自动更新（nil=跟随项目默认）
+	AutoUpdate *bool `json:"autoUpdate,omitempty"`
+	// ForceUpdate - 强制更新（客户端不得跳过）
+	ForceUpdate bool `json:"forceUpdate,omitempty"`
+	// RestartMode - 建议重启方式（空=跟随项目/auto/exit-code/respawn/callback）
+	RestartMode string `json:"restartMode,omitempty"`
 	// Remark - 备注
 	Remark string `json:"remark,omitempty"`
 }
@@ -962,6 +982,76 @@ type VersionFindParams struct {
 	OnlyTrashed bool `json:"onlyTrashed,omitempty"`
 	// WithTrashed - 包含回收站数据（仅管理员生效）
 	WithTrashed bool `json:"withTrashed,omitempty"`
+}
+
+// ============================= 升级执行记录 =============================
+
+// UpgradeRecord - 升级执行记录（平台 models/basic.UpgradeRecord，只读；由运行面 updates/report 写入）
+type UpgradeRecord struct {
+	// Id - 记录ID
+	Id int `json:"id"`
+	// RecordNo - 升级记录编号（UPG-{年}-%06d）
+	RecordNo string `json:"recordNo"`
+	// LicenseId - 许可证ID
+	LicenseId int `json:"licenseId"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId"`
+	// InstanceId - 部署实例ID
+	InstanceId int `json:"instanceId"`
+	// VersionId - 目标版本ID
+	VersionId int `json:"versionId"`
+	// ArtifactId - 发布物ID
+	ArtifactId int `json:"artifactId"`
+	// FromVersion - 来源版本
+	FromVersion string `json:"fromVersion"`
+	// TargetVersion - 目标版本
+	TargetVersion string `json:"targetVersion"`
+	// Status - 状态（pending/downloading/installing/success/failed/rolled_back）
+	Status string `json:"status"`
+	// Message - 结果描述
+	Message string `json:"message"`
+	// Logs - 过程日志（带时间戳追加，超长截断保留尾部）
+	Logs string `json:"logs"`
+	// ReportedAt - 最近上报时间（毫秒）
+	ReportedAt int64 `json:"reportedAt"`
+	// Uid - 归属用户ID
+	Uid int `json:"uid"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+}
+
+// UpgradeRecordFindParams - 升级记录查询参数（平台 types.UpgradeRecordFind + 控制器 In/Like/Between 清单）
+type UpgradeRecordFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// Order - 排序（如 "create_at desc"）
+	Order string `json:"order,omitempty"`
+	// RecordNo - 升级记录编号（模糊）
+	RecordNo string `json:"recordNo,omitempty"`
+	// ProjectId - 项目ID（IN）
+	ProjectId []int `json:"projectId,omitempty"`
+	// VersionId - 目标版本ID（IN）
+	VersionId []int `json:"versionId,omitempty"`
+	// LicenseId - 许可证ID（IN）
+	LicenseId []int `json:"licenseId,omitempty"`
+	// InstanceId - 部署实例ID（IN）
+	InstanceId []int `json:"instanceId,omitempty"`
+	// TargetVersion - 目标版本（模糊）
+	TargetVersion string `json:"targetVersion,omitempty"`
+	// Status - 状态（IN）
+	Status []string `json:"status,omitempty"`
+	// ReportedAt - 最近上报时间区间（毫秒，Between）
+	ReportedAt []int64 `json:"reportedAt,omitempty"`
+	// CreateTime - 创建时间区间（毫秒，Between）
+	CreateTime []int64 `json:"createTime,omitempty"`
+	// UpdateTime - 更新时间区间（毫秒，Between）
+	UpdateTime []int64 `json:"updateTime,omitempty"`
 }
 
 // ============================= 项目发布物 =============================

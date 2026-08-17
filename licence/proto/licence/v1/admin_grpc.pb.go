@@ -2698,16 +2698,19 @@ var ArtifactAdminService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	VersionAdminService_RowsVersions_FullMethodName    = "/licenhub.licence.v1.VersionAdminService/RowsVersions"
-	VersionAdminService_FindVersions_FullMethodName    = "/licenhub.licence.v1.VersionAdminService/FindVersions"
-	VersionAdminService_GetVersion_FullMethodName      = "/licenhub.licence.v1.VersionAdminService/GetVersion"
-	VersionAdminService_CreateVersion_FullMethodName   = "/licenhub.licence.v1.VersionAdminService/CreateVersion"
-	VersionAdminService_UpdateVersion_FullMethodName   = "/licenhub.licence.v1.VersionAdminService/UpdateVersion"
-	VersionAdminService_ReleaseVersion_FullMethodName  = "/licenhub.licence.v1.VersionAdminService/ReleaseVersion"
-	VersionAdminService_ArchiveVersion_FullMethodName  = "/licenhub.licence.v1.VersionAdminService/ArchiveVersion"
-	VersionAdminService_RemoveVersions_FullMethodName  = "/licenhub.licence.v1.VersionAdminService/RemoveVersions"
-	VersionAdminService_DeleteVersions_FullMethodName  = "/licenhub.licence.v1.VersionAdminService/DeleteVersions"
-	VersionAdminService_RestoreVersions_FullMethodName = "/licenhub.licence.v1.VersionAdminService/RestoreVersions"
+	VersionAdminService_RowsVersions_FullMethodName       = "/licenhub.licence.v1.VersionAdminService/RowsVersions"
+	VersionAdminService_FindVersions_FullMethodName       = "/licenhub.licence.v1.VersionAdminService/FindVersions"
+	VersionAdminService_GetVersion_FullMethodName         = "/licenhub.licence.v1.VersionAdminService/GetVersion"
+	VersionAdminService_CreateVersion_FullMethodName      = "/licenhub.licence.v1.VersionAdminService/CreateVersion"
+	VersionAdminService_UpdateVersion_FullMethodName      = "/licenhub.licence.v1.VersionAdminService/UpdateVersion"
+	VersionAdminService_ReleaseVersion_FullMethodName     = "/licenhub.licence.v1.VersionAdminService/ReleaseVersion"
+	VersionAdminService_ArchiveVersion_FullMethodName     = "/licenhub.licence.v1.VersionAdminService/ArchiveVersion"
+	VersionAdminService_RemoveVersions_FullMethodName     = "/licenhub.licence.v1.VersionAdminService/RemoveVersions"
+	VersionAdminService_DeleteVersions_FullMethodName     = "/licenhub.licence.v1.VersionAdminService/DeleteVersions"
+	VersionAdminService_RestoreVersions_FullMethodName    = "/licenhub.licence.v1.VersionAdminService/RestoreVersions"
+	VersionAdminService_RowsUpgradeRecords_FullMethodName = "/licenhub.licence.v1.VersionAdminService/RowsUpgradeRecords"
+	VersionAdminService_FindUpgradeRecords_FullMethodName = "/licenhub.licence.v1.VersionAdminService/FindUpgradeRecords"
+	VersionAdminService_GetUpgradeRecord_FullMethodName   = "/licenhub.licence.v1.VersionAdminService/GetUpgradeRecord"
 )
 
 // VersionAdminServiceClient is the client API for VersionAdminService service.
@@ -2724,6 +2727,10 @@ type VersionAdminServiceClient interface {
 	RemoveVersions(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	DeleteVersions(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	RestoreVersions(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// 升级执行记录（只读，运行面 updates/report 写入）
+	RowsUpgradeRecords(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	FindUpgradeRecords(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	GetUpgradeRecord(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 }
 
 type versionAdminServiceClient struct {
@@ -2834,6 +2841,36 @@ func (c *versionAdminServiceClient) RestoreVersions(ctx context.Context, in *Adm
 	return out, nil
 }
 
+func (c *versionAdminServiceClient) RowsUpgradeRecords(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, VersionAdminService_RowsUpgradeRecords_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *versionAdminServiceClient) FindUpgradeRecords(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, VersionAdminService_FindUpgradeRecords_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *versionAdminServiceClient) GetUpgradeRecord(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, VersionAdminService_GetUpgradeRecord_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VersionAdminServiceServer is the server API for VersionAdminService service.
 // All implementations must embed UnimplementedVersionAdminServiceServer
 // for forward compatibility.
@@ -2848,6 +2885,10 @@ type VersionAdminServiceServer interface {
 	RemoveVersions(context.Context, *AdminRequest) (*AdminResponse, error)
 	DeleteVersions(context.Context, *AdminRequest) (*AdminResponse, error)
 	RestoreVersions(context.Context, *AdminRequest) (*AdminResponse, error)
+	// 升级执行记录（只读，运行面 updates/report 写入）
+	RowsUpgradeRecords(context.Context, *AdminRequest) (*AdminResponse, error)
+	FindUpgradeRecords(context.Context, *AdminRequest) (*AdminResponse, error)
+	GetUpgradeRecord(context.Context, *AdminRequest) (*AdminResponse, error)
 	mustEmbedUnimplementedVersionAdminServiceServer()
 }
 
@@ -2887,6 +2928,15 @@ func (UnimplementedVersionAdminServiceServer) DeleteVersions(context.Context, *A
 }
 func (UnimplementedVersionAdminServiceServer) RestoreVersions(context.Context, *AdminRequest) (*AdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RestoreVersions not implemented")
+}
+func (UnimplementedVersionAdminServiceServer) RowsUpgradeRecords(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RowsUpgradeRecords not implemented")
+}
+func (UnimplementedVersionAdminServiceServer) FindUpgradeRecords(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindUpgradeRecords not implemented")
+}
+func (UnimplementedVersionAdminServiceServer) GetUpgradeRecord(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUpgradeRecord not implemented")
 }
 func (UnimplementedVersionAdminServiceServer) mustEmbedUnimplementedVersionAdminServiceServer() {}
 func (UnimplementedVersionAdminServiceServer) testEmbeddedByValue()                             {}
@@ -3089,6 +3139,60 @@ func _VersionAdminService_RestoreVersions_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VersionAdminService_RowsUpgradeRecords_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VersionAdminServiceServer).RowsUpgradeRecords(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VersionAdminService_RowsUpgradeRecords_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VersionAdminServiceServer).RowsUpgradeRecords(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VersionAdminService_FindUpgradeRecords_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VersionAdminServiceServer).FindUpgradeRecords(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VersionAdminService_FindUpgradeRecords_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VersionAdminServiceServer).FindUpgradeRecords(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VersionAdminService_GetUpgradeRecord_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VersionAdminServiceServer).GetUpgradeRecord(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VersionAdminService_GetUpgradeRecord_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VersionAdminServiceServer).GetUpgradeRecord(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // VersionAdminService_ServiceDesc is the grpc.ServiceDesc for VersionAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3135,6 +3239,18 @@ var VersionAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestoreVersions",
 			Handler:    _VersionAdminService_RestoreVersions_Handler,
+		},
+		{
+			MethodName: "RowsUpgradeRecords",
+			Handler:    _VersionAdminService_RowsUpgradeRecords_Handler,
+		},
+		{
+			MethodName: "FindUpgradeRecords",
+			Handler:    _VersionAdminService_FindUpgradeRecords_Handler,
+		},
+		{
+			MethodName: "GetUpgradeRecord",
+			Handler:    _VersionAdminService_GetUpgradeRecord_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

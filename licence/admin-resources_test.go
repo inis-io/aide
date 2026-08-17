@@ -457,6 +457,7 @@ func TestLicenseSeats(t *testing.T) {
 }
 
 // TestLicenseSeatTake - 机器席位详情：GET /api/licenses/seats/take?id=N
+
 func TestLicenseSeatTake(t *testing.T) {
 
 	hub := newFakeHub(t)
@@ -607,5 +608,67 @@ func TestProjectToggleAutoProvision(t *testing.T) {
 	}
 	if !strings.Contains(string(hub.lastBody), `"id":3`) {
 		t.Fatalf("切换请求体应携带 id: %s", string(hub.lastBody))
+	}
+}
+
+// TestUpgradeRecordsFind - 升级记录分页：query 透传 projectId/status，Page[UpgradeRecord] 解析
+func TestUpgradeRecordsFind(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/project-upgrade-records/find"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"data": []map[string]any{{
+				"id": 5, "recordNo": "UPG-2026-000005", "licenseId": 9, "projectId": 7,
+				"instanceId": 3, "versionId": 12, "artifactId": 31,
+				"fromVersion": "1.3.0", "targetVersion": "1.4.0", "status": "success",
+			}},
+			"count": 1, "page": 1,
+		})
+	}
+	client := hub.newClient(t)
+
+	page, err := client.UpgradeRecords.Find(context.Background(), &UpgradeRecordFindParams{
+		ProjectId: []int{7}, Status: []string{"success"}, Page: 1, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("升级记录分页失败: %v", err)
+	}
+	if page.Count != 1 || len(page.Data) != 1 {
+		t.Fatalf("升级记录分页解析不符: %+v", page)
+	}
+	row := page.Data[0]
+	if row.RecordNo != "UPG-2026-000005" || row.TargetVersion != "1.4.0" || row.Status != "success" {
+		t.Fatalf("升级记录字段解析不符: %+v", row)
+	}
+	query := hub.lastQuery
+	if got := query["projectId[]"]; len(got) != 1 || got[0] != "7" {
+		t.Fatalf("项目过滤参数不符: %s", query.Encode())
+	}
+	if got := query["status[]"]; len(got) != 1 || got[0] != "success" {
+		t.Fatalf("状态过滤参数不符: %s", query.Encode())
+	}
+}
+
+// TestUpgradeRecordTake - 升级记录详情（含过程日志）：GET /api/project-upgrade-records/take?id=N
+func TestUpgradeRecordTake(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/project-upgrade-records/take"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"id": 5, "recordNo": "UPG-2026-000005", "status": "failed",
+			"message": "解包失败", "logs": "[2026-08-17T00:00:00Z] 开始下载\n",
+		})
+	}
+	client := hub.newClient(t)
+
+	row, err := client.UpgradeRecords.Take(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("升级记录详情失败: %v", err)
+	}
+	if row.Id != 5 || row.Status != "failed" || row.Logs == "" {
+		t.Fatalf("升级记录详情解析不符: %+v", row)
+	}
+	if hub.lastQuery.Get("id") != "5" {
+		t.Fatalf("take 应携带 ?id=5，实际: %s", hub.lastQuery.Encode())
 	}
 }

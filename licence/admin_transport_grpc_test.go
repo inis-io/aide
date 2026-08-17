@@ -155,3 +155,68 @@ func TestGRPCSaasTenantSyncMenus(t *testing.T) {
 	}
 	_ = transport.Close()
 }
+
+// upgradeRecordAdminServer - 升级记录 gRPC 映射断言用假服务端：
+// 校验 JWT metadata，记录 full method 与请求体原文，返回一条升级记录分页结果
+type upgradeRecordAdminServer struct {
+	licencev1.UnimplementedVersionAdminServiceServer
+	t        *testing.T
+	fullName string
+	body     []byte
+}
+
+func (s *upgradeRecordAdminServer) FindUpgradeRecords(ctx context.Context, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {
+	s.t.Helper()
+	md, _ := metadata.FromIncomingContext(ctx)
+	if values := md.Get("authorization"); len(values) != 1 || values[0] != "Bearer jwt" {
+		s.t.Fatalf("authorization=%v", values)
+	}
+	s.fullName, _ = grpc.Method(ctx)
+	s.body = request.GetJson()
+	raw, _ := json.Marshal(map[string]any{
+		"data": []map[string]any{{"id": 5, "recordNo": "UPG-2026-000005", "status": "success"}},
+		"count": 1, "page": 1,
+	})
+	return &licencev1.AdminResponse{Code: 200, Message: "ok", DataJson: raw}, nil
+}
+
+// TestGRPCUpgradeRecordsFind - gRPC 管理面升级记录查询映射（对照 HTTP 用例 TestUpgradeRecordsFind）：
+// GET /api/project-upgrade-records/find 路由到 VersionAdminService.FindUpgradeRecords，
+// 查询体原样透传，分页响应解析一致
+func TestGRPCUpgradeRecordsFind(t *testing.T) {
+
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	versionServer := &upgradeRecordAdminServer{t: t}
+	licencev1.RegisterVersionAdminServiceServer(server, versionServer)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	transport := &grpcAdminTransport{client: &AdminClient{options: AdminOptions{}}, conn: conn, version: licencev1.NewVersionAdminServiceClient(conn)}
+
+	data, err := transport.RoundTrip(context.Background(), adminCall{
+		Method: http.MethodGet, Path: "/api/project-upgrade-records/find",
+		Body: []byte(`{"projectId":[7],"status":["success"]}`), Token: "jwt",
+	})
+	if err != nil {
+		t.Fatalf("升级记录查询失败: %v", err)
+	}
+	if versionServer.fullName != "/licenhub.licence.v1.VersionAdminService/FindUpgradeRecords" {
+		t.Fatalf("full method 路由不符: %q", versionServer.fullName)
+	}
+	if !bytes.Contains(versionServer.body, []byte(`"projectId":[7]`)) {
+		t.Fatalf("查询体未透传: %s", string(versionServer.body))
+	}
+	var result struct {
+		Data  []map[string]any `json:"data"`
+		Count int              `json:"count"`
+	}
+	if json.Unmarshal(data, &result) != nil || result.Count != 1 || result.Data[0]["recordNo"] != "UPG-2026-000005" {
+		t.Fatalf("响应解析不符: %s", string(data))
+	}
+	_ = transport.Close()
+}

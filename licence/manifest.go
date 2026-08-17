@@ -12,6 +12,21 @@ type ManifestArtifact struct {
 	Sha256     string `json:"sha256"`
 	Signature  string `json:"signature"`
 	KeyVersion string `json:"keyVersion"`
+	// ArtifactType - 发布物类型（full=全量包 / incremental=文件级增量包）
+	ArtifactType string `json:"artifactType"`
+	// SourceVersion - 增量包来源版本（全量包为空）
+	SourceVersion string `json:"sourceVersion"`
+}
+
+// ManifestUpdatePolicy - 更新策略（随清单签名下发；优先级见 licen-hub 设计文档 §5.8：
+// force 不可被本地配置关闭 > 版本显式 auto > SDK 集成配置 > 项目默认 > 全局默认 false）
+type ManifestUpdatePolicy struct {
+	// Auto - 允许 SDK 无需确认自动执行更新
+	Auto bool `json:"auto"`
+	// Force - 强制更新：不得因本地配置跳过（安全修复场景）
+	Force bool `json:"force"`
+	// RestartMode - 建议重启方式：auto/exit-code/respawn/callback；空 = SDK 自适应探测
+	RestartMode string `json:"restartMode"`
 }
 
 // ManifestPayload - 更新清单签名载荷（与平台 app/common/sign/manifest.go 字节级镜像）
@@ -33,6 +48,8 @@ type ManifestPayload struct {
 	IssuedAt           string             `json:"issuedAt"`
 	KeyVersion         string             `json:"keyVersion"`
 	Nonce              string             `json:"nonce"`
+	// UpdatePolicy - 更新策略（只许追加在末尾；验签基于原文字节，新旧 SDK 互不影响）
+	UpdatePolicy *ManifestUpdatePolicy `json:"updatePolicy"`
 }
 
 // Manifest - 更新清单信封（release-key 签名，与许可证信封同构）

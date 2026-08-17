@@ -100,6 +100,9 @@ admin:
     - [RemoveVersions, DELETE, /api/project-versions/remove, permission, project.version.delete, normal]
     - [DeleteVersions, DELETE, /api/project-versions/delete, permission, project.version.delete, normal]
     - [RestoreVersions, PUT, /api/project-versions/restore, permission, project.version.update, normal]
+    - [RowsUpgradeRecords, GET, /api/project-upgrade-records/rows, permission, project.upgrade.read, normal]
+    - [FindUpgradeRecords, GET, /api/project-upgrade-records/find, permission, project.upgrade.read, normal]
+    - [GetUpgradeRecord, GET, /api/project-upgrade-records/take, permission, project.upgrade.read, normal]
   ProjectModuleAdminService:
     - [RowsProjectModules, GET, /api/project-modules/rows, permission, project.module.read, normal]
     - [FindProjectModules, GET, /api/project-modules/find, permission, project.module.read, normal]

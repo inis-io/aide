@@ -79,6 +79,8 @@ type AdminClient struct {
 	Artifacts *ArtifactsResource
 	// Versions - 项目版本（/api/project-versions/*）
 	Versions *VersionsResource
+	// UpgradeRecords - 升级执行记录（/api/project-upgrade-records/*，只读）
+	UpgradeRecords *UpgradeRecordsResource
 	// Modules - 项目功能模块（/api/project-modules/*）
 	Modules *ProjectModulesResource
 	// SaasMenus - SaaS 菜单清单（/api/saas-menus/*）
@@ -124,6 +126,7 @@ func NewAdmin(options AdminOptions) (*AdminClient, error) {
 	client.SigningKeys = &SigningKeysResource{client: client}
 	client.Artifacts = &ArtifactsResource{client: client}
 	client.Versions = &VersionsResource{client: client}
+	client.UpgradeRecords = &UpgradeRecordsResource{client: client}
 	client.Modules = &ProjectModulesResource{client: client}
 	client.SaasMenus = &SaasMenusResource{client: client}
 	client.SaasFeatures = &SaasFeaturesResource{client: client}
