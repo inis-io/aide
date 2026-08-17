@@ -7,6 +7,7 @@ import (
 	"io"
 	pathpkg "path"
 	"strings"
+	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/inis-io/aide/utils"
@@ -204,6 +205,23 @@ func (this *OssStore) key(rel string) string {
 	return this.Root() + "/" + rel
 }
 
+// SignedURL - 签发 OSS 预签名 URL（GET，expire 内有效，SDK 可直接下载）
+func (this *OssStore) SignedURL(ctx context.Context, key string, expire time.Duration) (string, error) {
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return "", err
+	}
+	seconds := int64(expire / time.Second)
+	if seconds <= 0 {
+		seconds = 60
+	}
+	return bucket.SignURL(this.key(key), oss.HTTPGet, seconds)
+}
+
 // collectKeys - 收集指定 Key 对应的全部对象（文件返回自身，目录返回前缀下全部对象）
 func (this *OssStore) collectKeys(bucket *oss.Bucket, key string) (keys []string, err error) {
 
@@ -254,5 +272,7 @@ func deleteOssKeys(bucket *oss.Bucket, keys []string) error {
 
 // 编译期接口校验
 var _ Store = (*OssStore)(nil)
+
+var _ SignedURLer = (*OssStore)(nil)
 
 // ================================== 阿里云对象存储 - 结束 ==================================

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -465,6 +466,86 @@ func TestControllerInitAndReload(t *testing.T) {
 	// 测试结束后恢复默认门面，避免影响其他用例
 	inst.HasConfig = false
 	inst.useDefault()
+}
+
+// TestSignedURLOSS - 验证 OSS 预签名 URL：本地计算签名（不联网），断言 URL 形态与过期秒数
+func TestSignedURLOSS(t *testing.T) {
+
+	factory, err := newOssStore(Config{OSS: OSSConfig{
+		AccessKeyId: "test-access-key", AccessKeySecret: "test-secret", Bucket: "smoke-bucket", Endpoint: "oss-cn-guangzhou.aliyuncs.com", Path: "AIDE",
+	}})
+	if err != nil {
+		t.Fatalf("构造 OSS 驱动失败：%v", err)
+	}
+	store, ok := factory.(SignedURLer)
+	if !ok {
+		t.Fatal("OSS 驱动应实现 SignedURLer 可选接口")
+	}
+
+	signed, err := store.SignedURL(context.Background(), "artifacts/app.bin", time.Minute)
+	if err != nil {
+		t.Fatalf("SignedURL 失败：%v", err)
+	}
+	// 形态：{scheme}://{bucket}.{endpoint}/{Root}/{key}?{签名 query}（scheme 由 SDK 决定）
+	parsed, err := url.Parse(signed)
+	if err != nil {
+		t.Fatalf("预签名 URL 解析失败：%v", err)
+	}
+	if parsed.Host != "smoke-bucket.oss-cn-guangzhou.aliyuncs.com" {
+		t.Fatalf("预签名 URL host 不符：%s", signed)
+	}
+	if parsed.Path != "/AIDE/artifacts/app.bin" {
+		t.Fatalf("预签名 URL 路径不符：%s", signed)
+	}
+	query := parsed.Query()
+	if query.Get("Signature") == "" || query.Get("Expires") == "" {
+		t.Fatalf("预签名 URL 缺少签名参数：%s", signed)
+	}
+
+	// 无效客户端应报错
+	broken := &OssStore{Config: OSSConfig{Bucket: "b"}}
+	if _, err := broken.SignedURL(context.Background(), "k", time.Minute); err == nil {
+		t.Fatal("未初始化客户端应报错")
+	}
+}
+
+// TestSignedURLCOS - 验证 COS 预签名 URL：本地计算签名（不联网），断言 URL 形态
+func TestSignedURLCOS(t *testing.T) {
+
+	factory, err := newCosStore(Config{COS: COSConfig{
+		AppId: "1250000000", SecretId: "test-secret-id", SecretKey: "test-secret-key", Bucket: "smoke-bucket", Region: "ap-guangzhou", Path: "AIDE",
+	}})
+	if err != nil {
+		t.Fatalf("构造 COS 驱动失败：%v", err)
+	}
+	store, ok := factory.(SignedURLer)
+	if !ok {
+		t.Fatal("COS 驱动应实现 SignedURLer 可选接口")
+	}
+
+	signed, err := store.SignedURL(context.Background(), "artifacts/app.bin", time.Minute)
+	if err != nil {
+		t.Fatalf("SignedURL 失败：%v", err)
+	}
+	// 形态：https://{bucket}-{appid}.cos.{region}.myqcloud.com/{Root}/{key}?{签名 query}
+	if !strings.HasPrefix(signed, "https://smoke-bucket-1250000000.cos.ap-guangzhou.myqcloud.com/AIDE/artifacts/app.bin?") {
+		t.Fatalf("预签名 URL 形态不符：%s", signed)
+	}
+	if !strings.Contains(signed, "q-signature=") {
+		t.Fatalf("预签名 URL 缺少 COS 签名参数：%s", signed)
+	}
+}
+
+// TestSignedURLLocalNotSupported - 验证 local 驱动不实现 SignedURLer（走鉴权下载代理）
+func TestSignedURLLocalNotSupported(t *testing.T) {
+
+	store, err := newLocalStore(Config{Local: LocalConfig{Root: "public/storage", Domain: "http://localhost:2000"}})
+	if err != nil {
+		t.Fatalf("构造 local 驱动失败：%v", err)
+	}
+	if _, ok := store.(SignedURLer); ok {
+		t.Fatal("local 驱动不应实现 SignedURLer（本地文件走鉴权下载代理）")
+	}
 }
 
 // TestStoreError - 验证驱动初始化失败的占位实现：所有操作返回原始初始化错误

@@ -49,6 +49,13 @@ type Store interface {
 	Move(ctx context.Context, src, dst string) (err error)
 }
 
+// SignedURLer - 可选接口：支持签发带时效签名 URL 的存储驱动（OSS/COS 实现，
+// local 不实现——本地文件走鉴权下载代理，见 licen-hub 阶段五）。
+// key 为「相对存储根」路径（与 Store 契约一致），expire 为 URL 有效期。
+type SignedURLer interface {
+	SignedURL(ctx context.Context, key string, expire time.Duration) (string, error)
+}
+
 // Factory - 驱动工厂：按配置构建驱动实例（传入的 Config 已归一化）
 type Factory func(config Config) (Store, error)
 

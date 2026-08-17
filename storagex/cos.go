@@ -171,6 +171,20 @@ func (this *CosStore) key(rel string) string {
 	return this.Root() + "/" + rel
 }
 
+// SignedURL - 签发 COS 预签名 URL（GET，expire 内有效，SDK 可直接下载）
+func (this *CosStore) SignedURL(ctx context.Context, key string, expire time.Duration) (string, error) {
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	url, err := this.Client.Object.GetPresignedURL(ctx, http.MethodGet, this.key(key),
+		this.Config.SecretId, this.Config.SecretKey, expire, nil)
+	if err != nil {
+		return "", err
+	}
+	return url.String(), nil
+}
+
 // collectKeys - 收集指定 Key 对应的全部对象（文件返回自身，目录返回前缀下全部对象）
 func (this *CosStore) collectKeys(ctx context.Context, key string) (keys []string, err error) {
 
@@ -241,5 +255,7 @@ func encodeUriKey(key string) string {
 
 // 编译期接口校验
 var _ Store = (*CosStore)(nil)
+
+var _ SignedURLer = (*CosStore)(nil)
 
 // ================================== 腾讯云对象存储 - 结束 ==================================
