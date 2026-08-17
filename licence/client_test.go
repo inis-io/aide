@@ -64,6 +64,8 @@ type fakePlatform struct {
 	tamperManifest bool
 	// reportSeq - 升级记录编号序列
 	reportSeq int
+	// reports - 升级上报轨迹（handleUpdateReport 记录，供流水线断言）
+	reports []map[string]any
 	// 调用计数
 	activateCalls int
 	validateCalls int
@@ -74,7 +76,17 @@ type fakePlatform struct {
 	server *httptest.Server
 }
 
-// fakeVersion - 假发布版本（artifactData 经 /files/{version} 提供下载）
+// fakeArtifact - 假发布物（artifactType 空 = 全量包；incremental 需填 sourceVersion）
+type fakeArtifact struct {
+	artifactType  string
+	sourceVersion string
+	fileName      string
+	osArch        string
+	data          []byte
+}
+
+// fakeVersion - 假发布版本（artifactData 经 /files/{version} 提供下载；
+// artifacts 非空时替代单 artifactData 构造多发布物清单，policy 非空时随清单下发 updatePolicy）
 type fakeVersion struct {
 	version      string
 	buildNumber  string
@@ -85,6 +97,8 @@ type fakeVersion struct {
 	grayMode     string
 	grayPercent  int
 	artifactData []byte
+	artifacts    []fakeArtifact
+	policy       *ManifestUpdatePolicy
 }
 
 // fakeTenant - 假 SaaS 租户（status 非空时优先于时间判定，用于模拟 suspended 等）
@@ -479,23 +493,18 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 			continue
 		}
 
-		artifactNo := "ART-2026-" + strings.ReplaceAll(version.version, ".", "")
-		sum := sha256.Sum256(version.artifactData)
-		sha256Hex := hex.EncodeToString(sum[:])
-		artifactPayload, _ := json.Marshal(ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
-		artifactSign, _ := signPayload(artifactPayload, this.releaseSeed)
-
+		artifacts, err := this.signManifestArtifacts(version)
+		if err != nil {
+			writeJson(writer, map[string]any{"status": StatusError, "serverTime": time.Now().UnixMilli()})
+			return
+		}
 		manifest, err := issueManifest(ManifestPayload{
 			ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
 			Version: version.version, BuildNumber: version.buildNumber,
 			SourceVersionRange: version.sourceRange, MinUpgradeVersion: version.minUpgrade,
-			Artifacts: []ManifestArtifact{{
-				ArtifactNo: artifactNo, FileName: "app-" + version.version + ".tar.gz",
-				Url:  this.server.URL + "/files/" + version.version,
-				Size: int64(len(version.artifactData)), OsArch: version.osArch,
-				Sha256: sha256Hex, Signature: artifactSign, KeyVersion: "release-key-2026-01",
-			}},
-			IssuedAt: time.Now().UTC().Format(time.RFC3339), KeyVersion: "release-key-2026-01", Nonce: Licence.Nonce(),
+			Artifacts: artifacts,
+			IssuedAt:  time.Now().UTC().Format(time.RFC3339), KeyVersion: "release-key-2026-01", Nonce: Licence.Nonce(),
+			UpdatePolicy: version.policy,
 		}, this.releaseSeed)
 		if err != nil {
 			writeJson(writer, map[string]any{"status": StatusError, "serverTime": time.Now().UnixMilli()})
@@ -512,6 +521,47 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 		return
 	}
 	writeJson(writer, map[string]any{"status": status, "serverTime": time.Now().UnixMilli(), "update": false})
+}
+
+// signManifestArtifacts - 为假版本签发发布物清单项（多发布物优先，否则回退单 artifactData 兼容既有用例）
+func (this *fakePlatform) signManifestArtifacts(version fakeVersion) ([]ManifestArtifact, error) {
+
+	if len(version.artifacts) > 0 {
+		var artifacts []ManifestArtifact
+		for index, item := range version.artifacts {
+			artifactNo := "ART-2026-" + strings.ReplaceAll(version.version, ".", "") + strconv.Itoa(index)
+			sum := sha256.Sum256(item.data)
+			sha256Hex := hex.EncodeToString(sum[:])
+			payload, _ := json.Marshal(ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
+			sign, err := signPayload(payload, this.releaseSeed)
+			if err != nil {
+				return nil, err
+			}
+			artifacts = append(artifacts, ManifestArtifact{
+				ArtifactNo: artifactNo, FileName: item.fileName,
+				Url: this.server.URL + "/files/" + item.fileName,
+				Size: int64(len(item.data)), OsArch: item.osArch,
+				Sha256: sha256Hex, Signature: sign, KeyVersion: "release-key-2026-01",
+				ArtifactType: item.artifactType, SourceVersion: item.sourceVersion,
+			})
+		}
+		return artifacts, nil
+	}
+
+	artifactNo := "ART-2026-" + strings.ReplaceAll(version.version, ".", "")
+	sum := sha256.Sum256(version.artifactData)
+	sha256Hex := hex.EncodeToString(sum[:])
+	payload, _ := json.Marshal(ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
+	sign, err := signPayload(payload, this.releaseSeed)
+	if err != nil {
+		return nil, err
+	}
+	return []ManifestArtifact{{
+		ArtifactNo: artifactNo, FileName: "app-" + version.version + ".tar.gz",
+		Url: this.server.URL + "/files/" + version.version,
+		Size: int64(len(version.artifactData)), OsArch: version.osArch,
+		Sha256: sha256Hex, Signature: sign, KeyVersion: "release-key-2026-01",
+	}}, nil
 }
 
 // mustParseSemver - 测试辅助：解析三段版本号（假平台输入均可解析）
@@ -536,7 +586,9 @@ func (this *fakePlatform) handleUpdateReport(writer http.ResponseWriter, request
 	if recordNo == "" {
 		this.reportSeq++
 		recordNo = "UPG-2026-" + strings.Repeat("0", 6-len(strconv.Itoa(this.reportSeq))) + strconv.Itoa(this.reportSeq)
+		params["recordNo"] = recordNo
 	}
+	this.reports = append(this.reports, params)
 	writeJson(writer, map[string]any{"status": StatusValid, "serverTime": time.Now().UnixMilli(), "recordNo": recordNo})
 }
 
@@ -558,9 +610,19 @@ func (this *fakePlatform) handleFileDownload(writer http.ResponseWriter, request
 	this.mu.Lock()
 	defer this.mu.Unlock()
 
-	version := strings.TrimPrefix(request.URL.Path, "/files/")
+	key := strings.TrimPrefix(request.URL.Path, "/files/")
+	// 多发布物按 fileName 匹配
 	for _, item := range this.versions {
-		if item.version == version {
+		for _, artifact := range item.artifacts {
+			if artifact.fileName == key {
+				_, _ = writer.Write(artifact.data)
+				return
+			}
+		}
+	}
+	// 兼容单 artifactData（URL = /files/{version}）
+	for _, item := range this.versions {
+		if item.version == key {
 			_, _ = writer.Write(item.artifactData)
 			return
 		}
