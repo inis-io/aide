@@ -10,7 +10,8 @@ import (
 // PlatformConfigItem - 平台配置下发条目（服务端已完成维度匹配，value 为最终值）
 //
 // 字段顺序即签名内容，与 licen-hub app/common/sign/platform-config.go 字节级镜像，
-// 新增字段只允许追加到末尾。
+// 新增字段只允许追加到末尾。GroupPath 为分组 name 路径（斜杠分隔，如 "email/smtp"），
+// 与平台导出/模板契约同语义；无分组时为空串。
 type PlatformConfigItem struct {
 	Key          string          `json:"key"`
 	Label        string          `json:"label"`
@@ -23,6 +24,7 @@ type PlatformConfigItem struct {
 	Remark       string          `json:"remark"`
 	Sensitive    bool            `json:"sensitive"`
 	Version      int             `json:"version"`
+	GroupPath    string          `json:"groupPath"`
 }
 
 // PlatformConfigGroup - 平台配置分组（树形，扁平输出 + children 嵌套）

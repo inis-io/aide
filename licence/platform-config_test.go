@@ -82,14 +82,14 @@ var goldenPlatformConfigPayload = PlatformConfigPayload{
 			Value: "ap-southeast-1", DefaultValue: "ap-east-1",
 			Options: json.RawMessage(`[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}]`),
 			Rules:   json.RawMessage(`[{"key":"app.region","operator":"==","value":"<prod>&"}]`),
-			Remark:  "上线后不可改", Sensitive: false, Version: 3,
+			Remark:  "上线后不可改", Sensitive: false, Version: 3, GroupPath: "general/theme",
 		},
 		{
 			Key: "security.api_token", Label: "接口令牌", Type: "password",
 			Value: "S3cr3t&<key>", DefaultValue: "",
 			Options:    json.RawMessage(`null`),
 			Rules:      json.RawMessage(`{"min":12}`),
-			Placeholder: "至少 12 位", Remark: "敏感项", Sensitive: true, Version: 2,
+			Placeholder: "至少 12 位", Remark: "敏感项", Sensitive: true, Version: 2, GroupPath: "general",
 		},
 	},
 	IssuedAt:   "2026-08-08T12:00:00Z",
@@ -99,9 +99,9 @@ var goldenPlatformConfigPayload = PlatformConfigPayload{
 
 // goldenPlatformConfigCanonicalPlain - 平台签发端 canonical 的字面形态（< > & 未转义，便于阅读）
 // 完整转义形态由 escapeJSONHTML 在测试内展开，避免源码内出现反斜杠序列。
-const goldenPlatformConfigCanonicalPlain = `{"projectId":"PRJ-2026-000001","syncVersion":3,"groups":[{"id":1,"pid":0,"name":"general","label":"通用","icon":"settings","sort":1,"children":null},{"id":2,"pid":1,"name":"theme","label":"主题","icon":"palette","sort":2,"children":null}],"configs":[{"key":"app.region","label":"部署区域","type":"select","value":"ap-southeast-1","defaultValue":"ap-east-1","options":[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}],"rules":[{"key":"app.region","operator":"==","value":"<prod>&"}],"placeholder":"","remark":"上线后不可改","sensitive":false,"version":3},{"key":"security.api_token","label":"接口令牌","type":"password","value":"S3cr3t&<key>","defaultValue":"","options":null,"rules":{"min":12},"placeholder":"至少 12 位","remark":"敏感项","sensitive":true,"version":2}],"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90"}`
+const goldenPlatformConfigCanonicalPlain = `{"projectId":"PRJ-2026-000001","syncVersion":3,"groups":[{"id":1,"pid":0,"name":"general","label":"通用","icon":"settings","sort":1,"children":null},{"id":2,"pid":1,"name":"theme","label":"主题","icon":"palette","sort":2,"children":null}],"configs":[{"key":"app.region","label":"部署区域","type":"select","value":"ap-southeast-1","defaultValue":"ap-east-1","options":[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}],"rules":[{"key":"app.region","operator":"==","value":"<prod>&"}],"placeholder":"","remark":"上线后不可改","sensitive":false,"version":3,"groupPath":"general/theme"},{"key":"security.api_token","label":"接口令牌","type":"password","value":"S3cr3t&<key>","defaultValue":"","options":null,"rules":{"min":12},"placeholder":"至少 12 位","remark":"敏感项","sensitive":true,"version":2,"groupPath":"general"}],"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90"}`
 
-const goldenPlatformConfigSignature = "9ca900b718c2e9295b2e45719f84aa55f42f538efbc9b2731b6e59ab022baefe13ffd37c8fc7feb3d6f5c050a4dad98464367a4a6efd6c136f75f437b9176f05"
+const goldenPlatformConfigSignature = "53ff67e33517e41f81b20dc21ae36a7d2071c6cd2fc3fd5229386f4a2d5854fa18d3afc4d394500297aa3180c2907dab4d1071f05cad76c3ea65286d28af4f0c"
 
 // escapeJSONHTML - 复现 Go encoding/json 的 HTML 转义（< > & → < > &）。
 // 反斜杠在运行期用字节构造，源码内不出现反斜杠序列。
@@ -170,14 +170,14 @@ func TestPlatformConfigSyncCacheAndPersistence(t *testing.T) {
 		Value: "ap-southeast-1", DefaultValue: "ap-east-1",
 		Options: json.RawMessage(`[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}]`),
 		Rules:   json.RawMessage(`[{"key":"app.region","operator":"==","value":"<prod>&"}]`),
-		Remark:  "上线后不可改", Sensitive: false, Version: 3,
+		Remark:  "上线后不可改", Sensitive: false, Version: 3, GroupPath: "general/theme",
 	}
 	platform.platformConfigs["security.api_token"] = PlatformConfigItem{
 		Key: "security.api_token", Label: "接口令牌", Type: "password",
 		Value: "S3cr3t&<key>", DefaultValue: "",
 		Options:    json.RawMessage(`null`),
 		Rules:      json.RawMessage(`{"min":12}`),
-		Placeholder: "至少 12 位", Remark: "敏感项", Sensitive: true, Version: 2,
+		Placeholder: "至少 12 位", Remark: "敏感项", Sensitive: true, Version: 2, GroupPath: "general",
 	}
 	platform.platformConfigSyncVersion = 3
 	dir := t.TempDir()
@@ -193,10 +193,10 @@ func TestPlatformConfigSyncCacheAndPersistence(t *testing.T) {
 		t.Fatalf("首次同步失败: %v", err)
 	}
 	item, exists := client.PlatformConfig("app.region")
-	if !exists || item.Value != "ap-southeast-1" || item.Version != 3 || item.Sensitive {
+	if !exists || item.Value != "ap-southeast-1" || item.Version != 3 || item.Sensitive || item.GroupPath != "general/theme" {
 		t.Fatalf("平台配置快照不符: exists=%v item=%+v", exists, item)
 	}
-	if sensitive := client.PlatformConfigMust("security.api_token"); !sensitive.Sensitive || sensitive.Value != "S3cr3t&<key>" {
+	if sensitive := client.PlatformConfigMust("security.api_token"); !sensitive.Sensitive || sensitive.Value != "S3cr3t&<key>" || sensitive.GroupPath != "general" {
 		t.Fatalf("敏感配置快照不符: %+v", sensitive)
 	}
 	client.mu.RLock()
