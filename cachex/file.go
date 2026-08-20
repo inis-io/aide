@@ -3,7 +3,6 @@ package cachex
 import (
 	"fmt"
 	"path"
-	"sync"
 	"time"
 
 	"github.com/inis-io/aide/utils"
@@ -19,8 +18,8 @@ type FileStore struct {
 	Fs afero.Fs
 	// 配置
 	Config FileConfig
-	// 原子方法（Incr/SetNX）的进程内互斥锁：读-改-写串行化，文件缓存本就是单机兜底场景
-	mu sync.Mutex
+	// 原子方法（Incr/SetNX）的分段锁：按 key 哈希分片，同键串行、异键并行
+	locks shardLocks
 }
 
 // newFileStore - 文件缓存驱动工厂
@@ -59,11 +58,12 @@ func (this *FileStore) Set(key string, value any, expired time.Duration) (ok boo
 	return this.write(this.dest(key), []byte(data)) == nil
 }
 
-// Incr - 原子自增 1（读-改-写在互斥锁内串行；仅当自增结果为 1 时写入过期时间）
+// Incr - 原子自增 1（读-改-写在分段锁内串行；仅当自增结果为 1 时写入过期时间）
 func (this *FileStore) Incr(key string, expired time.Duration) (count int64, err error) {
 
-	this.mu.Lock()
-	defer this.mu.Unlock()
+	lock := this.locks.lock(key)
+	lock.Lock()
+	defer lock.Unlock()
 
 	dest := this.dest(key)
 	row, readErr := this.read(dest)
@@ -87,8 +87,9 @@ func (this *FileStore) Incr(key string, expired time.Duration) (count int64, err
 // SetNX - 仅当键不存在时设置（已存在不覆盖、不续期）
 func (this *FileStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
 
-	this.mu.Lock()
-	defer this.mu.Unlock()
+	lock := this.locks.lock(key)
+	lock.Lock()
+	defer lock.Unlock()
 
 	if this.get(key) != nil {
 		return false, nil

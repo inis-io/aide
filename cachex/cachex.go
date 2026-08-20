@@ -1,4 +1,4 @@
-// Package cachex - 缓存包：以接口模式封装文件、Redis 等缓存能力
+// Package cachex - 缓存包：以接口模式封装文件、内存、Redis 等缓存能力
 //
 // 设计要点：
 //   - Store 是唯一扩展点：新后端实现 Has/Get/Set/Delete/Clear 五个读写方法，
@@ -13,6 +13,7 @@ package cachex
 
 import (
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 	"sync"
@@ -59,8 +60,10 @@ var registry = struct {
 	sync.RWMutex
 	items map[string]Factory
 }{items: map[string]Factory{
-	"file":  newFileStore,
-	"redis": newRedisStore,
+	"file":     newFileStore,
+	"redis":    newRedisStore,
+	"memory":   newMemoryStore,
+	"layered":  newLayeredStore,
 }}
 
 // Register - 注册缓存驱动
@@ -321,6 +324,21 @@ var tagLocks sync.Map // map[string]*sync.Mutex
 func tagLock(name string) *sync.Mutex {
 	lock, _ := tagLocks.LoadOrStore(name, &sync.Mutex{})
 	return lock.(*sync.Mutex)
+}
+
+// shardCount - 分段锁分片数（2 的幂，位运算取模；与 ristretto 内部 shardedMap 分片数对齐）
+const shardCount = 256
+
+// shardLocks - 分段锁：按键哈希分片，同一分片内串行、不同分片并行
+// 供 memory / file 驱动的 Incr、SetNX 读-改-写临界区使用（redis 驱动原子性在服务端，不需要）
+type shardLocks [shardCount]sync.Mutex
+
+// lock - 取键对应分片的锁
+func (this *shardLocks) lock(key string) *sync.Mutex {
+	// 热路径用 fnv 直接算索引，避免 utils.Hash.Sum32 的字符串往返开销
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return &this[h.Sum32()&(shardCount-1)]
 }
 
 // setTags - 把成员键写入各标签的成员列表（标签列表永不过期）

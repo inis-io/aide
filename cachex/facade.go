@@ -57,8 +57,15 @@ func (this *Controller) setActive(config Config) {
 	// 单次临界区原子提交，避免并发重载时配置与全局实例交错
 	this.Mutex.Lock()
 	this.Config = conf
+	old := Cache.Store()
 	Cache = NewDriver(store, ctx.prefix, ctx.expired)
 	this.Mutex.Unlock()
+
+	// 临界区外关闭旧实例：memory 驱动释放 ristretto 后台 goroutine 与清理 ticker；
+	// redis / file / storeError 不实现 io.Closer，断言自然落空，行为不变
+	if closer, ok := old.(interface{ Close() error }); ok {
+		_ = closer.Close()
+	}
 }
 
 // setConfig - 注入缓存配置

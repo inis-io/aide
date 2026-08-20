@@ -1,13 +1,13 @@
 # cachex - 缓存
 
 > 包路径：`github.com/inis-io/aide/cachex`
-> 以接口模式封装文件 / Redis 缓存，注册表 + 链式调用，可自由扩展缓存后端。
+> 以接口模式封装文件 / 内存 / Redis 缓存，注册表 + 链式调用，可自由扩展缓存后端。
 
 ## 1. 特性
 
 - **接口模式**：`Store` 接口是唯一扩展点（5 个读写方法 + 3 个原子方法），新后端实现即可接入
 - **原子原语**：`Incr`（固定窗口自增）/ `SetNX`（占位不续期）/ `TTL`（存活查询），返回 `error` 可判别后端故障，支撑安全限流等 fail-closed 场景
-- **内置驱动**：`file`（本地文件，零依赖开箱即用）、`redis`（go-redis）
+- **内置驱动**：`file`（本地文件，零依赖开箱即用）、`memory`（ristretto v2，进程内高速缓存）、`layered`（内存 + 文件分层，读快且重启不丢）、`redis`（go-redis）
 - **链式调用**：值语义，每次调用返回副本，并发安全，天然隔离上下文
 - **标签分组**：`Tag` 簿记成员、`Delete` 按标签整组清除，簿记收敛在 Driver 层，新后端免费获得
 - **全局门面**：控制器单例 + 全局实例，支持配置热重载
@@ -115,15 +115,56 @@ if err != nil {
 driver.Expired(time.Hour).Set("cart:1001", items)
 ```
 
+### 6.1 内存驱动（memory）
+
+基于 ristretto v2（TinyLFU 准入 + SampledLFU 淘汰），进程内高速缓存，零依赖开箱即用：
+
+```go
+cachex.Inst.Init(cachex.Config{
+	Engine: "memory",
+	Memory: cachex.MemoryConfig{MaxEntries: 100000}, // 默认 10000
+})
+cachex.Cache.Expired(5 * time.Minute).Set("code", "123456")
+```
+
+与 file / redis 的差异（接入前须知）：
+
+- **无持久化**：重启即全部丢失，不能承受丢失的数据请用 `file`（跨重启保留）或 `redis`（跨进程共享）
+- **值直存不序列化**：类型保留（`int64` 不会变 `float64`），但存入的是原对象引用，调用方事后修改会反映到缓存
+- **容量淘汰**：超过 `MaxEntries` 后按 TinyLFU/SampledLFU 策略淘汰（含准入拒绝），极端压力下 `Set` 成功也可能不保留
+- **写后立即可读**：驱动内部已用 `Wait()` 对齐 file/redis 的同步语义，无需业务感知
+- 独立实例（`cachex.New("memory", ...)`）用完后应 `driver.Store().(interface{ Close() error }).Close()` 释放后台 goroutine；全局门面热重载会自动关闭旧实例
+
+### 6.2 分层驱动（layered）
+
+L1 内存 + L2 文件的分层缓存（cache-aside 模式）：**读走内存（快）、写落文件（重启不丢）**，配置复用 `Memory` / `File` 两段：
+
+```go
+cachex.Inst.Init(cachex.Config{
+	Engine: "layered",
+	Memory: cachex.MemoryConfig{MaxEntries: 100000},
+	File:   cachex.FileConfig{Root: "./runtime/cache"},
+})
+cachex.Cache.Expired(5 * time.Minute).Set("ticket", "T-1") // 落盘，首读回源后进内存
+```
+
+语义与边界：
+
+- **写路径 ≈ 磁盘速度**：每次写都落盘（权威层），随后失效内存副本；首次读回源 L2 并回灌 L1
+- **重启恢复**：进程重启后数据仍在文件层，懒加载回源（ristretto 无法枚举键，不做启动预热）；`Incr` 计数重启后连续
+- **一致性**：L1 是 L2 的保守子集，回灌 TTL 向下取整，L1 只会比 L2 更早过期；文件层写失败即整体失败
+- **适用**：读多写少 + 单进程 + 重启不想丢；高频写/计数请用 `redis`，只要不丢不在乎读速直接用 `file`
+
 ## 7. 配置项
 
 `cachex.Config`：
 
 | 字段 | 说明 |
 |---|---|
-| `Engine` | 引擎：`file` / `redis` / 自定义注册名（未注册名回退 `file`） |
+| `Engine` | 引擎：`file` / `memory` / `layered` / `redis` / 自定义注册名（未注册名回退 `file`） |
 | `Redis` | `Host`（默认 `127.0.0.1`）、`Port`（默认 6379）、`Password`、`Database`、`Prefix`（默认 `AIDE`）、`Expired`（秒，默认 7200） |
 | `File` | `Root`（默认 `./runtime/cache`）、`Suffix`（默认 `json`）、`Prefix`（默认 `AIDE`）、`Expired`（秒，默认 7200） |
+| `Memory` | `MaxEntries`（默认 10000，最大条目数）、`Metrics`（默认关，开启命中率统计）、`Prefix`（默认 `AIDE`）、`Expired`（秒，默认 7200） |
 | `Options` | 扩展驱动的自定义配置（`map[驱动名]map[string]any`） |
 | `Hash` | 配置变更指纹（不传自动计算） |
 
@@ -134,7 +175,7 @@ driver.Expired(time.Hour).Set("cart:1001", items)
 实现 `Store` 接口并在自己包内注册：
 
 ```go
-package memory
+package custom
 
 import (
 	"time"
@@ -172,12 +213,12 @@ func (this store) TTL(key string) (int64, error) {
 }
 
 func newStore(config cachex.Config) (cachex.Store, error) {
-	// 自定义配置从 config.Options["memory"] 读取
+	// 自定义配置从 config.Options["custom"] 读取
 	return store{items: map[string]any{}}, nil
 }
 
 func init() {
-	cachex.Register("memory", newStore) // 同名注册会覆盖先注册者
+	cachex.Register("custom", newStore) // 同名注册会覆盖先注册者（内置 memory 等亦可覆盖替换）
 }
 ```
 
@@ -188,7 +229,7 @@ func init() {
 - `Get` 未命中或已过期返回 `nil`；返回值 `bool` 仅表示操作是否成功
 - 原子方法 `Incr` / `SetNX` / `TTL` 返回 `error` 暴露后端故障（fail-closed 调用方依赖该错误判别）；`Incr` 仅在自增结果为 1 时写入过期时间（固定窗口语义）；`TTL` 约定 `>0` 有效、`0` 不存在或已过期、`-1` 永不过期
 
-注册后：`cachex.New("memory", config)` 可用；`Config.Engine` 填 `"memory"` 即可接入全局门面。
+注册后：`cachex.New("custom", config)` 可用；`Config.Engine` 填 `"custom"` 即可接入全局门面。
 
 ## 9. 全局门面与热重载
 
@@ -204,3 +245,4 @@ func init() {
 - 默认配置（不调用 `Init`）为 `file` 引擎，落盘 `./runtime/cache/`，该目录为运行时产物，请勿提交进仓库
 - 键哈希曾从 32 位升级为 MD5 前 16 位，旧键不兼容，随默认过期时间自然淘汰，无需人工清理
 - `Delete` 不传任何参数且没有链式 `Key`/`Tag` 时不做任何操作（返回成功）
+- `memory` 引擎无持久化（重启即失）、容量淘汰按 TinyLFU/SampledLFU 策略、存入值引用共享——详见 6.1 节差异说明

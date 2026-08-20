@@ -118,7 +118,7 @@ func TestRegisterAndNew(t *testing.T) {
 	}
 
 	// 内置驱动应在变量初始化时登记，无需任何 init 调用
-	for _, want := range []string{"file", "redis", "mock"} {
+	for _, want := range []string{"file", "memory", "redis", "layered", "mock"} {
 		if !contains(names, want) {
 			t.Fatalf("驱动[%s]应出现在 Names() 中，实际: %v", want, names)
 		}
@@ -163,6 +163,9 @@ func TestNormConfig(t *testing.T) {
 		{"文件后缀默认值", conf.File.Suffix, "json"},
 		{"文件过期默认值", conf.File.Expired, 7200},
 		{"文件前缀默认值", conf.File.Prefix, "AIDE"},
+		{"内存最大条目默认值", conf.Memory.MaxEntries, int64(10000)},
+		{"内存过期默认值", conf.Memory.Expired, 7200},
+		{"内存前缀默认值", conf.Memory.Prefix, "AIDE"},
 	}
 	for _, item := range cases {
 		if item.got != item.want {
@@ -178,6 +181,26 @@ func TestNormConfig(t *testing.T) {
 	conf = normConfig(Config{Engine: "unknown"})
 	if conf.Engine != "file" {
 		t.Errorf("未知引擎应回退默认值，实际: %s", conf.Engine)
+	}
+
+	// defaultContext：按引擎取对应分段的前缀与过期时间
+	ctx := defaultContext("memory", conf)
+	if ctx.prefix != "AIDE" || ctx.expired != 7200*time.Second {
+		t.Errorf("memory 段应取默认前缀与过期，实际: %+v", ctx)
+	}
+	custom := normConfig(Config{Memory: MemoryConfig{Prefix: "MEM", Expired: 60}})
+	ctx = defaultContext("memory", custom)
+	if ctx.prefix != "MEM" || ctx.expired != time.Minute {
+		t.Errorf("memory 段应取自定义前缀与过期，实际: %+v", ctx)
+	}
+	// layered 复用 Memory 段（两层共用 Driver 命名的同一键）
+	ctx = defaultContext("layered", custom)
+	if ctx.prefix != "MEM" || ctx.expired != time.Minute {
+		t.Errorf("layered 段应复用 memory 段配置，实际: %+v", ctx)
+	}
+	ctx = defaultContext("unknown", conf)
+	if ctx.prefix != conf.File.Prefix || ctx.expired != time.Duration(conf.File.Expired)*time.Second {
+		t.Errorf("未知引擎应回退 file 段，实际: %+v", ctx)
 	}
 }
 
@@ -623,4 +646,449 @@ func TestRedisStoreAtomic(t *testing.T) {
 	if ok, _ := store.SetNX("n", 1, 10*time.Minute); !ok {
 		t.Fatal("键不存在时 SetNX 应返回 true")
 	}
+}
+
+// newMemory - 构建内存驱动测试实例（自动注册清理时关闭，避免测试进程泄漏 ristretto goroutine）
+func newMemory(t *testing.T, conf MemoryConfig) *MemoryStore {
+	t.Helper()
+	// 工厂契约要求配置已归一化（与 setActive/New 的调用路径一致）
+	store, err := newMemoryStore(normConfig(Config{Memory: conf}))
+	if err != nil {
+		t.Fatalf("构建内存驱动失败: %v", err)
+	}
+	t.Cleanup(func() { _ = store.(*MemoryStore).Close() })
+	return store.(*MemoryStore)
+}
+
+// TestMemoryStore - 验证内存驱动：读写、类型保留、TTL 三态、过期、删除清空、Close 幂等与关闭后行为
+func TestMemoryStore(t *testing.T) {
+
+	store := newMemory(t, MemoryConfig{})
+
+	// 永不过期读写
+	if !store.Set("k", "v", 0) {
+		t.Fatal("Set 不应失败")
+	}
+	if !store.Has("k") || store.Get("k") != "v" {
+		t.Fatal("Set 后应能读到写入的值")
+	}
+
+	// 类型保留：内存驱动不经 JSON 往返，int64 不应变成 float64
+	store.Set("n", int64(42), 0)
+	if got, ok := store.Get("n").(int64); !ok || got != 42 {
+		t.Fatalf("内存驱动应保留原始类型，实际: %+v", store.Get("n"))
+	}
+
+	// TTL 三态：永不过期 -1、带窗口 >0、不存在 0
+	if seconds, _ := store.TTL("k"); seconds != -1 {
+		t.Fatalf("永不过期的键 TTL 应为 -1，实际: %d", seconds)
+	}
+	store.Set("e", "v", 2*time.Second)
+	if seconds, _ := store.TTL("e"); seconds <= 0 || seconds > 2 {
+		t.Fatalf("带窗口的键 TTL 应在 (0,2] 秒内，实际: %d", seconds)
+	}
+	if seconds, _ := store.TTL("none"); seconds != 0 {
+		t.Fatalf("不存在的键 TTL 应为 0，实际: %d", seconds)
+	}
+
+	// 过期后视为不存在（短 TTL + 睡眠，Get 惰性判定过期）
+	store.Set("x", "v", 100*time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+	if store.Has("x") || store.Get("x") != nil {
+		t.Fatal("过期缓存应视为不存在")
+	}
+
+	// 删除与清空
+	store.Delete("k")
+	if store.Has("k") {
+		t.Fatal("Delete 后缓存应移除")
+	}
+	store.Set("c", 1, 0)
+	if !store.Clear() || store.Has("c") {
+		t.Fatal("Clear 后缓存应清空")
+	}
+
+	// Close 幂等：连续两次不报错；关闭后读写全部失败
+	if err := store.Close(); err != nil {
+		t.Fatalf("首次 Close 不应报错: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("重复 Close 应幂等: %v", err)
+	}
+	if store.Set("a", "b", 0) || store.Has("a") || store.Get("a") != nil {
+		t.Fatal("关闭后所有读写应返回失败")
+	}
+}
+
+// TestMemoryStoreAtomic - 验证内存驱动原子方法：固定窗口自增、过期保留、SetNX 不覆盖不续期、TTL 映射、过期重计
+func TestMemoryStoreAtomic(t *testing.T) {
+
+	store := newMemory(t, MemoryConfig{})
+
+	// 固定窗口：首次自增写入过期时间，后续自增保留原时间戳
+	if count, _ := store.Incr("c", 10*time.Minute); count != 1 {
+		t.Fatalf("首次自增应为 1，实际: %d", count)
+	}
+	if count, _ := store.Incr("c", time.Hour); count != 2 {
+		t.Fatalf("第二次自增应为 2，实际: %d", count)
+	}
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("后续自增不应改写过期时间，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 永不过期返回 -1
+	if count, _ := store.Incr("f", 0); count != 1 {
+		t.Fatalf("永不过期自增应为 1，实际: %d", count)
+	}
+	if seconds, _ := store.TTL("f"); seconds != -1 {
+		t.Fatalf("永不过期的键 TTL 应为 -1，实际: %d", seconds)
+	}
+
+	// SetNX：已存在不覆盖、不续期，不存在则写入
+	store.Set("k", "v", 10*time.Minute)
+	if ok, _ := store.SetNX("k", "v2", time.Second); ok {
+		t.Fatal("键已存在时 SetNX 应返回 false")
+	}
+	if store.Get("k") != "v" {
+		t.Fatalf("SetNX 不应覆盖已有值，实际: %+v", store.Get("k"))
+	}
+	if seconds, _ := store.TTL("k"); seconds < 598 || seconds > 600 {
+		t.Fatalf("SetNX 不应续期，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+	if ok, _ := store.SetNX("n", 1, time.Minute); !ok {
+		t.Fatal("键不存在时 SetNX 应返回 true")
+	}
+
+	// 窗口过期后从 1 重新计数
+	if count, _ := store.Incr("e", time.Second); count != 1 {
+		t.Fatalf("过期窗口自增应为 1，实际: %d", count)
+	}
+	time.Sleep(2100 * time.Millisecond)
+	if count, _ := store.Incr("e", 10*time.Minute); count != 1 {
+		t.Fatalf("窗口过期后应重新从 1 计数，实际: %d", count)
+	}
+}
+
+// TestMemoryStoreIncrConcurrent - 验证内存驱动并发自增：同键计数准确（分段锁同键串行）、异键互不错串
+func TestMemoryStoreIncrConcurrent(t *testing.T) {
+
+	store := newMemory(t, MemoryConfig{})
+
+	// 同键并发：50 goroutine × 4 次，最终计数应精确
+	const goroutines = 50
+	const each = 4
+	var group sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.Incr("c", 10*time.Minute); err != nil {
+					t.Errorf("并发自增失败: %v", err)
+				}
+			}
+		}()
+	}
+	group.Wait()
+	if count, _ := store.Incr("c", 0); count != goroutines*each+1 {
+		t.Fatalf("同键并发自增计数应准确为 %d，实际: %d", goroutines*each+1, count)
+	}
+
+	// 异键并发：30 goroutine 各自增 a × 5、b × 7，两个键的计数互不错串
+	var group2 sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		group2.Add(2)
+		go func() {
+			defer group2.Done()
+			for j := 0; j < 5; j++ {
+				_, _ = store.Incr("a", time.Minute)
+			}
+		}()
+		go func() {
+			defer group2.Done()
+			for j := 0; j < 7; j++ {
+				_, _ = store.Incr("b", time.Minute)
+			}
+		}()
+	}
+	group2.Wait()
+	if count, _ := store.Incr("a", 0); count != 30*5+1 {
+		t.Fatalf("键 a 计数应准确为 %d，实际: %d", 30*5+1, count)
+	}
+	if count, _ := store.Incr("b", 0); count != 30*7+1 {
+		t.Fatalf("键 b 计数应准确为 %d，实际: %d", 30*7+1, count)
+	}
+}
+
+// TestFileStoreIncrConcurrentStripes - 验证文件驱动分段锁：异键并发自增互不错串（分段锁回归测试）
+func TestFileStoreIncrConcurrentStripes(t *testing.T) {
+
+	store := &FileStore{Fs: afero.NewMemMapFs(), Config: FileConfig{Root: "cache", Suffix: "json"}}
+
+	var group sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		group.Add(2)
+		go func() {
+			defer group.Done()
+			for j := 0; j < 5; j++ {
+				if _, err := store.Incr("a", time.Minute); err != nil {
+					t.Errorf("键 a 并发自增失败: %v", err)
+				}
+			}
+		}()
+		go func() {
+			defer group.Done()
+			for j := 0; j < 7; j++ {
+				if _, err := store.Incr("b", time.Minute); err != nil {
+					t.Errorf("键 b 并发自增失败: %v", err)
+				}
+			}
+		}()
+	}
+	group.Wait()
+
+	if count, _ := store.Incr("a", 0); count != 30*5+1 {
+		t.Fatalf("键 a 计数应准确为 %d，实际: %d", 30*5+1, count)
+	}
+	if count, _ := store.Incr("b", 0); count != 30*7+1 {
+		t.Fatalf("键 b 计数应准确为 %d，实际: %d", 30*7+1, count)
+	}
+}
+
+// TestControllerReloadClosesOldStore - 验证门面热重载关闭旧 memory 实例（防 ristretto goroutine 泄漏）
+func TestControllerReloadClosesOldStore(t *testing.T) {
+
+	inst := &Controller{}
+	inst.Init(Config{Engine: "memory", Memory: MemoryConfig{MaxEntries: 1000}})
+
+	old, ok := Cache.Store().(*MemoryStore)
+	if !ok {
+		t.Fatal("全局实例底层应为 memory 驱动")
+	}
+	if !Cache.Set("k", "v") {
+		t.Fatal("memory 引擎应可正常读写")
+	}
+
+	// 热重载到 file 引擎（临时目录，避免污染仓库）
+	inst.ReloadIfChanged(Config{Engine: "file", File: FileConfig{Root: t.TempDir()}})
+	if !Cache.Set("k2", "v2") {
+		t.Fatal("重载后新实例应可正常读写")
+	}
+
+	// 旧 memory 实例应已由门面关闭（ristretto 关闭后 Set 返回 false）
+	if old.Set("k3", "v3", 0) {
+		t.Fatal("旧 memory 实例应已被关闭")
+	}
+
+	// 测试结束后恢复默认门面，避免影响其他用例
+	inst.HasConfig = false
+	inst.useDefault()
+}
+
+// newLayered - 构建分层驱动测试实例（L2 注入内存文件系统；清理时关闭 L1）
+func newLayered(t *testing.T, fs afero.Fs) *LayeredStore {
+	t.Helper()
+	conf := normConfig(Config{File: FileConfig{Root: "cache", Suffix: "json"}})
+	l1, err := newMemoryStore(conf)
+	if err != nil {
+		t.Fatalf("构建内存层失败: %v", err)
+	}
+	l2 := &FileStore{Fs: fs, Config: conf.File}
+	store := &LayeredStore{L1: l1, L2: l2}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+// TestLayeredStore - 验证分层驱动：读写、回源回灌、写失效一致性、过期、删除清空双层生效
+func TestLayeredStore(t *testing.T) {
+
+	store := newLayered(t, afero.NewMemMapFs())
+
+	// Set 后 Get 命中（写已失效 L1，首次读走 L2 回源）
+	if !store.Set("k", "v", 0) {
+		t.Fatal("Set 不应失败")
+	}
+	if !store.Has("k") || store.Get("k") != "v" {
+		t.Fatal("Set 后应能读到写入的值")
+	}
+	// 回源后应回灌 L1（再次读不触发磁盘）
+	if !store.L1.Has("k") {
+		t.Fatal("Get 回源后应回灌 L1")
+	}
+
+	// 写失效一致性：Set 新值后读必为新值，无 L1 残留
+	store.Set("k", "A", 0)
+	if got := store.Get("k"); got != "A" {
+		t.Fatalf("写后失效不应残留旧值，实际: %+v", got)
+	}
+
+	// 过期语义（L2 为秒级时间戳，1 秒 TTL + 睡眠越过秒边界；先回灌 L1 再验证两层同时失效）
+	store.Set("e", "v", time.Second)
+	if store.Get("e") != "v" {
+		t.Fatal("窗口内应可读")
+	}
+	time.Sleep(2100 * time.Millisecond)
+	if store.Has("e") || store.Get("e") != nil {
+		t.Fatal("过期缓存应视为不存在")
+	}
+
+	// 删除：回灌后的键删除后两层均无残留（file 层 JSON 往返为 float64，用 cast 比较）
+	store.Set("d", 1, 0)
+	if cast.ToInt64(store.Get("d")) != 1 {
+		t.Fatal("读以触发回灌")
+	}
+	store.Delete("d")
+	if store.Has("d") || store.L1.Has("d") {
+		t.Fatal("Delete 后两层均应移除")
+	}
+
+	// Clear：两层同时清空
+	store.Set("c", 1, 0)
+	if !store.Clear() || store.Has("c") || store.L1.Has("c") {
+		t.Fatal("Clear 后两层均应清空")
+	}
+}
+
+// TestLayeredRestartPersist - 验证分层驱动重启恢复：同一文件系统 + 全新内存层，数据与计数连续
+func TestLayeredRestartPersist(t *testing.T) {
+
+	fs := afero.NewMemMapFs()
+	store := newLayered(t, fs)
+
+	store.Set("ticket", "T-1", 10*time.Minute)
+	store.Set("forever", "F", 0)
+	if count, _ := store.Incr("counter", 10*time.Minute); count != 1 {
+		t.Fatalf("首次自增应为 1，实际: %d", count)
+	}
+	if count, _ := store.Incr("counter", 10*time.Minute); count != 2 {
+		t.Fatalf("第二次自增应为 2，实际: %d", count)
+	}
+	store.Close() // 模拟进程结束：L1 释放，L2 落盘数据仍在
+
+	// 重启：同一文件系统（磁盘），全新内存层
+	store2 := newLayered(t, fs)
+	if got := store2.Get("ticket"); got != "T-1" {
+		t.Fatalf("重启后应能从文件层恢复 ticket，实际: %+v", got)
+	}
+	if got := store2.Get("forever"); got != "F" {
+		t.Fatalf("重启后应能恢复永不过期键，实际: %+v", got)
+	}
+	if seconds, _ := store2.TTL("forever"); seconds != -1 {
+		t.Fatalf("重启后永不过期键 TTL 应为 -1，实际: %d", seconds)
+	}
+	// 计数连续：文件层权威
+	if count, _ := store2.Incr("counter", 10*time.Minute); count != 3 {
+		t.Fatalf("重启后计数应连续为 3，实际: %d", count)
+	}
+}
+
+// TestLayeredAtomic - 验证分层驱动原子方法：SetNX 语义、TTL 三态
+func TestLayeredAtomic(t *testing.T) {
+
+	store := newLayered(t, afero.NewMemMapFs())
+
+	// SetNX：已存在不覆盖，不存在则写入
+	store.Set("k", "v", 10*time.Minute)
+	if ok, _ := store.SetNX("k", "v2", time.Second); ok {
+		t.Fatal("键已存在时 SetNX 应返回 false")
+	}
+	if store.Get("k") != "v" {
+		t.Fatalf("SetNX 不应覆盖已有值，实际: %+v", store.Get("k"))
+	}
+	if ok, _ := store.SetNX("n", 1, time.Minute); !ok {
+		t.Fatal("键不存在时 SetNX 应返回 true")
+	}
+
+	// TTL 三态：永不过期 -1、带窗口 >0、不存在 0
+	store.Set("f", "v", 0)
+	if seconds, _ := store.TTL("f"); seconds != -1 {
+		t.Fatalf("永不过期的键 TTL 应为 -1，实际: %d", seconds)
+	}
+	store.Set("e", "v", 2*time.Second)
+	if seconds, _ := store.TTL("e"); seconds <= 0 || seconds > 2 {
+		t.Fatalf("带窗口的键 TTL 应在 (0,2] 秒内，实际: %d", seconds)
+	}
+	if seconds, _ := store.TTL("none"); seconds != 0 {
+		t.Fatalf("不存在的键 TTL 应为 0，实际: %d", seconds)
+	}
+}
+
+// TestLayeredIncrConcurrent - 验证分层驱动并发自增：同键计数准确（L2 分段锁生效）、异键互不错串
+func TestLayeredIncrConcurrent(t *testing.T) {
+
+	store := newLayered(t, afero.NewMemMapFs())
+
+	const goroutines = 50
+	const each = 4
+	var group sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.Incr("c", 10*time.Minute); err != nil {
+					t.Errorf("并发自增失败: %v", err)
+				}
+			}
+		}()
+	}
+	group.Wait()
+	if count, _ := store.Incr("c", 0); count != goroutines*each+1 {
+		t.Fatalf("同键并发自增计数应准确为 %d，实际: %d", goroutines*each+1, count)
+	}
+
+	// 异键并发：互不错串
+	var group2 sync.WaitGroup
+	for i := 0; i < 30; i++ {
+		group2.Add(2)
+		go func() {
+			defer group2.Done()
+			for j := 0; j < 5; j++ {
+				_, _ = store.Incr("a", time.Minute)
+			}
+		}()
+		go func() {
+			defer group2.Done()
+			for j := 0; j < 7; j++ {
+				_, _ = store.Incr("b", time.Minute)
+			}
+		}()
+	}
+	group2.Wait()
+	if count, _ := store.Incr("a", 0); count != 30*5+1 {
+		t.Fatalf("键 a 计数应准确为 %d，实际: %d", 30*5+1, count)
+	}
+	if count, _ := store.Incr("b", 0); count != 30*7+1 {
+		t.Fatalf("键 b 计数应准确为 %d，实际: %d", 30*7+1, count)
+	}
+}
+
+// TestLayeredReloadClosesOldStore - 验证门面热重载关闭旧 layered 实例（复用 io.Closer 断言机制）
+func TestLayeredReloadClosesOldStore(t *testing.T) {
+
+	inst := &Controller{}
+	inst.Init(Config{Engine: "layered", File: FileConfig{Root: t.TempDir()}})
+
+	old, ok := Cache.Store().(*LayeredStore)
+	if !ok {
+		t.Fatal("全局实例底层应为 layered 驱动")
+	}
+	if !Cache.Set("k", "v") {
+		t.Fatal("layered 引擎应可正常读写")
+	}
+
+	// 热重载到 memory 引擎
+	inst.ReloadIfChanged(Config{Engine: "memory", Memory: MemoryConfig{MaxEntries: 1000}})
+	if !Cache.Set("k2", "v2") {
+		t.Fatal("重载后新实例应可正常读写")
+	}
+
+	// 旧 layered 实例的 L1 应已由门面关闭（ristretto 关闭后 Set 返回 false）
+	if old.L1.Set("k3", "v3", 0) {
+		t.Fatal("旧实例的 L1 应已被关闭")
+	}
+
+	// 测试结束后恢复默认门面，避免影响其他用例
+	inst.HasConfig = false
+	inst.useDefault()
 }

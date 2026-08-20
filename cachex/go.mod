@@ -4,6 +4,7 @@ go 1.26
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
+	github.com/dgraph-io/ristretto/v2 v2.4.2
 	github.com/inis-io/aide/utils v0.0.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/spf13/afero v1.15.0
@@ -19,6 +20,7 @@ require (
 	github.com/bwmarrin/snowflake v0.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect

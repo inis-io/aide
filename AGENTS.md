@@ -27,7 +27,7 @@
 ├── utils/       # 工具函数集合（36 个文件）：校验、加解密、JWT、日期、HTTP、文件、数组、掩码等（**嵌套独立模块** `github.com/inis-io/aide/utils`，依赖 ../dto）
 ├── dto/         # 数据传输对象：各服务的配置与响应结构体（JwtBody 等），纯 struct，无行为（**嵌套独立模块** `github.com/inis-io/aide/dto`，零依赖）
 ├── pushx/       # 消息推送：以接口模式封装短信 / 邮件验证码推送，注册表 + 链式调用，可扩展服务商（**嵌套独立模块**）
-├── cachex/      # 缓存：以接口模式封装文件 / Redis 缓存，注册表 + 链式调用，可扩展后端（**嵌套独立模块**）
+├── cachex/      # 缓存：以接口模式封装文件 / 内存 / Redis 缓存，注册表 + 链式调用，可扩展后端（**嵌套独立模块**）
 ├── storagex/    # 存储：以接口模式封装本地 / OSS / COS 文件存储，注册表 + 链式调用，可扩展后端（**嵌套独立模块**）
 ├── logx/        # 日志：zap + lumberjack 结构化日志，按级别分文件精确收录，单例 + 独立实例（**嵌套独立模块**）
 ├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理（**嵌套独立模块**，依赖 logx）
@@ -51,12 +51,12 @@
 
 ### cachex 包约定（缓存）
 
-- 接口模式封装文件 / Redis 缓存。**`Store` 接口是唯一扩展点**：`Has` / `Get` / `Set(key, value, expired)` / `Delete` / `Clear` 五个读写方法 + `Incr` / `SetNX` / `TTL` 三个原子方法（固定窗口计数、占位不续期、存活查询，返回 `error` 暴露后端故障，支撑安全限流等 fail-closed 场景）。内置驱动在 `cachex.go` 的 `registry` **变量初始化时登记**（不依赖文件 init 顺序）；外部驱动在自己包内 `init()` 中 `Register("名称", 工厂)` 注册，同名注册会覆盖先注册者。仓库内新增内置驱动：新建一个文件实现 `Store`，并在 `registry` 中登记一行。
+- 接口模式封装文件 / 内存 / Redis 缓存。**`Store` 接口是唯一扩展点**：`Has` / `Get` / `Set(key, value, expired)` / `Delete` / `Clear` 五个读写方法 + `Incr` / `SetNX` / `TTL` 三个原子方法（固定窗口计数、占位不续期、存活查询，返回 `error` 暴露后端故障，支撑安全限流等 fail-closed 场景）。内置驱动在 `cachex.go` 的 `registry` **变量初始化时登记**（不依赖文件 init 顺序）；外部驱动在自己包内 `init()` 中 `Register("名称", 工厂)` 注册，同名注册会覆盖先注册者。仓库内新增内置驱动：新建一个文件实现 `Store`，并在 `registry` 中登记一行。
 - `Store` 契约：键由 `Driver` 层命名（`前缀-MD5前16位(key)`，64 位哈希降低碰撞；与 Sum32 时代的旧键不兼容，旧键随默认过期自然淘汰），驱动按原名持久化；`Set` 的 value 须可 JSON 序列化，**`expired <= 0` 表示永不过期**；`Get` 未命中或已过期返回 `nil`。
 - `Driver` 是 `Store` 之上的链式包装（`Tag` / `Key` / `Expired` / `Has` / `Get` / `Set` / `Delete` / `Clear` / `Incr` / `SetNX` / `TTL`），**值语义**：每次链式调用返回副本，天然隔离上下文。**标签簿记统一收敛在 Driver 层**（标签列表键 `前缀-TAG-大写标签名`，成员列表永不过期；簿记读-改-写带**键控锁**，进程内并发安全），后端不感知标签，新后端接入即免费获得标签能力；`Incr`/`SetNX` 不参与标签簿记。`cachex.New("redis", config)` 创建独立实例，`Driver.Store()` 可取底层驱动做类型断言。
-- 配置自包含在包内：`cachex.Config`（含 `file` / `redis` 两组内置驱动配置，外部扩展驱动的自定义配置放 `Config.Options`）；`normConfig()` 补齐默认值（引擎名未注册时回退 `file`，默认前缀 `AIDE`、默认过期 7200 秒），`defaultContext()` 按引擎取对应分段的前缀与过期时间。
+- 配置自包含在包内：`cachex.Config`（含 `file` / `memory` / `redis` 三组内置驱动配置，外部扩展驱动的自定义配置放 `Config.Options`）；`normConfig()` 补齐默认值（引擎名未注册时回退 `file`，默认前缀 `AIDE`、默认过期 7200 秒），`defaultContext()` 按引擎取对应分段的前缀与过期时间。
 - 全局门面与其他子包同构：控制器单例 `cachex.Inst`（`Init` / `ReloadIfChanged`，`sync.RWMutex` 保护）+ 全局实例 `cachex.Cache`。驱动初始化失败时全局位用 `storeError` 占位，所有操作返回失败。
-- 内置驱动文件：`file.go`（afero 文件缓存，落盘 `存储目录/键名.后缀` JSON，过期为秒级时间戳，**临时文件 + Rename 原子写入**，Windows 下 Rename 不允许覆盖会删目标重试，可注入 `afero.NewMemMapFs` 测试）、`redis.go`（go-redis，`Clear` 按前缀扫描删除，前缀为空时回退 `FlushDB`）。
+- 内置驱动文件：`file.go`（afero 文件缓存，落盘 `存储目录/键名.后缀` JSON，过期为秒级时间戳，**临时文件 + Rename 原子写入**，Windows 下 Rename 不允许覆盖会删目标重试，可注入 `afero.NewMemMapFs` 测试）、`memory.go`（ristretto v2，`MaxCost` 语义 = 最大条目数，写路径 `Wait()` 同步可见）、`layered.go`（L1 内存 + L2 文件，cache-aside：读回源回灌、写权威层后失效 L1，重启不丢）、`redis.go`（go-redis，`Clear` 按前缀扫描删除，前缀为空时回退 `FlushDB`）。
 
 ### pushx 包约定（消息推送）
 
@@ -140,7 +140,7 @@ cd pay && go build ./... && go vet ./... && go test ./...       # pay 模块单�
 
 > 一次性验证全部模块可依次执行上表命令；子模块的 `go.sum` 因 `replace` 指向本地路径，首次构建会自动补齐。
 
-当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、控制器热重载、原子方法 Incr/SetNX/TTL——Driver 透传、file 固定窗口与并发自增、redis 经 miniredis 实测 Lua 路径、storeError 错误透传）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
+当前有测试的包：`licence`（golden 字节向量、签发/验签/防篡改、httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户、管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close）、layered 分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法 Incr/SetNX/TTL——Driver 透传、file 固定窗口与并发自增、redis 经 miniredis 实测 Lua 路径、storeError 错误透传）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
 
 ## 代码风格指南
 
