@@ -95,6 +95,8 @@ const (
 	EventSaasMenuArchived = "saas.menu.archived"
 	// EventSaasTenantMenusTrimmed - 租户悬空菜单已裁剪并重签，data: {tenantId, tenantCode, removedCodes}
 	EventSaasTenantMenusTrimmed = "saas.tenant.menus-trimmed"
+	// EventSaasTenantReissued - 套餐权益变更联动或平台纠错重签后租户信封已刷新（features/limits/menuCodes），data: {tenantId, tenantCode, planId, planCode}
+	EventSaasTenantReissued = "saas.tenant.reissued"
 	// EventPlatformConfigUpdated - 平台配置值已更新，data: {configKey, projectId}
 	EventPlatformConfigUpdated = "platform.config.updated"
 	// EventPlatformConfigDefinitionChanged - 平台配置项定义已变更，data: {configKey, version}

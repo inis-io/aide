@@ -114,7 +114,8 @@ type GRPCOptions struct {
 | `EventSaasTenantCreated` | `saas.tenant.created` | SaaS 租户已诞生（首次生效 `pending→active`），回调 `data` 含 `{tenantNo, tenantCode, planCode, subscriptionType, environment}` |
 | `EventSaasMenuPublished` | `saas.menu.published` | SaaS 菜单清单已发布，回调 `data` 含 `{manifestId, menuKind, version, removedCodes}` |
 | `EventSaasMenuArchived` | `saas.menu.archived` | SaaS 菜单清单已归档，回调 `data` 含 `{manifestId, menuKind, version}` |
-| `EventSaasTenantMenusTrimmed` | `saas.tenant.menus-trimmed` | 租户菜单已按最新租户清单裁剪并重签，回调 `data` 含 `{tenantId, tenantCode, removedCodes}` |
+| `EventSaasTenantMenusTrimmed` | `saas.tenant.menus-trimmed` | 租户菜单已按最新租户清单收敛并重签，回调 `data` 含 `{tenantId, tenantCode, action, removedCodes}` |
+| `EventSaasTenantReissued` | `saas.tenant.reissued` | 套餐权益变更联动重签（plan-propagate）或平台纠错重签后租户信封已刷新（features/limits/menuCodes），回调 `data` 含 `{tenantId, tenantCode, planId, planCode, action?}` |
 | `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值已更新，回调 `data` 含 `{configKey, projectId}` |
 | `EventPlatformConfigDefinitionChanged` | `platform.config.definition.changed` | 平台配置项定义已变更，回调 `data` 含 `{configKey, version}`（新增/修改）；删除/恢复路径当前为 `{configIds}`（批量删）或 `{configId}`（逐项），口径待统一，下游应以事件为失效信号、按 `PlatformConfigSync` 拉全量收敛 |
 
@@ -807,7 +808,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Resume` | 恢复（suspended → active，即时生效，reason 必填） | `POST /api/saas-tenants/resume` | `id int, reason string` → `*StatusResult` |
 | `Revoke` | 吊销（active/suspended → revoked，不可逆，reason 必填） | `POST /api/saas-tenants/revoke` | `id int, reason string` → `*StatusResult` |
 | `Reissue` | 重签（以现载荷为基础按入参覆盖，空值沿用现载荷；直通不产生申请单） | `POST /api/saas-tenants/reissue` | `SaasTenantReissueInput` → `*SaasTenantNoResult` |
-| `SyncMenus` | 按当前 published 租户清单裁剪悬空编码并原子重签；tenantIds 为空处理全项目 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int` → 无 |
+| `SyncMenus` | 按「当前 published 租户清单 + 套餐当前权益」收敛并原子重签（mode：`auto` 漂移感知 / `trim` 仅裁悬空码 / `rebase` 强制按套餐重物化）；tenantIds 为空处理全项目在营租户 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int, mode string` → `*SyncTenantMenusResult` |
 | `BatchRenew` | 批量续期（仅 active/suspended 可续；member 逐租户生成 change 申请单走审批；platform 直通重签；ids 须全部处于写数据范围内否则整体拒绝） | `POST /api/saas-tenants/batch-renew` | `SaasTenantBatchRenewInput` → `*SaasTenantBatchRenewResult` |
 | `Applications` | 我的申请分页 | `GET /api/saas-tenants/applications/find` | `*SaasTenantApplicationFindParams` → `*Page[SaasTenantApplication]` |
 | `ApplicationTake` | 我的申请详情 | `GET /api/saas-tenants/applications/take?id=N` | `id int` → `*SaasTenantApplication` |

@@ -910,7 +910,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `CallbackEvent` | 分发给业务回调的事件对象：`Payload`（完整回调载荷）、`Data`（载荷 `Data` 的只读视图） |
 | `CallbackEvent.MustData` | `func (this *CallbackEvent) MustData(v any)` 将事件 `Data` 解码到 `v`，失败时 panic |
 
-事件名常量：SaaS 套餐 / 租户 / 菜单清单 / 平台配置全部 9 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasTenantCreated`、`EventSaasMenuPublished`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`platform.config.*`、`saas.*`）一次捕获该族全部动作。
+事件名常量：SaaS 套餐 / 租户 / 菜单清单 / 平台配置全部 10 个事件均有导出常量（`EventSaasPlanCreated`、`EventSaasTenantCreated`、`EventSaasMenuPublished`、`EventPlatformConfigUpdated` 等，完整清单与 `data` 字段见 API.md §2.4），可直接传入 `OnEvent`；按事件族订阅用前缀通配（如 `saas.plan.*`、`platform.config.*`、`saas.*`）一次捕获该族全部动作。
 
 ### 19.4 平台配置同步
 
@@ -1201,7 +1201,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Resume` | 恢复（suspended → active，即时生效，reason 必填） | `POST /api/saas-tenants/resume` | `id int, reason string` → `*StatusResult` |
 | `Revoke` | 吊销（active/suspended → revoked，不可逆，reason 必填） | `POST /api/saas-tenants/revoke` | `id int, reason string` → `*StatusResult` |
 | `Reissue` | 重签（以现载荷为基础按入参覆盖，空值沿用现载荷；直通不产生申请单） | `POST /api/saas-tenants/reissue` | `SaasTenantReissueInput` → `*SaasTenantNoResult` |
-| `SyncMenus` | 按当前 published 租户清单裁剪悬空编码并原子重签；tenantIds 为空处理全项目 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int` → 无 |
+| `SyncMenus` | 按「当前 published 租户清单 + 套餐当前权益」收敛并原子重签（mode：`auto` 漂移感知 / `trim` 仅裁悬空码 / `rebase` 强制按套餐重物化）；tenantIds 为空处理全项目在营租户 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int, mode string` → `*SyncTenantMenusResult` |
 | `BatchRenew` | 批量续期（仅 active/suspended 可续；member 逐租户生成 change 申请单走审批；platform 直通重签；ids 须全部处于写数据范围内否则整体拒绝） | `POST /api/saas-tenants/batch-renew` | `SaasTenantBatchRenewInput` → `*SaasTenantBatchRenewResult` |
 | `Applications` | 我的申请分页 | `GET /api/saas-tenants/applications/find` | `*SaasTenantApplicationFindParams` → `*Page[SaasTenantApplication]` |
 | `ApplicationTake` | 我的申请详情 | `GET /api/saas-tenants/applications/take?id=N` | `id int` → `*SaasTenantApplication` |

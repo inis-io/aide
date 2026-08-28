@@ -361,14 +361,17 @@ func TestSaasTenantReissue(t *testing.T) {
 func TestSaasTenantSyncMenus(t *testing.T) {
 	hub := newFakeHub(t)
 	hub.routes["POST /api/saas-tenants/sync-menus"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
-		hub.writeData(writer, map[string]any{"ids": []int{41}, "count": 1})
+		hub.writeData(writer, map[string]any{"rebased": []int{41}, "unchanged": []int{42}, "count": 1})
 	}
 	client := hub.newClient(t)
-	err := client.SaasTenants.SyncMenus(context.Background(), 11, []int{41})
+	result, err := client.SaasTenants.SyncMenus(context.Background(), 11, []int{41}, "auto")
 	if err != nil {
 		t.Fatalf("同步菜单失败: %v", err)
 	}
-	if !strings.Contains(string(hub.lastBody), `"projectId":11`) || !strings.Contains(string(hub.lastBody), `"tenantIds":[41]`) {
+	if result.Count != 1 || len(result.Rebased) != 1 || result.Rebased[0] != 41 || len(result.Unchanged) != 1 || result.Unchanged[0] != 42 {
+		t.Fatalf("同步结果解析不符: %+v", result)
+	}
+	if !strings.Contains(string(hub.lastBody), `"projectId":11`) || !strings.Contains(string(hub.lastBody), `"tenantIds":[41]`) || !strings.Contains(string(hub.lastBody), `"mode":"auto"`) {
 		t.Fatalf("同步请求体不符: %s", string(hub.lastBody))
 	}
 }
