@@ -19,6 +19,10 @@ runtime:
   - [Client.PlatformConfigSync, POST, /api/v1/platform/configs/sync, PlatformConfigRuntimeService/Sync, activation-sign-v1, "", platform_config, read, normal, true]
   - [Client.PlatformConfigConsume, POST, /api/v1/platform/configs/consume, PlatformConfigRuntimeService/ReportConfigConsumption, activation-sign-v1, "", platform_config, write, normal, true]
   - [Client.Subscribe, POST, /api/v1/events/subscribe, EventRuntimeService/Subscribe, activation-sign-v1, "", callback_event, read, normal, true]
+  # 配置回推（客户端 → 平台，客户端权威全量快照）：tenant_id=0 项目级 / >0 租户级；
+  # 幂等 = 快照幂等 + client_push_id 批次去重。
+  - [Client.PushConfig, POST, /api/v1/pushback/configs, ConfigPushbackRuntimeService/Push, activation-sign-v1, "", pushback_config, write, normal, true]
+  - [Client.PushTenantConfig, POST, /api/v1/pushback/configs, ConfigPushbackRuntimeService/Push, activation-sign-v1, "", pushback_config, write, normal, true]
 admin:
   # 管理面 gRPC 统一走通用 AdminRequest{json}/AdminResponse{code,message,data_json} 信封，
   # proto 不为单个业务动作建专用字段；菜单类参数（如 menuKind、projectId/tenantIds）经

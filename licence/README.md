@@ -932,6 +932,19 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 
 `PlatformConfigPayload` / `PlatformConfigEnvelope` 与平台字节级镜像，验签必须使用 `ParsePlatformConfigEnvelope` 返回的 payload 原文。回调事件 `platform.config.updated`（值变更）、`platform.config.definition.changed`（定义变更）只是失效信号，客户端收到后应调用 `PlatformConfigSync` 拉取全量收敛，并以周期性同步兜底。
 
+### 19.5 配置回推（客户端 → 平台）
+
+与平台配置下发方向相反、权威源相反：把项目级/租户级**完整配置快照**主动推送回平台，平台 diff 落库（新增/更新/删除/不变）并写只追加审计，管理端只读查看。快照语义天然幂等（重复推送同一快照全部 unchanged）；批次级幂等号 `client_push_id` 缺省由 SDK 自动生成（UUIDv4），经 `PushbackResult.ClientPushID` 返回，也可显式传入自定值。HTTP/gRPC 双协议，走 `activation-sign-v1` 签名链路；写失败不自动跨协议回退/重试，由调用方自行重试。
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `PushConfig` | `func (this *Client) PushConfig(ctx context.Context, items map[string]string, clientPushID ...string) (*PushbackResult, error)` | 回推项目级配置全量快照（`tenant_id=0`）；空快照 = 清空该作用域库存键 |
+| `PushTenantConfig` | `func (this *Client) PushTenantConfig(ctx context.Context, tenantID uint64, items map[string]string, clientPushID ...string) (*PushbackResult, error)` | 回推指定租户的配置全量快照（`tenantID > 0`，平台校验租户确属此项目，不匹配按模糊 NotFound 处理） |
+
+| 类型 | 说明 |
+|---|---|
+| `PushbackResult` | 批次结果：`BatchID` / `Created` / `Updated` / `Deleted` / `Unchanged` / `PushedAt` / `ClientPushID` |
+
 ### 19.6 运行面事件订阅（EventSubscriber）
 
 `Client.Subscribe(CallbackOptions)` 创建**项目级事件订阅器**，拉取平台 `callback_events` 增量（HTTP 长轮询 + gRPC 服务端流双传输），把订阅信封喂给与 §19.3 `CallbackHandler` 完全相同的验签 / 防重放 / 分发管线。**无需登记 `notify_url`**；事件由平台现场重签（`occurredAt` 重新盖戳、`nonce` 新鲜、`deliveryNo` 稳定 `SUB-{eventNo}`），客户端以 `eventId` 单调推进水位。
@@ -1305,5 +1318,6 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `callback.go` | 回调接收：验签、防重放、幂等分发 |
 | `events.go` | 事件订阅：`EventSubscriber` 增量拉取、水位推进、HTTP/gRPC 双传输 |
 | `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
+| `pushback.go` | 配置回推：`PushConfig`/`PushTenantConfig` 客户端权威全量快照回推（HTTP/gRPC 双协议） |
 | `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |
 | `qualification.go` / `projects.go` / `instances.go` / `licenses.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go` | 管理面 13 个资源组 |

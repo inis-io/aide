@@ -7,6 +7,8 @@ import (
 	"net/url"
 
 	licencev1 "github.com/inis-io/aide/licence/proto/licence/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type tenantSyncBody struct {
@@ -254,6 +256,43 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 			return code, nil, mapped
 		}
 		return marshalMap(tenantResponseMap(response))
+	case http.MethodPost + " /api/v1/pushback/configs":
+		var input pushbackBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.ConfigPushbackPushRequest{
+			TenantId: input.TenantID, Items: input.Items, ClientPushId: input.ClientPushID,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.ConfigPushbackRuntimeService_Push_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.pushback.Push(callCtx, request)
+		if err != nil {
+			if code, mapped := grpcHTTPCode(err); mapped == nil {
+				return code, nil, mapped // NotFound → 404 模糊语义
+			}
+			// 校验失败/签名闸门错误映射为对应 HTTP 状态码 + message，与 HTTP 侧错误分层一致
+			if grpcStatus, ok := status.FromError(err); ok {
+				switch grpcStatus.Code() {
+				case codes.InvalidArgument:
+					raw, marshalErr := json.Marshal(map[string]any{"message": grpcStatus.Message()})
+					if marshalErr != nil {
+						return 0, nil, marshalErr
+					}
+					return http.StatusBadRequest, raw, nil
+				case codes.Unauthenticated:
+					return http.StatusUnauthorized, nil, nil
+				}
+			}
+			return 0, nil, err
+		}
+		return marshalMap(map[string]any{
+			"batch_id": response.GetBatchId(), "created": response.GetCreated(), "updated": response.GetUpdated(),
+			"deleted": response.GetDeleted(), "unchanged": response.GetUnchanged(), "pushed_at": response.GetPushedAt(),
+		})
 	}
 	return 0, nil, errorsNewUnsupported(method, requestURI)
 }

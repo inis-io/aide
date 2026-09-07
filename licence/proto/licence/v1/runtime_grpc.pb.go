@@ -937,3 +937,112 @@ var EventRuntimeService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "licence/v1/runtime.proto",
 }
+
+const (
+	ConfigPushbackRuntimeService_Push_FullMethodName = "/licenhub.licence.v1.ConfigPushbackRuntimeService/Push"
+)
+
+// ConfigPushbackRuntimeServiceClient is the client API for ConfigPushbackRuntimeService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ConfigPushbackRuntimeService - 配置回推运行面（客户端 → 平台，与平台配置下发方向相反）。
+type ConfigPushbackRuntimeServiceClient interface {
+	// Push - 运行面配置回推（客户端权威全量快照，平台 diff 落库 + 只追加审计）。
+	Push(ctx context.Context, in *ConfigPushbackPushRequest, opts ...grpc.CallOption) (*ConfigPushbackPushResponse, error)
+}
+
+type configPushbackRuntimeServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewConfigPushbackRuntimeServiceClient(cc grpc.ClientConnInterface) ConfigPushbackRuntimeServiceClient {
+	return &configPushbackRuntimeServiceClient{cc}
+}
+
+func (c *configPushbackRuntimeServiceClient) Push(ctx context.Context, in *ConfigPushbackPushRequest, opts ...grpc.CallOption) (*ConfigPushbackPushResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigPushbackPushResponse)
+	err := c.cc.Invoke(ctx, ConfigPushbackRuntimeService_Push_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ConfigPushbackRuntimeServiceServer is the server API for ConfigPushbackRuntimeService service.
+// All implementations must embed UnimplementedConfigPushbackRuntimeServiceServer
+// for forward compatibility.
+//
+// ConfigPushbackRuntimeService - 配置回推运行面（客户端 → 平台，与平台配置下发方向相反）。
+type ConfigPushbackRuntimeServiceServer interface {
+	// Push - 运行面配置回推（客户端权威全量快照，平台 diff 落库 + 只追加审计）。
+	Push(context.Context, *ConfigPushbackPushRequest) (*ConfigPushbackPushResponse, error)
+	mustEmbedUnimplementedConfigPushbackRuntimeServiceServer()
+}
+
+// UnimplementedConfigPushbackRuntimeServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedConfigPushbackRuntimeServiceServer struct{}
+
+func (UnimplementedConfigPushbackRuntimeServiceServer) Push(context.Context, *ConfigPushbackPushRequest) (*ConfigPushbackPushResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Push not implemented")
+}
+func (UnimplementedConfigPushbackRuntimeServiceServer) mustEmbedUnimplementedConfigPushbackRuntimeServiceServer() {
+}
+func (UnimplementedConfigPushbackRuntimeServiceServer) testEmbeddedByValue() {}
+
+// UnsafeConfigPushbackRuntimeServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ConfigPushbackRuntimeServiceServer will
+// result in compilation errors.
+type UnsafeConfigPushbackRuntimeServiceServer interface {
+	mustEmbedUnimplementedConfigPushbackRuntimeServiceServer()
+}
+
+func RegisterConfigPushbackRuntimeServiceServer(s grpc.ServiceRegistrar, srv ConfigPushbackRuntimeServiceServer) {
+	// If the following call pancis, it indicates UnimplementedConfigPushbackRuntimeServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ConfigPushbackRuntimeService_ServiceDesc, srv)
+}
+
+func _ConfigPushbackRuntimeService_Push_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigPushbackPushRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigPushbackRuntimeServiceServer).Push(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigPushbackRuntimeService_Push_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigPushbackRuntimeServiceServer).Push(ctx, req.(*ConfigPushbackPushRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ConfigPushbackRuntimeService_ServiceDesc is the grpc.ServiceDesc for ConfigPushbackRuntimeService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ConfigPushbackRuntimeService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "licenhub.licence.v1.ConfigPushbackRuntimeService",
+	HandlerType: (*ConfigPushbackRuntimeServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Push",
+			Handler:    _ConfigPushbackRuntimeService_Push_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "licence/v1/runtime.proto",
+}

@@ -67,6 +67,10 @@ type fakePlatform struct {
 	reportSeq int
 	// reports - 升级上报轨迹（handleUpdateReport 记录，供流水线断言）
 	reports []map[string]any
+	// pushbacks - 配置回推批次记录（handlePushbackConfigs 记录，供断言）
+	pushbacks []fakePushback
+	// pushbackCode - 非 0 时配置回推模拟平台拒绝（404 模糊 NotFound / 400 校验失败）
+	pushbackCode int
 	// 调用计数
 	activateCalls int
 	validateCalls int
@@ -116,6 +120,13 @@ type fakeEvent struct {
 	eventNo string
 	event   string
 	data    json.RawMessage
+}
+
+// fakePushback - 假配置回推批次（记录客户端上送的快照与幂等号）
+type fakePushback struct {
+	tenantID     uint64
+	items        map[string]string
+	clientPushID string
 }
 
 // pushEvent - 推送一条订阅事件（eventId 单调递增，等价平台 callback_events 落库）
@@ -217,6 +228,8 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleTenantCurrent(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/events/subscribe":
 		this.handleSubscribe(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/pushback/configs":
+		this.handlePushbackConfigs(writer, request, body)
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/files/"):
 		this.handleFileDownload(writer, request)
 	default:
@@ -609,6 +622,41 @@ func (this *fakePlatform) handleUpdateLogs(writer http.ResponseWriter, request *
 		return
 	}
 	writeJson(writer, map[string]any{"status": StatusValid, "serverTime": time.Now().UnixMilli()})
+}
+
+// handlePushbackConfigs - 配置回推（客户端权威全量快照的平台 diff 行为简镜像：
+// 记录批次并返回 created=len(items) 的 diff 统计；pushbackCode 非 0 时模拟拒绝）
+func (this *fakePlatform) handlePushbackConfigs(writer http.ResponseWriter, request *http.Request, body []byte) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	if !this.credential(writer, request, body) {
+		return
+	}
+	if this.pushbackCode == http.StatusNotFound {
+		writeNotFound(writer)
+		return
+	}
+	var params pushbackBody
+	if err := json.Unmarshal(body, &params); err != nil {
+		writer.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if this.pushbackCode == http.StatusBadRequest {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusBadRequest)
+		raw, _ := json.Marshal(map[string]any{"message": "配置键非法：Bad.Key"})
+		_, _ = writer.Write(raw)
+		return
+	}
+	this.pushbacks = append(this.pushbacks, fakePushback{
+		tenantID: params.TenantID, items: params.Items, clientPushID: params.ClientPushID,
+	})
+	writeJson(writer, map[string]any{
+		"batch_id": 42, "created": len(params.Items), "updated": 0, "deleted": 0, "unchanged": 0,
+		"pushed_at": time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // handleFileDownload - 发布物下载（/files/{version}）

@@ -46,6 +46,12 @@ service EventRuntimeService {
   rpc Subscribe(EventSubscribeRequest) returns (stream EventMessage);
 }
 
+// ConfigPushbackRuntimeService - 配置回推运行面（客户端 → 平台，与平台配置下发方向相反）。
+service ConfigPushbackRuntimeService {
+  // Push - 运行面配置回推（客户端权威全量快照，平台 diff 落库 + 只追加审计）。
+  rpc Push(ConfigPushbackPushRequest) returns (ConfigPushbackPushResponse);
+}
+
 message ActivateRequest {
   string license_no = 1;
   string instance_no = 2;
@@ -274,4 +280,22 @@ message EventSubscribeRequest {
 message EventMessage {
   int64 event_id = 1;
   bytes envelope_json = 2;
+}
+
+// ConfigPushbackPushRequest - 配置回推请求。
+// 快照语义天然幂等：同一快照重复推送，第二次起全部 unchanged；client_push_id 为批次级去重凭据。
+message ConfigPushbackPushRequest {
+  uint64 tenant_id = 1;               // 0 = 项目级；>0 = SaaS 租户级（平台校验租户归属项目）
+  map<string, string> items = 2;      // 该作用域的全量配置快照
+  string client_push_id = 3;          // 可选幂等批次号（SDK 缺省自动生成 UUIDv4）
+}
+
+// ConfigPushbackPushResponse - 配置回推批次结果。
+message ConfigPushbackPushResponse {
+  uint64 batch_id = 1;   // 平台批次号（pushback_batches.id）
+  int32 created = 2;
+  int32 updated = 3;
+  int32 deleted = 4;
+  int32 unchanged = 5;
+  string pushed_at = 6;
 }

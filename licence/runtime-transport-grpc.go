@@ -34,6 +34,7 @@ type grpcRuntimeTransport struct {
 	saas           licencev1.SaasRuntimeServiceClient
 	platformConfig licencev1.PlatformConfigRuntimeServiceClient
 	event          licencev1.EventRuntimeServiceClient
+	pushback       licencev1.ConfigPushbackRuntimeServiceClient
 	closeOnce      sync.Once
 	closeErr       error
 }
@@ -50,6 +51,7 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 		saas:           licencev1.NewSaasRuntimeServiceClient(conn),
 		platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn),
 		event:          licencev1.NewEventRuntimeServiceClient(conn),
+		pushback:       licencev1.NewConfigPushbackRuntimeServiceClient(conn),
 	}, nil
 }
 
