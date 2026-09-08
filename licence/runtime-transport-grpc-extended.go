@@ -293,6 +293,68 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 			"batch_id": response.GetBatchId(), "created": response.GetCreated(), "updated": response.GetUpdated(),
 			"deleted": response.GetDeleted(), "unchanged": response.GetUnchanged(), "pushed_at": response.GetPushedAt(),
 		})
+	case http.MethodPost + " /api/v1/pushback/config-definitions":
+		var input pushbackDefinitionsBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		groups := make([]*licencev1.ConfigDefinitionGroup, 0, len(input.Groups))
+		for _, group := range input.Groups {
+			groups = append(groups, &licencev1.ConfigDefinitionGroup{
+				Name: group.Name, Label: group.Label, LabelEn: group.LabelEn,
+				Icon: group.Icon, Sort: int32(group.Sort), Parent: group.Parent,
+			})
+		}
+		configs := make([]*licencev1.ConfigDefinitionItem, 0, len(input.Configs))
+		for _, item := range input.Configs {
+			configs = append(configs, &licencev1.ConfigDefinitionItem{
+				Key: item.Key, Label: item.Label, Type: item.Type, GroupPath: item.GroupPath,
+				Options: rawJSONText(item.Options), Rules: rawJSONText(item.Rules),
+				Placeholder: item.Placeholder, Remark: item.Remark, DefaultValue: item.DefaultValue,
+				Sensitive: item.Sensitive, Sort: int32(item.Sort),
+			})
+		}
+		request := &licencev1.ConfigPushbackDefinitionsRequest{
+			Groups: groups, Configs: configs, ClientPushId: input.ClientPushID,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.ConfigPushbackRuntimeService_PushDefinitions_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.pushback.PushDefinitions(callCtx, request)
+		if err != nil {
+			if code, mapped := grpcHTTPCode(err); mapped == nil {
+				return code, nil, mapped // NotFound → 404 模糊语义
+			}
+			// 开关闸门/校验失败/签名错误映射为对应 HTTP 状态码 + message，与 HTTP 侧错误分层一致；
+			// gRPC status 只能携带汇总 message，逐条 errors 明细以 HTTP 响应为准
+			if grpcStatus, ok := status.FromError(err); ok {
+				switch grpcStatus.Code() {
+				case codes.InvalidArgument:
+					raw, marshalErr := json.Marshal(map[string]any{"message": grpcStatus.Message()})
+					if marshalErr != nil {
+						return 0, nil, marshalErr
+					}
+					return http.StatusBadRequest, raw, nil
+				case codes.PermissionDenied:
+					raw, marshalErr := json.Marshal(map[string]any{"message": grpcStatus.Message()})
+					if marshalErr != nil {
+						return 0, nil, marshalErr
+					}
+					return http.StatusForbidden, raw, nil
+				case codes.Unauthenticated:
+					return http.StatusUnauthorized, nil, nil
+				}
+			}
+			return 0, nil, err
+		}
+		return marshalMap(map[string]any{
+			"batch_id":  response.GetBatchId(),
+			"groups":    definitionDiffStatsMap(response.GetGroups()),
+			"configs":   definitionDiffStatsMap(response.GetConfigs()),
+			"pushed_at": response.GetPushedAt(),
+		})
 	}
 	return 0, nil, errorsNewUnsupported(method, requestURI)
 }
@@ -317,6 +379,18 @@ func tenantResponseMap(response *licencev1.TenantResponse) map[string]any {
 		result["message"] = response.GetMessage()
 	}
 	return result
+}
+
+// definitionDiffStatsMap - proto diff 计数 → map（gRPC 分支回填与 HTTP 同构的响应体）
+func definitionDiffStatsMap(stats *licencev1.ConfigPushbackDiffStats) map[string]any {
+
+	if stats == nil {
+		return map[string]any{"created": 0, "updated": 0, "deleted": 0, "unchanged": 0}
+	}
+	return map[string]any{
+		"created": stats.GetCreated(), "updated": stats.GetUpdated(),
+		"deleted": stats.GetDeleted(), "unchanged": stats.GetUnchanged(),
+	}
 }
 
 func errorsNewUnsupported(method, requestURI string) error {

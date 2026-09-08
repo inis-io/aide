@@ -155,6 +155,12 @@ type runtimePushbackServer struct {
 	items    map[string]string
 	pushID   string
 	failCode codes.Code
+	// failMessage - PushDefinitions 失败分支携带的消息（缺省按通用文案）
+	failMessage string
+	// defGroups/defConfigs/defPushID - PushDefinitions 记录的上送内容
+	defGroups  []*licencev1.ConfigDefinitionGroup
+	defConfigs []*licencev1.ConfigDefinitionItem
+	defPushID  string
 }
 
 func (s *runtimePushbackServer) Push(ctx context.Context, request *licencev1.ConfigPushbackPushRequest) (*licencev1.ConfigPushbackPushResponse, error) {
@@ -174,6 +180,34 @@ func (s *runtimePushbackServer) Push(ctx context.Context, request *licencev1.Con
 	s.pushID = request.GetClientPushId()
 	return &licencev1.ConfigPushbackPushResponse{
 		BatchId: 7, Created: 2, Updated: 1, Deleted: 0, Unchanged: 5, PushedAt: "2026-08-10T12:00:00Z",
+	}, nil
+}
+
+// PushDefinitions - 配置定义反推 gRPC 假服务端：同 Push 的签名 metadata 校验，记录定义快照
+func (s *runtimePushbackServer) PushDefinitions(ctx context.Context, request *licencev1.ConfigPushbackDefinitionsRequest) (*licencev1.ConfigPushbackDefinitionsResponse, error) {
+
+	s.t.Helper()
+	md, _ := metadata.FromIncomingContext(ctx)
+	for _, key := range []string{LicenceProtocol.MetadataToken, LicenceProtocol.MetadataTimestamp, LicenceProtocol.MetadataNonce, LicenceProtocol.MetadataSignature, LicenceProtocol.MetadataSignVersion} {
+		if len(md.Get(key)) == 0 {
+			s.t.Fatalf("缺少签名 metadata %s", key)
+		}
+	}
+	if s.failCode != codes.OK {
+		message := s.failMessage
+		if message == "" {
+			message = "配置定义校验失败"
+		}
+		return nil, status.Error(s.failCode, message)
+	}
+	s.defGroups = request.GetGroups()
+	s.defConfigs = request.GetConfigs()
+	s.defPushID = request.GetClientPushId()
+	return &licencev1.ConfigPushbackDefinitionsResponse{
+		BatchId:  8,
+		Groups:   &licencev1.ConfigPushbackDiffStats{Created: 1},
+		Configs:  &licencev1.ConfigPushbackDiffStats{Created: 2, Updated: 1, Unchanged: 3},
+		PushedAt: "2026-08-10T12:00:00Z",
 	}, nil
 }
 

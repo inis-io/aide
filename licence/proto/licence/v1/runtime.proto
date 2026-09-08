@@ -50,6 +50,10 @@ service EventRuntimeService {
 service ConfigPushbackRuntimeService {
   // Push - 运行面配置回推（客户端权威全量快照，平台 diff 落库 + 只追加审计）。
   rpc Push(ConfigPushbackPushRequest) returns (ConfigPushbackPushResponse);
+  // PushDefinitions - 运行面配置定义反推（仅项目级；客户端权威全量定义快照，
+  // 平台先做项目开关闸门（未开启 → PermissionDenied）与定义结构校验（失败 → InvalidArgument），
+  // 通过后按分组/配置项分别 diff 落库 + 只追加审计）。
+  rpc PushDefinitions(ConfigPushbackDefinitionsRequest) returns (ConfigPushbackDefinitionsResponse);
 }
 
 message ActivateRequest {
@@ -298,4 +302,53 @@ message ConfigPushbackPushResponse {
   int32 deleted = 4;
   int32 unchanged = 5;
   string pushed_at = 6;
+}
+
+// ConfigDefinitionGroup - 配置分组定义（客户端权威；parent 为父分组 name 路径，空 = 顶级）。
+message ConfigDefinitionGroup {
+  string name = 1;      // 分组名（单段，正则同配置键）
+  string label = 2;
+  string label_en = 3;
+  string icon = 4;
+  int32 sort = 5;
+  string parent = 6;
+}
+
+// ConfigDefinitionItem - 配置项定义（客户端权威）。
+message ConfigDefinitionItem {
+  string key = 1;
+  string label = 2;
+  string type = 3;
+  string group_path = 4;   // 所属分组 name 路径（斜杠分隔），空 = 未分组
+  string options = 5;      // JSON 文本（选项数组原文），空串 = null
+  string rules = 6;        // JSON 文本（RuleSet 原文），空串 = null
+  string placeholder = 7;
+  string remark = 8;
+  string default_value = 9;
+  bool sensitive = 10;
+  int32 sort = 11;
+}
+
+// ConfigPushbackDefinitionsRequest - 配置定义反推请求（仅项目级，无 tenant_id）。
+// 快照语义与值回推一致：幂等 = 快照幂等 + client_push_id 批次去重。
+message ConfigPushbackDefinitionsRequest {
+  repeated ConfigDefinitionGroup groups = 1;
+  repeated ConfigDefinitionItem configs = 2;
+  string client_push_id = 3;   // 可选幂等批次号（SDK 缺省自动生成 UUIDv4）
+}
+
+// ConfigPushbackDiffStats - 分组/配置项各自的 diff 计数。
+message ConfigPushbackDiffStats {
+  int32 created = 1;
+  int32 updated = 2;
+  int32 deleted = 3;
+  int32 unchanged = 4;
+}
+
+// ConfigPushbackDefinitionsResponse - 配置定义反推批次结果。
+message ConfigPushbackDefinitionsResponse {
+  uint64 batch_id = 1;                 // 平台批次号（pushback_batches.id，kind=definitions）
+  ConfigPushbackDiffStats groups = 2;
+  ConfigPushbackDiffStats configs = 3;
+  string pushed_at = 4;
 }

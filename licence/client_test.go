@@ -71,6 +71,10 @@ type fakePlatform struct {
 	pushbacks []fakePushback
 	// pushbackCode - 非 0 时配置回推模拟平台拒绝（404 模糊 NotFound / 400 校验失败）
 	pushbackCode int
+	// definitionPushbacks - 配置定义反推批次记录（handlePushbackDefinitions 记录，供断言）
+	definitionPushbacks []fakeDefinitionPushback
+	// pushbackDefCode - 非 0 时定义反推模拟平台拒绝（403 开关关闭 / 400 校验失败带 errors 明细）
+	pushbackDefCode int
 	// 调用计数
 	activateCalls int
 	validateCalls int
@@ -126,6 +130,14 @@ type fakeEvent struct {
 type fakePushback struct {
 	tenantID     uint64
 	items        map[string]string
+	clientPushID string
+}
+
+// fakeDefinitionPushback - 假配置定义反推批次（记录请求原文与解析结果，供 snake_case/原生 JSON 断言）
+type fakeDefinitionPushback struct {
+	rawBody      []byte
+	groups       []ConfigDefinitionGroup
+	configs      []ConfigDefinitionItem
 	clientPushID string
 }
 
@@ -230,6 +242,8 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleSubscribe(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/pushback/configs":
 		this.handlePushbackConfigs(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/pushback/config-definitions":
+		this.handlePushbackDefinitions(writer, request, body)
 	case request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/files/"):
 		this.handleFileDownload(writer, request)
 	default:
@@ -655,6 +669,52 @@ func (this *fakePlatform) handlePushbackConfigs(writer http.ResponseWriter, requ
 	})
 	writeJson(writer, map[string]any{
 		"batch_id": 42, "created": len(params.Items), "updated": 0, "deleted": 0, "unchanged": 0,
+		"pushed_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// handlePushbackDefinitions - 配置定义反推（平台行为简镜像：记录批次并返回
+// groups/configs 分别计数；pushbackDefCode 非 0 时模拟 403 开关关闭 / 400 校验失败带 errors 明细）
+func (this *fakePlatform) handlePushbackDefinitions(writer http.ResponseWriter, request *http.Request, body []byte) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	if !this.credential(writer, request, body) {
+		return
+	}
+	var params pushbackDefinitionsBody
+	if err := json.Unmarshal(body, &params); err != nil {
+		writer.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	switch this.pushbackDefCode {
+	case http.StatusForbidden:
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusForbidden)
+		raw, _ := json.Marshal(map[string]any{"message": "项目未开启定义反推模式"})
+		_, _ = writer.Write(raw)
+		return
+	case http.StatusBadRequest:
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusBadRequest)
+		raw, _ := json.Marshal(map[string]any{
+			"message": "配置定义校验失败",
+			"errors": []map[string]string{
+				{"where": "configs[0].options", "message": "select 类型必须提供非空 options"},
+				{"where": "configs[1].key", "message": "配置键格式非法：Bad.Key"},
+			},
+		})
+		_, _ = writer.Write(raw)
+		return
+	}
+	this.definitionPushbacks = append(this.definitionPushbacks, fakeDefinitionPushback{
+		rawBody: append([]byte(nil), body...), groups: params.Groups, configs: params.Configs, clientPushID: params.ClientPushID,
+	})
+	writeJson(writer, map[string]any{
+		"batch_id": 43,
+		"groups":   map[string]any{"created": len(params.Groups), "updated": 0, "deleted": 0, "unchanged": 0},
+		"configs":  map[string]any{"created": len(params.Configs), "updated": 0, "deleted": 0, "unchanged": 0},
 		"pushed_at": time.Now().UTC().Format(time.RFC3339),
 	})
 }

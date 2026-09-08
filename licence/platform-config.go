@@ -25,6 +25,8 @@ type PlatformConfigItem struct {
 	Sensitive    bool            `json:"sensitive"`
 	Version      int             `json:"version"`
 	GroupPath    string          `json:"groupPath"`
+	// Sort - 组内排序（v0.7.8 追加，旧实例按 0 兼容）
+	Sort int `json:"sort"`
 }
 
 // PlatformConfigGroup - 平台配置分组（树形，扁平输出 + children 嵌套）

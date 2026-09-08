@@ -939,7 +939,8 @@ var EventRuntimeService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ConfigPushbackRuntimeService_Push_FullMethodName = "/licenhub.licence.v1.ConfigPushbackRuntimeService/Push"
+	ConfigPushbackRuntimeService_Push_FullMethodName            = "/licenhub.licence.v1.ConfigPushbackRuntimeService/Push"
+	ConfigPushbackRuntimeService_PushDefinitions_FullMethodName = "/licenhub.licence.v1.ConfigPushbackRuntimeService/PushDefinitions"
 )
 
 // ConfigPushbackRuntimeServiceClient is the client API for ConfigPushbackRuntimeService service.
@@ -950,6 +951,10 @@ const (
 type ConfigPushbackRuntimeServiceClient interface {
 	// Push - 运行面配置回推（客户端权威全量快照，平台 diff 落库 + 只追加审计）。
 	Push(ctx context.Context, in *ConfigPushbackPushRequest, opts ...grpc.CallOption) (*ConfigPushbackPushResponse, error)
+	// PushDefinitions - 运行面配置定义反推（仅项目级；客户端权威全量定义快照，
+	// 平台先做项目开关闸门（未开启 → PermissionDenied）与定义结构校验（失败 → InvalidArgument），
+	// 通过后按分组/配置项分别 diff 落库 + 只追加审计）。
+	PushDefinitions(ctx context.Context, in *ConfigPushbackDefinitionsRequest, opts ...grpc.CallOption) (*ConfigPushbackDefinitionsResponse, error)
 }
 
 type configPushbackRuntimeServiceClient struct {
@@ -970,6 +975,16 @@ func (c *configPushbackRuntimeServiceClient) Push(ctx context.Context, in *Confi
 	return out, nil
 }
 
+func (c *configPushbackRuntimeServiceClient) PushDefinitions(ctx context.Context, in *ConfigPushbackDefinitionsRequest, opts ...grpc.CallOption) (*ConfigPushbackDefinitionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfigPushbackDefinitionsResponse)
+	err := c.cc.Invoke(ctx, ConfigPushbackRuntimeService_PushDefinitions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ConfigPushbackRuntimeServiceServer is the server API for ConfigPushbackRuntimeService service.
 // All implementations must embed UnimplementedConfigPushbackRuntimeServiceServer
 // for forward compatibility.
@@ -978,6 +993,10 @@ func (c *configPushbackRuntimeServiceClient) Push(ctx context.Context, in *Confi
 type ConfigPushbackRuntimeServiceServer interface {
 	// Push - 运行面配置回推（客户端权威全量快照，平台 diff 落库 + 只追加审计）。
 	Push(context.Context, *ConfigPushbackPushRequest) (*ConfigPushbackPushResponse, error)
+	// PushDefinitions - 运行面配置定义反推（仅项目级；客户端权威全量定义快照，
+	// 平台先做项目开关闸门（未开启 → PermissionDenied）与定义结构校验（失败 → InvalidArgument），
+	// 通过后按分组/配置项分别 diff 落库 + 只追加审计）。
+	PushDefinitions(context.Context, *ConfigPushbackDefinitionsRequest) (*ConfigPushbackDefinitionsResponse, error)
 	mustEmbedUnimplementedConfigPushbackRuntimeServiceServer()
 }
 
@@ -990,6 +1009,9 @@ type UnimplementedConfigPushbackRuntimeServiceServer struct{}
 
 func (UnimplementedConfigPushbackRuntimeServiceServer) Push(context.Context, *ConfigPushbackPushRequest) (*ConfigPushbackPushResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Push not implemented")
+}
+func (UnimplementedConfigPushbackRuntimeServiceServer) PushDefinitions(context.Context, *ConfigPushbackDefinitionsRequest) (*ConfigPushbackDefinitionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PushDefinitions not implemented")
 }
 func (UnimplementedConfigPushbackRuntimeServiceServer) mustEmbedUnimplementedConfigPushbackRuntimeServiceServer() {
 }
@@ -1031,6 +1053,24 @@ func _ConfigPushbackRuntimeService_Push_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ConfigPushbackRuntimeService_PushDefinitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfigPushbackDefinitionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigPushbackRuntimeServiceServer).PushDefinitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigPushbackRuntimeService_PushDefinitions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigPushbackRuntimeServiceServer).PushDefinitions(ctx, req.(*ConfigPushbackDefinitionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ConfigPushbackRuntimeService_ServiceDesc is the grpc.ServiceDesc for ConfigPushbackRuntimeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1041,6 +1081,10 @@ var ConfigPushbackRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Push",
 			Handler:    _ConfigPushbackRuntimeService_Push_Handler,
+		},
+		{
+			MethodName: "PushDefinitions",
+			Handler:    _ConfigPushbackRuntimeService_PushDefinitions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -69,6 +69,7 @@ func (this *fakePlatform) handlePlatformConfigSync(writer http.ResponseWriter, r
 // 字段顺序即签名内容，任何序列化/签名语义漂移都会在此暴露。
 
 // goldenPlatformConfigPayload - 固定载荷：含特殊字符 <>&、非空 Options/Rules、Sensitive 配置
+// v0.7.8：PlatformConfigItem 末尾追加 sort（设计 §2.5），canonical 相应在 groupPath 后追加 "sort":N。
 var goldenPlatformConfigPayload = PlatformConfigPayload{
 	ProjectId:   "PRJ-2026-000001",
 	SyncVersion: 3,
@@ -83,6 +84,7 @@ var goldenPlatformConfigPayload = PlatformConfigPayload{
 			Options: json.RawMessage(`[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}]`),
 			Rules:   json.RawMessage(`[{"key":"app.region","operator":"==","value":"<prod>&"}]`),
 			Remark:  "上线后不可改", Sensitive: false, Version: 3, GroupPath: "general/theme",
+			Sort: 10,
 		},
 		{
 			Key: "security.api_token", Label: "接口令牌", Type: "password",
@@ -90,6 +92,7 @@ var goldenPlatformConfigPayload = PlatformConfigPayload{
 			Options:    json.RawMessage(`null`),
 			Rules:      json.RawMessage(`{"min":12}`),
 			Placeholder: "至少 12 位", Remark: "敏感项", Sensitive: true, Version: 2, GroupPath: "general",
+			Sort: 20,
 		},
 	},
 	IssuedAt:   "2026-08-08T12:00:00Z",
@@ -99,9 +102,9 @@ var goldenPlatformConfigPayload = PlatformConfigPayload{
 
 // goldenPlatformConfigCanonicalPlain - 平台签发端 canonical 的字面形态（< > & 未转义，便于阅读）
 // 完整转义形态由 escapeJSONHTML 在测试内展开，避免源码内出现反斜杠序列。
-const goldenPlatformConfigCanonicalPlain = `{"projectId":"PRJ-2026-000001","syncVersion":3,"groups":[{"id":1,"pid":0,"name":"general","label":"通用","icon":"settings","sort":1,"children":null},{"id":2,"pid":1,"name":"theme","label":"主题","icon":"palette","sort":2,"children":null}],"configs":[{"key":"app.region","label":"部署区域","type":"select","value":"ap-southeast-1","defaultValue":"ap-east-1","options":[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}],"rules":[{"key":"app.region","operator":"==","value":"<prod>&"}],"placeholder":"","remark":"上线后不可改","sensitive":false,"version":3,"groupPath":"general/theme"},{"key":"security.api_token","label":"接口令牌","type":"password","value":"S3cr3t&<key>","defaultValue":"","options":null,"rules":{"min":12},"placeholder":"至少 12 位","remark":"敏感项","sensitive":true,"version":2,"groupPath":"general"}],"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90"}`
+const goldenPlatformConfigCanonicalPlain = `{"projectId":"PRJ-2026-000001","syncVersion":3,"groups":[{"id":1,"pid":0,"name":"general","label":"通用","icon":"settings","sort":1,"children":null},{"id":2,"pid":1,"name":"theme","label":"主题","icon":"palette","sort":2,"children":null}],"configs":[{"key":"app.region","label":"部署区域","type":"select","value":"ap-southeast-1","defaultValue":"ap-east-1","options":[{"label":"香港","value":"ap-east-1"},{"label":"新加坡","value":"ap-southeast-1"}],"rules":[{"key":"app.region","operator":"==","value":"<prod>&"}],"placeholder":"","remark":"上线后不可改","sensitive":false,"version":3,"groupPath":"general/theme","sort":10},{"key":"security.api_token","label":"接口令牌","type":"password","value":"S3cr3t&<key>","defaultValue":"","options":null,"rules":{"min":12},"placeholder":"至少 12 位","remark":"敏感项","sensitive":true,"version":2,"groupPath":"general","sort":20}],"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90"}`
 
-const goldenPlatformConfigSignature = "53ff67e33517e41f81b20dc21ae36a7d2071c6cd2fc3fd5229386f4a2d5854fa18d3afc4d394500297aa3180c2907dab4d1071f05cad76c3ea65286d28af4f0c"
+const goldenPlatformConfigSignature = "de49f254a58e5dc63e95b4f620aabed1156472f8c4e8b728232a363021d684c2bd6301276562cb0ca9b31dbd6d9b532fa29974a54cd44681e44e27708434cf0a"
 
 // escapeJSONHTML - 复现 Go encoding/json 的 HTML 转义（< > & → < > &）。
 // 反斜杠在运行期用字节构造，源码内不出现反斜杠序列。

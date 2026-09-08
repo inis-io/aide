@@ -9,7 +9,9 @@
   SaaS 租户、平台配置、回调接收、签名/验签与本地安全存储。
 - 本目录有独立 `go.mod`，不参与 aide 根模块的 `go build ./...`，必须在本目录单独构建测试。
 - **截至 2026-08-09，运行面与管理面现有全资源均已实现 HTTP + gRPC**（运行面含许可证、在线更新、
-  SaaS 租户、平台配置、事件订阅与配置回推 `ConfigPushbackRuntimeService/Push`）。
+  SaaS 租户、平台配置、事件订阅与配置回推 `ConfigPushbackRuntimeService/Push`；
+  另有配置定义反推 `ConfigPushbackRuntimeService/PushDefinitions`（仅项目级，403 开关闸门 /
+  400 errors 明细）与配置校验引擎 `config-validate.go`（全系统唯一实现，licen-hub backend import 复用））。
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`；服务端共同消费该契约，
   禁止在 Licen Hub 仓库复制第二份 proto。

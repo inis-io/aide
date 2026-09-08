@@ -23,6 +23,9 @@ runtime:
   # 幂等 = 快照幂等 + client_push_id 批次去重。
   - [Client.PushConfig, POST, /api/v1/pushback/configs, ConfigPushbackRuntimeService/Push, activation-sign-v1, "", pushback_config, write, normal, true]
   - [Client.PushTenantConfig, POST, /api/v1/pushback/configs, ConfigPushbackRuntimeService/Push, activation-sign-v1, "", pushback_config, write, normal, true]
+  # 配置定义反推（仅项目级，需项目开启定义反推模式，403 = 未开启）：groups/configs 分别 diff 计数；
+  # 幂等 = 快照幂等 + client_push_id 批次去重。
+  - [Client.PushConfigDefinitions, POST, /api/v1/pushback/config-definitions, ConfigPushbackRuntimeService/PushDefinitions, activation-sign-v1, "", pushback_config, write, normal, true]
 admin:
   # 管理面 gRPC 统一走通用 AdminRequest{json}/AdminResponse{code,message,data_json} 信封，
   # proto 不为单个业务动作建专用字段；菜单类参数（如 menuKind、projectId/tenantIds）经
