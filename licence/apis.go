@@ -22,12 +22,13 @@ type apisDoer struct {
 // 否则经根 Client doRequest 携带签名头发起调用，返回业务信封原始 JSON 字节。
 func (this apisDoer) Do(ctx context.Context, method string, path string, body []byte) ([]byte, error) {
 
-	// 未激活闸门：无 activation token 或状态为 EXPIRED/REVOKED/SUSPENDED 时不发请求
+	// 未激活闸门：无 activation token 或授权状态非放行态（passThrough 口径，
+	// 与 TenantSync/PullEvents 的 fail-closed 惯例一致）时不发请求
 	this.client.mu.RLock()
 	token := this.client.state.ActivationToken
 	status := this.client.state.Status
 	this.client.mu.RUnlock()
-	if token == "" || status == StatusExpired || status == StatusRevoked || status == StatusSuspended {
+	if token == "" || !passThrough(status) {
 		return nil, apis.ErrNotActivated
 	}
 	_, raw, err := this.client.doRequest(ctx, method, path, body, true)
