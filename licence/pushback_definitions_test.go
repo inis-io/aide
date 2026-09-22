@@ -9,17 +9,19 @@ import (
 	"testing"
 
 	"google.golang.org/grpc/codes"
+
+	"github.com/inis-io/aide/licence/configdef"
 )
 
 // testDefinitions - 测试用定义快照（含分组树与一条 select 定义，覆盖 snake_case 与原生 JSON 字段）
-func testDefinitions() ConfigDefinitions {
+func testDefinitions() configdef.ConfigDefinitions {
 
-	return ConfigDefinitions{
-		Groups: []ConfigDefinitionGroup{
+	return configdef.ConfigDefinitions{
+		Groups: []configdef.ConfigDefinitionGroup{
 			{Name: "storage", Label: "存储", LabelEn: "Storage", Icon: "folder", Sort: 1},
 			{Name: "oss", Label: "对象存储", Parent: "storage", Sort: 1},
 		},
-		Configs: []ConfigDefinitionItem{
+		Configs: []configdef.ConfigDefinitionItem{
 			{
 				Key: "storage.driver", Label: "存储驱动", Type: "select", GroupPath: "storage",
 				Options:     json.RawMessage(`[{"value":"local","label":"本地存储"},{"value":"oss","label":"阿里云 OSS"}]`),
@@ -93,7 +95,7 @@ func TestPushConfigDefinitionsCustomPushID(t *testing.T) {
 	platform := newFakePlatform(t)
 	client := startPushbackClient(t, platform)
 
-	result, err := client.PushConfigDefinitions(t.Context(), ConfigDefinitions{}, "def-batch-1")
+	result, err := client.PushConfigDefinitions(t.Context(), configdef.ConfigDefinitions{}, "def-batch-1")
 	if err != nil {
 		t.Fatalf("PushConfigDefinitions 失败: %v", err)
 	}

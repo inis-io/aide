@@ -8,7 +8,7 @@ import (
 )
 
 // SaasMenuWriteInput - 以许可证身份保存菜单清单草稿的参数。
-// 与 AdminClient.SaasMenuSaveInput 的区别：无 ProjectId——项目由平台按许可证归属收敛，
+// 与管理面（admin 子包）SaasMenuSaveInput 的区别：无 ProjectId——项目由平台按许可证归属收敛，
 // 客户端无法越界指定目标项目。
 type SaasMenuWriteInput struct {
 	// Id - 清单ID（0=新建递增版本草稿，否则更新既有 draft 行）
@@ -29,6 +29,22 @@ type SaasMenuWriteResult struct {
 	Version int `json:"version"`
 	// ImpactReport - 发布租户清单时的下游影响报告（仅 publish 返回）
 	ImpactReport *SaasMenuImpactReport `json:"impactReport,omitempty"`
+}
+
+// SaasMenuImpactItem - 清单发布影响项（运行面与管理面 admin 子包共用，唯一定义在本包）。
+type SaasMenuImpactItem struct {
+	PlanId     int      `json:"planId,omitempty"`
+	PlanCode   string   `json:"planCode,omitempty"`
+	TenantId   int      `json:"tenantId,omitempty"`
+	TenantCode string   `json:"tenantCode,omitempty"`
+	StaleCodes []string `json:"staleCodes"`
+}
+
+// SaasMenuImpactReport - 租户清单发布影响报告（运行面与管理面 admin 子包共用，唯一定义在本包）。
+type SaasMenuImpactReport struct {
+	RemovedCodes    []string             `json:"removedCodes"`
+	AffectedPlans   []SaasMenuImpactItem `json:"affectedPlans"`
+	AffectedTenants []SaasMenuImpactItem `json:"affectedTenants"`
 }
 
 // saasMenuWriteResponse - 许可证签名写操作的统一响应。

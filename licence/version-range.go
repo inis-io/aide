@@ -121,3 +121,21 @@ func compareSemver(a, b [3]int) int {
 	}
 	return 0
 }
+
+// CompareVersion - 比较两个版本号：a<b 返回 -1，a==b 返回 0，a>b 返回 1。
+// 版本号按 a.b.c 数值比较（缺段补 0，前导 v/V 容忍），与 VersionInRange 同一解析语义；
+// 任一版本号无法解析时第二返回值 false（调用方据此跳过比较判定，不做猜测）。
+// 供 updater 子包防降级等场景复用，禁止在子包复制第二份版本比较实现。
+/**
+ * @example：
+ * 	cmp, ok := licence.CompareVersion("2.4.0", "2.3.9") // 1, true
+ */
+func CompareVersion(a string, b string) (int, bool) {
+
+	parsedA, okA := parseSemver(a)
+	parsedB, okB := parseSemver(b)
+	if !okA || !okB {
+		return 0, false
+	}
+	return compareSemver(parsedA, parsedB), true
+}

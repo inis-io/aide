@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inis-io/aide/licence/configdef"
 )
 
 // ============================= 假授权平台（契约行为镜像） =============================
@@ -136,8 +138,8 @@ type fakePushback struct {
 // fakeDefinitionPushback - 假配置定义反推批次（记录请求原文与解析结果，供 snake_case/原生 JSON 断言）
 type fakeDefinitionPushback struct {
 	rawBody      []byte
-	groups       []ConfigDefinitionGroup
-	configs      []ConfigDefinitionItem
+	groups       []configdef.ConfigDefinitionGroup
+	configs      []configdef.ConfigDefinitionItem
 	clientPushID string
 }
 
@@ -161,10 +163,22 @@ func (this *fakePlatform) pushEvent(event string, data map[string]any) (int64, e
 }
 
 // signCallbackEnvelope - 用平台 seed 现场重签一条订阅事件信封：
-// nonce 每次新鲜、occurredAt 为当下、deliveryNo 稳定 SUB-{eventNo}（镜像平台订阅端点行为）
+// nonce 每次新鲜、occurredAt 为当下、deliveryNo 稳定 SUB-{eventNo}（镜像平台订阅端点行为）。
+// 匿名结构的字段顺序与 callback.CallbackPayload/CallbackEnvelope 字节级一致
+// （字段顺序即签名内容；根包测试不反向依赖 callback 子包）。
 func signCallbackEnvelope(seed []byte, event fakeEvent) (json.RawMessage, error) {
 
-	payload := CallbackPayload{
+	payload := struct {
+		EventNo    string          `json:"eventNo"`
+		DeliveryNo string          `json:"deliveryNo"`
+		Event      string          `json:"event"`
+		ProjectId  string          `json:"projectId"`
+		InstanceId string          `json:"instanceId"`
+		OccurredAt string          `json:"occurredAt"`
+		Nonce      string          `json:"nonce"`
+		KeyVersion string          `json:"keyVersion"`
+		Data       json.RawMessage `json:"data"`
+	}{
 		EventNo: event.eventNo, DeliveryNo: "SUB-" + event.eventNo, Event: event.event,
 		ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
 		OccurredAt: time.Now().UTC().Format(time.RFC3339),
@@ -179,9 +193,12 @@ func signCallbackEnvelope(seed []byte, event fakeEvent) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(CallbackEnvelope{
-		Version: EnvelopeVersion, Algorithm: Algorithm, Payload: payload, Signature: signature,
-	})
+	return json.Marshal(struct {
+		Version   int             `json:"version"`
+		Algorithm string          `json:"algorithm"`
+		Payload   json.RawMessage `json:"payload"`
+		Signature string          `json:"signature"`
+	}{Version: EnvelopeVersion, Algorithm: Algorithm, Payload: raw, Signature: signature})
 }
 
 // newFakePlatform - 创建假平台（默认：永久授权、基础权益）

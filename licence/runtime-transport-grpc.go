@@ -40,7 +40,7 @@ type grpcRuntimeTransport struct {
 }
 
 func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
-	conn, err := newGRPCConn(client.options.ServerURL, client.options.GRPC, client.options.HTTPTimeout)
+	conn, err := NewGRPCConn(client.options.ServerURL, client.options.GRPC, client.options.HTTPTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -55,8 +55,8 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 	}, nil
 }
 
-// newGRPCConn 统一运行面与管理面的安全拨号默认值。
-func newGRPCConn(serverURL string, options GRPCOptions, fallbackTimeout time.Duration) (*grpc.ClientConn, error) {
+// NewGRPCConn 统一运行面与管理面的安全拨号默认值（管理面 admin 子包经本函数建连）。
+func NewGRPCConn(serverURL string, options GRPCOptions, fallbackTimeout time.Duration) (*grpc.ClientConn, error) {
 	parsed, err := url.Parse(serverURL)
 	if err != nil || parsed.Host == "" {
 		return nil, errors.New("ServerURL 不是有效的平台 URI")

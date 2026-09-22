@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/inis-io/aide/licence/apis"
 )
 
 // Transport - SDK 到 Licen Hub 的传输协议。
@@ -138,6 +140,9 @@ type Client struct {
 	// retryDelay - 网络故障退避（请求未达服务端时拉长下轮间隔，恢复后清除）
 	retryDelay time.Duration
 
+	// Apis - API 商城 typed 方法包挂载点（apis 子包；New 时构造，生命周期跟随本 Client）
+	Apis *apis.Client
+
 	// cancel - 后台循环取消函数
 	cancel context.CancelFunc
 }
@@ -209,6 +214,7 @@ func New(options Options) (*Client, error) {
 		tenantCache:         make(map[string]tenantCacheItem),
 		pendingConsumption:  make(map[string]int),
 	}
+	client.Apis = apis.New(apisDoer{client: client})
 	client.transport, err = newRuntimeTransport(client)
 	if err != nil {
 		return nil, err
@@ -283,6 +289,17 @@ func (this *Client) SeatNo() string {
 // 与激活上送、平台席位列表展示的值一致，仅展示/排障用途。
 func (this *Client) DeviceName() string {
 	return this.options.DeviceName
+}
+
+// StorageDir - 本地安全存储根目录（Options.StorageDir，New 时已归一化）。
+// 供 updater 等子包定位 update/ 工作区，替代直接读私有 options。
+func (this *Client) StorageDir() string {
+	return this.options.StorageDir
+}
+
+// Version - 当前运行版本（Options.Version），更新检查与防降级判定的来源版本。
+func (this *Client) Version() string {
+	return this.options.Version
 }
 
 // Envelope - 当前缓存信封（第二返回值标识是否存在）

@@ -32,7 +32,7 @@
 ├── logx/        # 日志：zap + lumberjack 结构化日志，按级别分文件精确收录，单例 + 独立实例（**嵌套独立模块**）
 ├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理（**嵌套独立模块**，依赖 logx）
 ├── pay/         # 支付能力工厂（**嵌套独立模块** `github.com/inis-io/aide/pay`，有自己的 go.mod，不参与父模块 `go build ./...`）：支付协议 + 统一 Driver + 多网关 Pool，providers/ 内置支付宝 / 微信 V3 / PayPal 适配，约定详见 pay/AGENTS.md
-└── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：运行面客户端（激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储）+ 在线更新 + SaaS 租户 + 管理面 AdminClient
+└── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：根包 = 运行面客户端（激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储）+ 在线更新查询 + SaaS 租户 + 纯函数签名层；子包 `admin/`（管理面 AdminClient）、`updater/`（自更新执行器）、`callback/`（回调接收 + 事件订阅）、`configdef/`（配置校验引擎，licen-hub backend 复用）、`apis/`（API 商城挂载骨架）
 ```
 
 > **模块拆分说明**：除空占位 `main.go` 外，`utils`/`dto`/`pushx`/`cachex`/`storagex`/`logx`/`taskx` 均为嵌套独立模块（各自有 `go.mod` 与 `AGENTS.md`）。子模块经 `replace` 引用本地路径：`utils` 引用 `../dto`；`pushx`/`cachex`/`storagex`/`logx` 引用 `../utils` 与 `../dto`；`taskx` 额外引用 `../logx`。修改子模块依赖时必须同步维护其 `go.mod` 的 `require` / `replace` 列表。子模块的 `AGENTS.md` 与根文件同构，变更对应包时优先阅读子目录的 `AGENTS.md`。
@@ -100,6 +100,7 @@
 
 > 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
 
+- **子包划分**（2026 目录重构）：根包 = 运行面 Client + 纯函数层；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`configdef/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城挂载骨架（不 import 根包）。依赖方向：`admin`/`updater`/`callback` → 根包 → `configdef`/`apis`，编译期保证无环；详见 `licence/AGENTS.md`。
 - **纯函数层**（`envelope.go` / `sign.go` / `licence.go`）：`Issue`（签发）、`VerifyEnvelope`/`VerifyRaw`（验签）、`Parse`/`ParseEnvelope`（解析）、`GenerateKeyPair`、`Nonce`。信封格式（`Envelope`/`Payload`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**
 - **验签首选原文模式**：`ParseEnvelope` 返回载荷原始字节，`VerifyRaw` 基于原文验签——平台只追加新字段时重序列化会丢字段导致验签失败，原文验签天然兼容。
 - **运行面客户端**（`client.go` / `transport.go`）：`licence.New(Options)` 创建、`Start/Stop` 管理后台滑动刷新循环；`Options.ServerURL` 是平台 URI 唯一入口；内部完成激活、token 与客户端密钥对管理、逐请求 Ed25519 签名（契约 §2.4）、信封缓存与离线宽限降级、用量合并上报；业务侧只感知 `Status()` / `HasFeature()` / `GetLimit()` / `CheckVersion()` / `ReportUsage()`。
@@ -111,12 +112,12 @@
 - **安全存储**（`store.go`）：`Store` 接口 + 默认 AES-256-GCM 加密文件（密钥派生自 盐+指纹，权限 0600）；token、客户端私钥、信封缓存只允许经 `Store` 持久化。
 - **测试**：`golden_test.go` 的 canonical/签名向量由平台签发端原样生成，是双仓库字节兼容的验收线——改 `Payload` 或序列化语义后必须重新生成向量（方法见 licen-hub `docs/md/开发者SDK设计方案.md`）；`client_test.go` 用 httptest 假平台做端到端（含请求验签镜像），禁止联网测试。
 
-#### 管理面（AdminClient，二期并入本包）
+#### 管理面（AdminClient，`licence/admin` 子包）
 
-- **定位**：面向商户自有运维系统/CI 的管理面 typed client（`admin.go`/`admin-response.go`/`admin-types.go`），与运行面（同包 `Client`）协议完全不同——管理面是后台登录态接口，统一 `{code,msg,data}` 信封（HTTP 状态码恒为 200，业务结果看 code），路由统一 `/api/{table}/{key}`（GET 走 query，POST/PUT/DELETE 走 JSON body），与 licen-hub/backend 的 `GenRoute` 逐一对齐，禁止发明平台没有的路由。
-- **登录态**（`admin.go`）：`licence.NewAdmin(AdminOptions)` 创建；`AdminOptions.ServerURL` 是平台 URI 唯一入口；账密登录（`POST /api/comm/sign-in`）换取 JWT，以 `Authorization: Bearer <token.value>` 携带；token 仅内存保管（`Token()`/`SetToken()` 供 CI 复用会话）；首次请求自动登录、令牌过期（毫秒）预判重登、业务 401 自动重登并重试一次。登录账密按平台现状以明文 JSON 上送（平台的 AES 加密上送通道未实现），依赖 HTTPS 保护；平台若开启「API 签名验证」（safety.api.sign）管理面客户端不支持。
-- **错误分层**（`admin-response.go`）：传输层（非 200 状态码）返回 `*HTTPError`，业务 code != 200 返回 `*APIError`（含 Code/Msg/Data，登录 2FA 闸门触发时 `Require2FA=true`），网络错误原样包装；分页结果用泛型 `Page[T]`（对应信封 data 内的 `{data,count,page}`）。
-- **资源分文件**：`projects.go` / `instances.go` / `licenses.go` / `qualification.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go`，以 `client.Projects.Rows(ctx, ...)` 形式挂在 AdminClient 的资源组字段上；DTO（`admin-types.go`）的 json tag 与平台模型/请求结构体逐一对齐（camelCase），查询数组参数按平台约定序列化为 `key[]=v` 重复键。SaaS 定义层只有 find/take 无 rows、套餐 update/status 用 POST、租户 subscribe/change 的 data 随审批路径有三种形态——以平台 GenRoute 实际为准，禁止套通用 CRUD 惯性。
+- **定位**：面向商户自有运维系统/CI 的管理面 typed client（`admin/admin.go`/`admin/admin-response.go`/`admin/admin-types.go`），与运行面（根包 `Client`）协议完全不同——管理面是后台登录态接口，统一 `{code,msg,data}` 信封（HTTP 状态码恒为 200，业务结果看 code），路由统一 `/api/{table}/{key}`（GET 走 query，POST/PUT/DELETE 走 JSON body），与 licen-hub/backend 的 `GenRoute` 逐一对齐，禁止发明平台没有的路由。
+- **登录态**（`admin/admin.go`）：`admin.NewAdmin(AdminOptions)` 创建（`Transport`/`GRPC` 复用根包 `licence.Transport`/`licence.GRPCOptions`）；`AdminOptions.ServerURL` 是平台 URI 唯一入口；账密登录（`POST /api/comm/sign-in`）换取 JWT，以 `Authorization: Bearer <token.value>` 携带；token 仅内存保管（`Token()`/`SetToken()` 供 CI 复用会话）；首次请求自动登录、令牌过期（毫秒）预判重登、业务 401 自动重登并重试一次。登录账密按平台现状以明文 JSON 上送（平台的 AES 加密上送通道未实现），依赖 HTTPS 保护；平台若开启「API 签名验证」（safety.api.sign）管理面客户端不支持。
+- **错误分层**（`admin/admin-response.go`）：传输层（非 200 状态码）返回 `*HTTPError`，业务 code != 200 返回 `*APIError`（含 Code/Msg/Data，登录 2FA 闸门触发时 `Require2FA=true`），网络错误原样包装；分页结果用泛型 `Page[T]`（对应信封 data 内的 `{data,count,page}`）。
+- **资源分文件**（均在 `admin/` 子包）：`projects.go` / `instances.go` / `licenses.go` / `qualification.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `upgrade-records.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go`，以 `client.Projects.Rows(ctx, ...)` 形式挂在 AdminClient 的资源组字段上；DTO（`admin/admin-types.go`）的 json tag 与平台模型/请求结构体逐一对齐（camelCase），查询数组参数按平台约定序列化为 `key[]=v` 重复键。SaaS 定义层只有 find/take 无 rows、套餐 update/status 用 POST、租户 subscribe/change 的 data 随审批路径有三种形态——以平台 GenRoute 实际为准，禁止套通用 CRUD 惯性。
 - **测试**：httptest 假平台（`utils.Resp` 写信封保证结构一致），覆盖登录、自动带 token、过期/401 重登、错误分层、分页解析、公钥导出、发布物代验与 multipart 上传，禁止联网测试。
 
 ## 构建与测试命令

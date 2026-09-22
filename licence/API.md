@@ -24,11 +24,19 @@
 
 ## 1. 包结构与分层
 
-| 分层 | 入口 | 使用方 |
-|---|---|---|
-| 纯函数层 | `licence.Licence` 链式工具、`Envelope`/`Payload` 结构、`VersionInRange`、`FingerprintHash`、`Store` 接口 | 需要自行签发/验签/解析信封的服务端或测试 |
-| 运行面客户端 | `licence.New(Options)` → `*Client` | **交付项目嵌入**：激活、授权闸门、在线更新、SaaS 租户 |
-| 管理面客户端 | `licence.NewAdmin(AdminOptions)` → `*AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
+SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import 根包（子包按需引用）：
+
+| 分层 | 包 | 入口 | 使用方 |
+|---|---|---|---|
+| 纯函数层 | `licence`（根包） | `licence.Licence` 链式工具、`Envelope`/`Payload` 结构、`VersionInRange`、`FingerprintHash`、`Store` 接口 | 需要自行签发/验签/解析信封的服务端或测试 |
+| 运行面客户端 | `licence`（根包） | `licence.New(Options)` → `*Client` | **交付项目嵌入**：激活、授权闸门、在线更新、SaaS 租户 |
+| 在线更新执行器 | `licence/updater` | `updater.NewUpdater(client, updater.UpdaterOptions)` → `*updater.Updater` | 更新代理 / 自更新程序（swap/unpack/restart 编排、事件触发检查） |
+| 回调接收与事件订阅 | `licence/callback` | `callback.NewCallbackHandler(CallbackOptions)`、`callback.NewEventSubscriber(client, CallbackOptions)` | 客户项目接收 webhook / 主动订阅平台事件 |
+| 配置定义校验引擎 | `licence/configdef` | `configdef.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
+| 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
+| API 商城（骨架） | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（随商城后端就绪落地；面向 `Doer` 窄接口、不 import 根包） |
+
+依赖方向（编译期保证无环）：`admin` / `updater` / `callback` → 根包 → `configdef` / `apis`；`proto/licence/v1` 与 `protocol` 为共享契约包，自身不 import 根包。
 
 两类客户端的协议完全不同，互不通用：
 
@@ -101,7 +109,7 @@ type GRPCOptions struct {
 | `UpgradeFailed` | `failed` | 升级失败 |
 | `UpgradeRolledBack` | `rolled_back` | 已回滚 |
 
-### 2.4 回调事件常量（`callback.go`）
+### 2.4 回调事件常量（`callback` 子包）
 
 与平台 `backend/app/common/callback/event.go` 的 `supportedEvents` 一一对应；对未收录的新事件族，可用 `OnEvent` 前缀通配（如 `saas.*`）匹配。
 
@@ -472,7 +480,7 @@ ok := client.TenantFeature("tenant-a", "report.advanced")
 
 ### 9.3 回调通知（事件订阅 · 事件推送）
 
-`NewCallbackHandler(CallbackOptions)` 返回标准 `http.Handler`，可挂载到标准库、Gin 或其他 HTTP 框架。`PublicKeys` 与运行面 `Options.PublicKeys` 使用同一组 license-key 信任链。
+回调接收端位于 `callback` 子包（`import "github.com/inis-io/aide/licence/callback"`；本节符号均属该包）。`NewCallbackHandler(CallbackOptions)` 返回标准 `http.Handler`，可挂载到标准库、Gin 或其他 HTTP 框架。`PublicKeys` 与运行面 `Options.PublicKeys` 使用同一组 license-key 信任链。
 
 ```go
 type CallbackOptions struct {
@@ -490,7 +498,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 
 分发顺序为精确事件 → 逐级前缀通配（例如 `saas.plan.*` 、`saas.*`）→ `OnAny` → 自动 `ignored`。应答词是 `AckSuccess` / `AckOk` / `AckIgnored` / `AckRetry` / `AckRejected`；回调返回 error 等价于 `AckRetry`，panic 由 SDK 恢复为 HTTP 500。`deliveryNo` 是业务幂等键，相同 nonce 的原请求重放会被 HTTP 401 拒绝。
 
-**类型参考**（`callback.go`，信封与平台签发端字节级镜像，字段顺序即签名内容，只许追加）：
+**类型参考**（`callback/callback.go`，信封与平台签发端字节级镜像，字段顺序即签名内容，只许追加）：
 
 | 类型 | 说明 |
 |---|---|
@@ -542,35 +550,36 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `PushConfigDefinitions` | `func (this *Client) PushConfigDefinitions(ctx context.Context, defs ConfigDefinitions, clientPushID ...string) (*PushbackDefinitionsResult, error)` | 回推项目级配置定义全量快照（HTTP body 固定 `tenant_id:0`）；空快照 = 清空该项目非 platform_owned 定义。400 返回 `*PushbackDefinitionsError`（`errors.As` 取结构化明细，CLI 直接打印 err 即可读全） |
+| `PushConfigDefinitions` | `func (this *Client) PushConfigDefinitions(ctx context.Context, defs configdef.ConfigDefinitions, clientPushID ...string) (*PushbackDefinitionsResult, error)` | 回推项目级配置定义全量快照（HTTP body 固定 `tenant_id:0`）；空快照 = 清空该项目非 platform_owned 定义。400 返回 `*PushbackDefinitionsError`（`errors.As` 取结构化明细，CLI 直接打印 err 即可读全） |
 
 | 类型 | 说明 |
 |---|---|
-| `ConfigDefinitions` | 定义快照：`Groups []ConfigDefinitionGroup` / `Configs []ConfigDefinitionItem` |
-| `ConfigDefinitionGroup` | 分组定义：`Name`（单段，正则同配置键）/ `Label` / `LabelEn` / `Icon` / `Sort` / `Parent`（父分组 name 路径，空 = 顶级；parent 链须在快照内闭合并无环） |
-| `ConfigDefinitionItem` | 配置项定义：`Key`（`^[a-z0-9][a-z0-9._-]{0,127}$`，快照内唯一）/ `Label`（非空 ≤100 字符）/ `Type` / `GroupPath`（空 = 未分组）/ `Options`（`json.RawMessage` 选项数组原文，`[{"value":...,"label":...}]`，select 必填且 value 唯一）/ `Rules`（`json.RawMessage` RuleSet 原文）/ `Placeholder` / `Remark` / `DefaultValue`（非空时须过自身 type + rules 校验，select 须 ∈ options）/ `Sensitive` / `Sort` |
-| `PushbackDefinitionsResult` | 批次结果：`BatchID` / `Groups` / `Configs`（`PushbackDiffStats` 分别计数）/ `PushedAt` / `ClientPushID` |
-| `PushbackDiffStats` | diff 计数：`Created` / `Updated` / `Deleted` / `Unchanged` |
-| `PushbackDefinitionsError` | 400 校验失败：`Message`（平台汇总文案）+ `Errors []ConfigValidationError`（逐条明细） |
+| `configdef.ConfigDefinitions` | 定义快照：`Groups []ConfigDefinitionGroup` / `Configs []ConfigDefinitionItem`（configdef 子包） |
+| `configdef.ConfigDefinitionGroup` | 分组定义：`Name`（单段，正则同配置键）/ `Label` / `LabelEn` / `Icon` / `Sort` / `Parent`（父分组 name 路径，空 = 顶级；parent 链须在快照内闭合并无环） |
+| `configdef.ConfigDefinitionItem` | 配置项定义：`Key`（`^[a-z0-9][a-z0-9._-]{0,127}$`，快照内唯一）/ `Label`（非空 ≤100 字符）/ `Type` / `GroupPath`（空 = 未分组）/ `Options`（`json.RawMessage` 选项数组原文，`[{"value":...,"label":...}]`，select 必填且 value 唯一）/ `Rules`（`json.RawMessage` RuleSet 原文）/ `Placeholder` / `Remark` / `DefaultValue`（非空时须过自身 type + rules 校验，select 须 ∈ options）/ `Sensitive` / `Sort` |
+| `PushbackDefinitionsResult` | 批次结果（根包）：`BatchID` / `Groups` / `Configs`（`configdef.PushbackDiffStats` 分别计数）/ `PushedAt` / `ClientPushID` |
+| `configdef.PushbackDiffStats` | diff 计数：`Created` / `Updated` / `Deleted` / `Unchanged` |
+| `PushbackDefinitionsError` | 400 校验失败（根包）：`Message`（平台汇总文案）+ `Errors []configdef.ConfigValidationError`（逐条明细） |
 
-**配置校验引擎**（`config-validate.go`，全系统唯一实现——SDK 本地预校验与 licen-hub backend 复用同一份，禁止另起规则引擎）：
+**配置校验引擎**（`configdef` 子包，全系统唯一实现——SDK 本地预校验与 licen-hub backend 复用同一份，禁止另起规则引擎；`Client.ValidateConfig*` 为根包薄壳）：
 
 | 符号 | 签名 | 说明 |
 |---|---|---|
-| `ConfigRuleSet` | — | 规则集：`Required`（bool）/ `Regex`（RE2）/ `Min` / `Max`（`*float64`，仅 int/float 等数值类型生效，指针区分「未设置」与 0）/ `MinLen` / `MaxLen`（`*int`，仅字符串语义类型生效，按 rune 计）/ `Enum []string`（select 以 options 为准，不必重复声明） |
-| `ParseConfigRuleSet` | `func ParseConfigRuleSet(raw json.RawMessage) (*ConfigRuleSet, error)` | 解析 rules 原文；空/nil/null/`{}`/全零值 → nil；严格模式（`DisallowUnknownFields`），未知字段/类型错误/非对象一律报错 |
-| `ValidateConfigDefinition` | `func ValidateConfigDefinition(item ConfigDefinitionItem, groupPaths map[string]struct{}, allowedTypes map[string]struct{}) error` | 单条定义结构校验，返回 `*ConfigValidationError`（Where 为字段名）；`allowedTypes` 传 nil/空 = 不限制（SDK 默认），Hub 侧由 backend 注入控件白名单 |
-| `ValidateConfigValue` | `func ValidateConfigValue(typ string, options json.RawMessage, rules *ConfigRuleSet, value string) error` | 单值校验：type 可解析（int/integer、float/double/number、bool/boolean/switch、select，其余按字符串语义兜底）+ RuleSet；select 以 options 为枚举；空值（去除首尾空白）仅受 required 约束 |
-| `ConfigValidationError` | — | 失败明细：`Where` / `Message`，实现 `error` 接口（`where：message`） |
-| `Client.ValidateConfig` | `func (this *Client) ValidateConfig(items map[string]string) []ConfigValidationError` | 基于本地平台配置快照（PlatformConfigSync 缓存）的值预校验，供值回推前 fail-fast：**sensitive 定义跳过**（回推的是脱敏值）、无定义放行（前向兼容）；快照为空（未同步）返回 nil，以平台校验为准 |
-| `Client.ValidateConfigDefinitions` | `func (this *Client) ValidateConfigDefinitions(defs ConfigDefinitions) []ConfigValidationError` | 定义快照本地预校验（CI 拦错）：分组 name 正则、name 路径唯一（含大小写冲突）、parent 闭包与无环、配置项 key 快照内唯一 + 逐条结构校验；失败定位与平台 errors 同构（`configs[i].field` / `groups[i].field`） |
+| `configdef.ConfigRuleSet` | — | 规则集：`Required`（bool）/ `Regex`（RE2）/ `Min` / `Max`（`*float64`，仅 int/float 等数值类型生效，指针区分「未设置」与 0）/ `MinLen` / `MaxLen`（`*int`，仅字符串语义类型生效，按 rune 计）/ `Enum []string`（select 以 options 为准，不必重复声明） |
+| `configdef.ParseConfigRuleSet` | `func configdef.ParseConfigRuleSet(raw json.RawMessage) (*configdef.ConfigRuleSet, error)` | 解析 rules 原文；空/nil/null/`{}`/全零值 → nil；严格模式（`DisallowUnknownFields`），未知字段/类型错误/非对象一律报错 |
+| `configdef.ValidateConfigDefinition` | `func configdef.ValidateConfigDefinition(item configdef.ConfigDefinitionItem, groupPaths map[string]struct{}, allowedTypes map[string]struct{}) error` | 单条定义结构校验，返回 `*ConfigValidationError`（Where 为字段名）；`allowedTypes` 传 nil/空 = 不限制（SDK 默认），Hub 侧由 backend 注入控件白名单 |
+| `configdef.ValidateConfigValue` | `func configdef.ValidateConfigValue(typ string, options json.RawMessage, rules *configdef.ConfigRuleSet, value string) error` | 单值校验：type 可解析（int/integer、float/double/number、bool/boolean/switch、select，其余按字符串语义兜底）+ RuleSet；select 以 options 为枚举；空值（去除首尾空白）仅受 required 约束 |
+| `configdef.ConfigValidationError` | — | 失败明细：`Where` / `Message`，实现 `error` 接口（`where：message`） |
+| `Client.ValidateConfig` | `func (this *Client) ValidateConfig(items map[string]string) []configdef.ConfigValidationError` | 基于本地平台配置快照（PlatformConfigSync 缓存）的值预校验，供值回推前 fail-fast：**sensitive 定义跳过**（回推的是脱敏值）、无定义放行（前向兼容）；快照为空（未同步）返回 nil，以平台校验为准 |
+| `Client.ValidateConfigDefinitions` | `func (this *Client) ValidateConfigDefinitions(defs configdef.ConfigDefinitions) []configdef.ConfigValidationError` | 定义快照本地预校验（CI 拦错）：分组 name 正则、name 路径唯一（含大小写冲突）、parent 闭包与无环、配置项 key 快照内唯一 + 逐条结构校验；失败定位与平台 errors 同构（`configs[i].field` / `groups[i].field`） |
 
 ### 9.6 运行面事件订阅（EventSubscriber）
 
-**项目级事件订阅**：拉取平台 `callback_events` 增量（HTTP 长轮询 + gRPC 服务端流双传输），把每条订阅信封喂给与 `CallbackHandler` 完全相同的验签 / 防重放 / 分发管线。与 webhook 不同，**无需为实例登记 `notify_url`**；事件由平台现场重签为标准 `CallbackEnvelope` 下发（`occurredAt` 重新盖戳落在 ±5 分钟窗口、`nonce` 每次新鲜、`deliveryNo` 稳定为 `SUB-{eventNo}`），客户端以 `eventId` 单调推进水位。
+**项目级事件订阅**：拉取平台 `callback_events` 增量（HTTP 长轮询 + gRPC 服务端流双传输），把每条订阅信封喂给与 `CallbackHandler` 完全相同的验签 / 防重放 / 分发管线。订阅器位于 `callback` 子包，经 `callback.NewEventSubscriber(client, CallbackOptions)` 创建（`*licence.Client` 天然满足 `EventPuller` 窄接口；puller 实现 `PublicKeys()` 时验签公钥强制与客户端同源）。与 webhook 不同，**无需为实例登记 `notify_url`**；事件由平台现场重签为标准 `CallbackEnvelope` 下发（`occurredAt` 重新盖戳落在 ±5 分钟窗口、`nonce` 每次新鲜、`deliveryNo` 稳定为 `SUB-{eventNo}`），客户端以 `eventId` 单调推进水位。
 
 ```go
-func (this *Client) Subscribe(options CallbackOptions) *EventSubscriber
+// 以下符号均位于 callback 子包（import "github.com/inis-io/aide/licence/callback"）
+func NewEventSubscriber(puller EventPuller, options CallbackOptions) *EventSubscriber
 func (this *EventSubscriber) OnEvent(event string, fn CallbackFunc) *EventSubscriber
 func (this *EventSubscriber) OnAny(fn CallbackFunc) *EventSubscriber
 func (this *EventSubscriber) Poll(ctx context.Context) (int, error)
@@ -582,8 +591,8 @@ func (this *EventSubscriber) SetWatermark(id int64)
 **使用示例**（前台循环用 `Run`，或按需手动 `Poll` 单轮）：
 
 ```go
-sub := client.Subscribe(licence.CallbackOptions{}). // 默认复用 client.PublicKeys，可覆盖 TimeWindow/DedupTTL
-    OnEvent("saas.*", func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+sub := callback.NewEventSubscriber(client, callback.CallbackOptions{}). // 验签公钥强制复用 client.PublicKeys，可覆盖 TimeWindow/DedupTTL
+    OnEvent("saas.*", func(ctx context.Context, event *callback.CallbackEvent) (callback.Ack, error) {
         var data struct {
             TenantNo   string `json:"tenantNo"`
             PlanCode   string `json:"planCode"`
@@ -591,11 +600,11 @@ sub := client.Subscribe(licence.CallbackOptions{}). // 默认复用 client.Publi
         }
         _ = event.MustData(&data)          // data 只带摘要
         _, _, _ = client.TenantSync(ctx, 0) // 推送即失效信号：收到后拉完整租户信封
-        return licence.AckSuccess, nil
+        return callback.AckSuccess, nil
     }).
-    OnEvent(licence.EventPlatformConfigUpdated, func(ctx context.Context, event *licence.CallbackEvent) (licence.Ack, error) {
+    OnEvent(callback.EventPlatformConfigUpdated, func(ctx context.Context, event *callback.CallbackEvent) (callback.Ack, error) {
         _, _ = client.PlatformConfigSync(ctx)
-        return licence.AckSuccess, nil
+        return callback.AckSuccess, nil
     })
 
 sub.SetWatermark(lastEventId) // 可选：跳过已消费的历史事件（需在首轮 Poll 前设置）
@@ -620,6 +629,8 @@ _ = sub.Run(ctx)              // 或后台循环直到 ctx 取消
 ## 10. 管理面客户端 AdminClient
 
 > 使用方是商户自有运维系统/CI。HTTP 使用 `{code, msg, data}` JSON 信封；gRPC 使用显式业务 RPC 并映射为相同的 `APIError` 语义。账密登录在生产环境必须使用 TLS。HTTP 的 `safety.api.sign` 开关不套用到 gRPC。
+>
+> **本节全部符号位于 `admin` 子包**（`import "github.com/inis-io/aide/licence/admin"`；`AdminOptions.Transport`/`GRPC` 复用根包 `licence.Transport`/`licence.GRPCOptions`；例外：`SyncTenantMenusResult` 等少量共享类型留在根包，见对应条目）。
 
 ### 10.1 配置与创建
 
@@ -637,15 +648,15 @@ type AdminOptions struct {
 func NewAdmin(options AdminOptions) (*AdminClient, error)
 ```
 
-创建后挂载 13 个资源组字段：
+创建后挂载 14 个资源组字段：
 
 ```go
-admin, _ := licence.NewAdmin(licence.AdminOptions{
+adm, _ := admin.NewAdmin(admin.AdminOptions{
     ServerURL: "https://licen-hub.inis.cn", Account: "ops", Password: "secret",
 })
-// admin.Qualification / admin.Projects / admin.Instances / admin.Licenses /
-// admin.SigningKeys / admin.Artifacts / admin.Versions / admin.Modules /
-// admin.SaasMenus / admin.SaasFeatures / admin.SaasPlans / admin.SaasTenants / admin.SaasReview
+// adm.Qualification / adm.Projects / adm.Instances / adm.Licenses /
+// adm.SigningKeys / adm.Artifacts / adm.Versions / adm.UpgradeRecords / adm.Modules /
+// adm.SaasMenus / adm.SaasFeatures / adm.SaasPlans / adm.SaasTenants / adm.SaasReview
 ```
 
 ### 10.2 登录态
@@ -666,7 +677,7 @@ type Token struct {
     Expired int64  // 过期时间（毫秒时间戳）
 }
 type SignInResult struct {
-    User  User            // 登录用户（字段见 admin-types.go）
+    User  User            // 登录用户（字段见 admin/admin-types.go）
     Token Token           // 登录令牌
     Auth  json.RawMessage // 权限快照（结构随版本演进，保留原文）
 }
@@ -683,7 +694,7 @@ type SignInResult struct {
 
 ```go
 // 错误判断示例
-var apiErr *licence.APIError
+var apiErr *admin.APIError
 if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录失效 */ }
 ```
 
@@ -701,7 +712,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 ### 10.5 资源组接口明细
 
-所有方法第一个参数均为 `ctx context.Context`。`input` / `params` 参数类型见 §10.6（DTO 均在 `admin-types.go` 定义，json tag 与平台逐一对齐，camelCase）。
+所有方法第一个参数均为 `ctx context.Context`。`input` / `params` 参数类型见 §10.6（DTO 均在 `admin/admin-types.go` 定义，json tag 与平台逐一对齐，camelCase）。
 
 #### Qualification - 资格审核（`/api/qualification/*`）
 
@@ -740,7 +751,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Rows` | 许可证列表（不分页；非审批视角限本人） | `GET /api/licenses/rows` | `*LicenseFindParams` → `[]License` |
 | `Find` | 许可证分页 | `GET /api/licenses/find` | `*LicenseFindParams` → `*Page[License]` |
 | `Take` | 许可证详情 | `GET /api/licenses/take?id=N` | `id int` → `*License` |
-| `TakePayload` | 查看签发载荷（载荷/签名原文，可用本包 `Parse` + 公钥验签） | `GET /api/licenses/take-payload?id=N` | `id int` → `*LicensePayloadView` |
+| `TakePayload` | 查看签发载荷（载荷/签名原文，可用根包 `licence.Parse` + 公钥验签） | `GET /api/licenses/take-payload?id=N` | `id int` → `*LicensePayloadView` |
 | `PublicKey` | 项目验签公钥表（任意登录用户可读；projectId 必填，返回全版本 `keys[]` 含历史轮换密钥） | `GET /api/licenses/public-key?projectId=` | `projectId int` → `*LicensePublicKey` |
 | `Apply` | 提交授权申请（member 自助） | `POST /api/licenses/apply` | `LicenseApplyInput` → `*ApplyResult` |
 | `Cancel` | 撤回授权申请（仅本人 pending 可撤回） | `POST /api/licenses/cancel` | `id int` → 无 |
@@ -792,6 +803,16 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Remove` / `Delete` | 逻辑/物理删除（已发布/已归档版本禁止删除） | `DELETE /api/project-versions/{remove,delete}` | `ids []int` → `*IdsResult` |
 | `Restore` | 恢复回收站数据 | `PUT /api/project-versions/restore` | `ids []int` → `*IdsResult` |
 
+#### UpgradeRecords - 升级执行记录（`/api/project-upgrade-records/*`，只读）
+
+记录由运行面 `ReportUpgrade` / `ReportUpgradeLog` 写入，管理面仅提供查询观测（灰度效果与失败原因追溯）。
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `Rows` | 列表（不分页） | `GET /api/project-upgrade-records/rows` | `*UpgradeRecordFindParams` → `[]UpgradeRecord` |
+| `Find` | 分页 | `GET /api/project-upgrade-records/find` | `*UpgradeRecordFindParams` → `*Page[UpgradeRecord]` |
+| `Take` | 详情（含过程日志） | `GET /api/project-upgrade-records/take?id=N` | `id int` → `*UpgradeRecord` |
+
 #### Modules - 项目功能模块（`/api/project-modules/*`）
 
 | 方法 | 说明 | 路由 | 参数 → 返回 |
@@ -838,7 +859,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 |---|---|---|---|
 | `Find` | 分页（member 限本人；platform 按范围策略） | `GET /api/saas-tenants/find` | `*SaasTenantFindParams` → `*Page[SaasTenant]` |
 | `Take` | 详情 | `GET /api/saas-tenants/take?id=N` | `id int` → `*SaasTenant` |
-| `TakePayload` | 查看租户授权原文（payload/signature，仅归属人/平台可见，可用本包 `TenantPayload` 解析验签） | `GET /api/saas-tenants/take-payload?id=N` | `id int` → `*SaasTenantPayloadView` |
+| `TakePayload` | 查看租户授权原文（payload/signature，仅归属人/平台可见，可用根包 `licence.TenantPayload` 解析验签） | `GET /api/saas-tenants/take-payload?id=N` | `id int` → `*SaasTenantPayloadView` |
 | `Subscribe` | 开通申请（member 创建 pending 行 + 申请单，命中自动过单同事务生效；platform 直通生效） | `POST /api/saas-tenants/subscribe` | `SaasTenantSubscribeInput` → `*SaasTenantSubscribeResult` |
 | `Change` | 权益变更申请（仅 active 可发起且一律人工审批；pending 租户为驳回后重新提审；platform 直通生效） | `POST /api/saas-tenants/change` | `SaasTenantChangeInput` → `*SaasTenantChangeResult` |
 | `UpdateInfo` | 非权益字段直改（tenantName/contact 即时生效 + 审计） | `POST /api/saas-tenants/update-info` | `SaasTenantInfoUpdateInput` → `*IdResult` |
@@ -848,7 +869,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Resume` | 恢复（suspended → active，即时生效，reason 必填） | `POST /api/saas-tenants/resume` | `id int, reason string` → `*StatusResult` |
 | `Revoke` | 吊销（active/suspended → revoked，不可逆，reason 必填） | `POST /api/saas-tenants/revoke` | `id int, reason string` → `*StatusResult` |
 | `Reissue` | 重签（以现载荷为基础按入参覆盖，空值沿用现载荷；直通不产生申请单） | `POST /api/saas-tenants/reissue` | `SaasTenantReissueInput` → `*SaasTenantNoResult` |
-| `SyncMenus` | 按「当前 published 租户清单 + 套餐当前权益」收敛并原子重签（mode：`auto` 漂移感知 / `trim` 仅裁悬空码 / `rebase` 强制按套餐重物化）；tenantIds 为空处理全项目在营租户 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int, mode string` → `*SyncTenantMenusResult` |
+| `SyncMenus` | 按「当前 published 租户清单 + 套餐当前权益」收敛并原子重签（mode：`auto` 漂移感知 / `trim` 仅裁悬空码 / `rebase` 强制按套餐重物化）；tenantIds 为空处理全项目在营租户 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int, mode string` → `*licence.SyncTenantMenusResult`（根包运行面共享类型） |
 | `BatchRenew` | 批量续期（仅 active/suspended 可续；member 逐租户生成 change 申请单走审批；platform 直通重签；ids 须全部处于写数据范围内否则整体拒绝） | `POST /api/saas-tenants/batch-renew` | `SaasTenantBatchRenewInput` → `*SaasTenantBatchRenewResult` |
 | `Applications` | 我的申请分页 | `GET /api/saas-tenants/applications/find` | `*SaasTenantApplicationFindParams` → `*Page[SaasTenantApplication]` |
 | `ApplicationTake` | 我的申请详情 | `GET /api/saas-tenants/applications/take?id=N` | `id int` → `*SaasTenantApplication` |
@@ -864,7 +885,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Take` | 审批申请详情 | `GET /api/saas-review/take?id=N` | `id int` → `*SaasTenantApplication` |
 | `Review` | 审批（approve 单事务生效并签发；reject 需填审批意见） | `POST /api/saas-review/review` | `SaasReviewInput` → `*SaasReviewResult` |
 
-### 10.6 主要 DTO 说明（`admin-types.go`）
+### 10.6 主要 DTO 说明（`admin/admin-types.go`）
 
 **输入结构**（json tag 与平台请求结构体逐一对齐）：
 
@@ -967,21 +988,26 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 ## 附：包内文件与能力映射
 
-| 文件 | 能力 |
+| 文件 / 子包 | 能力 |
 |---|---|
 | `envelope.go` / `sign.go` / `licence.go` | 纯函数层：信封结构、签发、验签、密钥对、nonce |
 | `status.go` | 运行面状态码与本地时间判定 |
 | `version-range.go` | 版本范围表达式判定 |
 | `fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `store.go` | 安全存储接口与默认加密文件实现 |
-| `client.go` / `transport.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存 |
-| `manifest.go` / `update.go` | 在线更新：清单结构、检查、下载、升级上报 |
+| `client.go` / `transport.go` / `runtime-transport*.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存、HTTP/gRPC 双传输 |
+| `manifest.go` / `update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
-| `callback.go` | 回调验签、防重放与幂等分发 |
-| `events.go` | 运行面事件订阅：`EventSubscriber` 增量拉取、水位推进、HTTP/gRPC 双传输 `SubscribeEvents` |
+| `events.go` | 运行面事件拉取原语：`Client.PullEvents` / `Client.PublicKeys`（订阅器在 `callback` 子包） |
 | `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `pushback.go` | 配置回推：`PushConfig`/`PushTenantConfig` 客户端权威全量快照回推（HTTP/gRPC 双协议） |
 | `pushback_definitions.go` | 配置定义反推：`PushConfigDefinitions` 项目级定义快照回推（403 开关闸门 / 400 errors 明细，HTTP/gRPC 双协议） |
-| `config-validate.go` | 配置校验引擎（全系统唯一实现，backend import 复用）：`ConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`Client.ValidateConfig`/`Client.ValidateConfigDefinitions` |
-| `admin.go` / `admin-response.go` / `admin-types.go` | 管理面：登录态、请求出口、错误分层、DTO |
-| `qualification.go` / `projects.go` / `instances.go` / `licenses.go` / `signingkeys.go` / `artifacts.go` / `versions.go` / `projectmodules.go` / `saasmenus.go` / `saasfeatures.go` / `saasplans.go` / `saastenants.go` / `saasreview.go` | 管理面 13 个资源组 |
+| `config-validate.go` | `Client.ValidateConfig` / `Client.ValidateConfigDefinitions` 薄壳（校验引擎与定义类型在 `configdef` 子包） |
+| `apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口） |
+| `configdef/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
+| `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
+| `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
+| `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 14 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`） |
+| `apis/` | API 商城 typed 方法包骨架：`Client{doer}` + `New` + `Receipt` + `ErrNotActivated`（typed 方法随商城后端就绪落地） |
+| `proto/licence/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改） |
+| `protocol/` | 签名 canonical 助手（licen-hub backend 直接 import） |

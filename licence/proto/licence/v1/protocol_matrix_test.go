@@ -41,7 +41,7 @@ func TestProtocolMatrixCoversEveryRPC(t *testing.T) {
 }
 
 func TestGeneratedRPCsAreBoundBySDKTransports(t *testing.T) {
-	adminSource, err := os.ReadFile("../../../admin-transport-grpc.go")
+	adminSource, err := os.ReadFile("../../../admin/admin-transport-grpc.go")
 	if err != nil {
 		t.Fatal(err)
 	}

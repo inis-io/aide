@@ -212,8 +212,8 @@ func TestGRPCRuntimeTransportSubscribeEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := runtimeEventServer{t: t, seed: seed, events: []fakeEvent{
-		{eventId: 1, eventNo: "EVT-2026-000001", event: EventSaasTenantCreated, data: json.RawMessage(`{"tenantNo":"T1"}`)},
-		{eventId: 2, eventNo: "EVT-2026-000002", event: EventSaasPlanUpdated, data: json.RawMessage(`{"planCode":"pro"}`)},
+		{eventId: 1, eventNo: "EVT-2026-000001", event: "saas.tenant.created", data: json.RawMessage(`{"tenantNo":"T1"}`)},
+		{eventId: 2, eventNo: "EVT-2026-000002", event: "saas.plan.updated", data: json.RawMessage(`{"planCode":"pro"}`)},
 	}}
 	transport, err := newTestEventTransport(t, server)
 	if err != nil {
@@ -230,8 +230,13 @@ func TestGRPCRuntimeTransportSubscribeEvents(t *testing.T) {
 	if result.Events[0].EventId != 1 || result.Events[1].EventId != 2 {
 		t.Fatalf("事件顺序错误: %d %d", result.Events[0].EventId, result.Events[1].EventId)
 	}
-	envelope, _, err := ParseCallbackEnvelope(result.Events[1].Envelope)
-	if err != nil || envelope.Payload.Event != EventSaasPlanUpdated {
+	// 匿名结构内联解析信封（根包测试不反向依赖 callback 子包的 ParseCallbackEnvelope）
+	var envelope struct {
+		Payload struct {
+			Event string `json:"event"`
+		} `json:"payload"`
+	}
+	if err = json.Unmarshal(result.Events[1].Envelope, &envelope); err != nil || envelope.Payload.Event != "saas.plan.updated" {
 		t.Fatalf("信封解析失败: %v %v", envelope.Payload.Event, err)
 	}
 
