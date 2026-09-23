@@ -1,4 +1,4 @@
-package configdef
+package config
 
 import (
 	"bytes"

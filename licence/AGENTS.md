@@ -8,7 +8,7 @@
 - 本目录是 Licen Hub 的 Go SDK，按职责拆为「根包 + 子包」：
   根包 = 运行面 `Client` + 纯函数层（签名/验签/信封/状态码/版本范围/指纹/安全存储）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
-  `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`configdef/` = 配置定义与
+  `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
   RuleSet 校验引擎；`apis/` = API 商城 typed 方法包骨架。
 - 本目录有独立 `go.mod`，不参与 aide 根模块的 `go build ./...`，必须在本目录单独构建测试。
 
@@ -20,7 +20,7 @@ licence/
 ├── admin/            # 管理面 AdminClient（admin.go + admin-transport*.go + 14 个资源文件）
 ├── updater/          # 在线更新执行器（自更新 swap/unpack/restart/state）
 ├── callback/         # 回调接收端 CallbackHandler + 事件订阅器 EventSubscriber
-├── configdef/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
+├── config/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
 ├── apis/             # API 商城 typed 方法包骨架（typed 方法随商城后端就绪落地）
 ├── proto/            # gRPC 权威契约与生成代码（禁手改）
 └── protocol/         # 签名 canonical 助手（licen-hub backend 直接 import）
@@ -28,18 +28,18 @@ licence/
 
 依赖方向铁律（改动后必须 `go list -deps` 复核）：
 
-- 根包**只允许** import 两个子包：`configdef`（`Client.ValidateConfig*` 薄壳的引擎）与
+- 根包**只允许** import 两个子包：`config`（`Client.ValidateConfig*` 薄壳的引擎）与
   `apis`（`Client.Apis` 挂载点）；**禁止** import `admin` / `updater` / `callback`；
 - `admin` / `updater` / `callback` → 根包（共享 `Transport`/`GRPCOptions`、验签纯函数、
   `ManifestArtifact`/`Upgrade*` 等运行面类型；类型一律留根包，子包反向引用即按此切开）；
-- `apis` / `configdef` 为叶子包，不 import 根包。apis 面向自声明的 `Doer` 窄接口编程，
+- `apis` / `config` 为叶子包，不 import 根包。apis 面向自声明的 `Doer` 窄接口编程，
   由根包 `apis.go` 的 `apisDoer` 适配器注入 `doRequest`（withSign=true）调用能力，
   未激活闸门返回 `apis.ErrNotActivated`；
 - `proto/licence/v1` 与 `protocol` 被各包引用，自身不 import 根包。
 - **截至 2026-08-09，运行面与管理面现有全资源均已实现 HTTP + gRPC**（运行面含许可证、在线更新、
   SaaS 租户、平台配置、事件订阅与配置回推 `ConfigPushbackRuntimeService/Push`；
   另有配置定义反推 `ConfigPushbackRuntimeService/PushDefinitions`（仅项目级，403 开关闸门 /
-  400 errors 明细）与配置校验引擎 `configdef` 子包（全系统唯一实现，licen-hub backend import
+  400 errors 明细）与配置校验引擎 `config` 子包（全系统唯一实现，licen-hub backend import
   复用；根包 `config-validate.go` 仅留 `Client` 方法薄壳））。
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`；服务端共同消费该契约，

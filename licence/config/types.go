@@ -1,4 +1,4 @@
-// Package configdef - 配置定义与 RuleSet 校验引擎（全系统唯一实现）。
+// Package config - 配置定义与 RuleSet 校验引擎（全系统唯一实现）。
 //
 // 本包是叶子包：不 import 根包 licence，SDK（本地预校验）与 licen-hub backend
 // （平台侧落库校验）共同 import 本包，禁止在平台侧复制第二份规则引擎。
@@ -7,7 +7,7 @@
 //   - 值校验（ValidateConfigValue）
 //
 // 规则 DSL（RuleSet）严格模式：未知字段一律拒绝，防止拼写错误静默失效。
-package configdef
+package config
 
 import "encoding/json"
 

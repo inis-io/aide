@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inis-io/aide/licence/configdef"
+	"github.com/inis-io/aide/licence/config"
 )
 
 // ============================= 假授权平台（契约行为镜像） =============================
@@ -138,8 +138,8 @@ type fakePushback struct {
 // fakeDefinitionPushback - 假配置定义反推批次（记录请求原文与解析结果，供 snake_case/原生 JSON 断言）
 type fakeDefinitionPushback struct {
 	rawBody      []byte
-	groups       []configdef.ConfigDefinitionGroup
-	configs      []configdef.ConfigDefinitionItem
+	groups       []config.ConfigDefinitionGroup
+	configs      []config.ConfigDefinitionItem
 	clientPushID string
 }
 

@@ -32,11 +32,11 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | 运行面客户端 | `licence`（根包） | `licence.New(Options)` → `*Client` | **交付项目嵌入**：激活、授权闸门、在线更新、SaaS 租户 |
 | 在线更新执行器 | `licence/updater` | `updater.NewUpdater(client, updater.UpdaterOptions)` → `*updater.Updater` | 更新代理 / 自更新程序（swap/unpack/restart 编排、事件触发检查） |
 | 回调接收与事件订阅 | `licence/callback` | `callback.NewCallbackHandler(CallbackOptions)`、`callback.NewEventSubscriber(client, CallbackOptions)` | 客户项目接收 webhook / 主动订阅平台事件 |
-| 配置定义校验引擎 | `licence/configdef` | `configdef.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
+| 配置定义校验引擎 | `licence/config` | `config.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
 | 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
 | API 商城（骨架） | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（随商城后端就绪落地；面向 `Doer` 窄接口、不 import 根包） |
 
-依赖方向（编译期保证无环）：`admin` / `updater` / `callback` → 根包 → `configdef` / `apis`；`proto/licence/v1` 与 `protocol` 为共享契约包，自身不 import 根包。
+依赖方向（编译期保证无环）：`admin` / `updater` / `callback` → 根包 → `config` / `apis`；`proto/licence/v1` 与 `protocol` 为共享契约包，自身不 import 根包。
 
 两类客户端的协议完全不同，互不通用：
 
@@ -550,28 +550,28 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `PushConfigDefinitions` | `func (this *Client) PushConfigDefinitions(ctx context.Context, defs configdef.ConfigDefinitions, clientPushID ...string) (*PushbackDefinitionsResult, error)` | 回推项目级配置定义全量快照（HTTP body 固定 `tenant_id:0`）；空快照 = 清空该项目非 platform_owned 定义。400 返回 `*PushbackDefinitionsError`（`errors.As` 取结构化明细，CLI 直接打印 err 即可读全） |
+| `PushConfigDefinitions` | `func (this *Client) PushConfigDefinitions(ctx context.Context, defs config.ConfigDefinitions, clientPushID ...string) (*PushbackDefinitionsResult, error)` | 回推项目级配置定义全量快照（HTTP body 固定 `tenant_id:0`）；空快照 = 清空该项目非 platform_owned 定义。400 返回 `*PushbackDefinitionsError`（`errors.As` 取结构化明细，CLI 直接打印 err 即可读全） |
 
 | 类型 | 说明 |
 |---|---|
-| `configdef.ConfigDefinitions` | 定义快照：`Groups []ConfigDefinitionGroup` / `Configs []ConfigDefinitionItem`（configdef 子包） |
-| `configdef.ConfigDefinitionGroup` | 分组定义：`Name`（单段，正则同配置键）/ `Label` / `LabelEn` / `Icon` / `Sort` / `Parent`（父分组 name 路径，空 = 顶级；parent 链须在快照内闭合并无环） |
-| `configdef.ConfigDefinitionItem` | 配置项定义：`Key`（`^[a-z0-9][a-z0-9._-]{0,127}$`，快照内唯一）/ `Label`（非空 ≤100 字符）/ `Type` / `GroupPath`（空 = 未分组）/ `Options`（`json.RawMessage` 选项数组原文，`[{"value":...,"label":...}]`，select 必填且 value 唯一）/ `Rules`（`json.RawMessage` RuleSet 原文）/ `Placeholder` / `Remark` / `DefaultValue`（非空时须过自身 type + rules 校验，select 须 ∈ options）/ `Sensitive` / `Sort` |
-| `PushbackDefinitionsResult` | 批次结果（根包）：`BatchID` / `Groups` / `Configs`（`configdef.PushbackDiffStats` 分别计数）/ `PushedAt` / `ClientPushID` |
-| `configdef.PushbackDiffStats` | diff 计数：`Created` / `Updated` / `Deleted` / `Unchanged` |
-| `PushbackDefinitionsError` | 400 校验失败（根包）：`Message`（平台汇总文案）+ `Errors []configdef.ConfigValidationError`（逐条明细） |
+| `config.ConfigDefinitions` | 定义快照：`Groups []ConfigDefinitionGroup` / `Configs []ConfigDefinitionItem`（config 子包） |
+| `config.ConfigDefinitionGroup` | 分组定义：`Name`（单段，正则同配置键）/ `Label` / `LabelEn` / `Icon` / `Sort` / `Parent`（父分组 name 路径，空 = 顶级；parent 链须在快照内闭合并无环） |
+| `config.ConfigDefinitionItem` | 配置项定义：`Key`（`^[a-z0-9][a-z0-9._-]{0,127}$`，快照内唯一）/ `Label`（非空 ≤100 字符）/ `Type` / `GroupPath`（空 = 未分组）/ `Options`（`json.RawMessage` 选项数组原文，`[{"value":...,"label":...}]`，select 必填且 value 唯一）/ `Rules`（`json.RawMessage` RuleSet 原文）/ `Placeholder` / `Remark` / `DefaultValue`（非空时须过自身 type + rules 校验，select 须 ∈ options）/ `Sensitive` / `Sort` |
+| `PushbackDefinitionsResult` | 批次结果（根包）：`BatchID` / `Groups` / `Configs`（`config.PushbackDiffStats` 分别计数）/ `PushedAt` / `ClientPushID` |
+| `config.PushbackDiffStats` | diff 计数：`Created` / `Updated` / `Deleted` / `Unchanged` |
+| `PushbackDefinitionsError` | 400 校验失败（根包）：`Message`（平台汇总文案）+ `Errors []config.ConfigValidationError`（逐条明细） |
 
-**配置校验引擎**（`configdef` 子包，全系统唯一实现——SDK 本地预校验与 licen-hub backend 复用同一份，禁止另起规则引擎；`Client.ValidateConfig*` 为根包薄壳）：
+**配置校验引擎**（`config` 子包，全系统唯一实现——SDK 本地预校验与 licen-hub backend 复用同一份，禁止另起规则引擎；`Client.ValidateConfig*` 为根包薄壳）：
 
 | 符号 | 签名 | 说明 |
 |---|---|---|
-| `configdef.ConfigRuleSet` | — | 规则集：`Required`（bool）/ `Regex`（RE2）/ `Min` / `Max`（`*float64`，仅 int/float 等数值类型生效，指针区分「未设置」与 0）/ `MinLen` / `MaxLen`（`*int`，仅字符串语义类型生效，按 rune 计）/ `Enum []string`（select 以 options 为准，不必重复声明） |
-| `configdef.ParseConfigRuleSet` | `func configdef.ParseConfigRuleSet(raw json.RawMessage) (*configdef.ConfigRuleSet, error)` | 解析 rules 原文；空/nil/null/`{}`/全零值 → nil；严格模式（`DisallowUnknownFields`），未知字段/类型错误/非对象一律报错 |
-| `configdef.ValidateConfigDefinition` | `func configdef.ValidateConfigDefinition(item configdef.ConfigDefinitionItem, groupPaths map[string]struct{}, allowedTypes map[string]struct{}) error` | 单条定义结构校验，返回 `*ConfigValidationError`（Where 为字段名）；`allowedTypes` 传 nil/空 = 不限制（SDK 默认），Hub 侧由 backend 注入控件白名单 |
-| `configdef.ValidateConfigValue` | `func configdef.ValidateConfigValue(typ string, options json.RawMessage, rules *configdef.ConfigRuleSet, value string) error` | 单值校验：type 可解析（int/integer、float/double/number、bool/boolean/switch、select，其余按字符串语义兜底）+ RuleSet；select 以 options 为枚举；空值（去除首尾空白）仅受 required 约束 |
-| `configdef.ConfigValidationError` | — | 失败明细：`Where` / `Message`，实现 `error` 接口（`where：message`） |
-| `Client.ValidateConfig` | `func (this *Client) ValidateConfig(items map[string]string) []configdef.ConfigValidationError` | 基于本地平台配置快照（PlatformConfigSync 缓存）的值预校验，供值回推前 fail-fast：**sensitive 定义跳过**（回推的是脱敏值）、无定义放行（前向兼容）；快照为空（未同步）返回 nil，以平台校验为准 |
-| `Client.ValidateConfigDefinitions` | `func (this *Client) ValidateConfigDefinitions(defs configdef.ConfigDefinitions) []configdef.ConfigValidationError` | 定义快照本地预校验（CI 拦错）：分组 name 正则、name 路径唯一（含大小写冲突）、parent 闭包与无环、配置项 key 快照内唯一 + 逐条结构校验；失败定位与平台 errors 同构（`configs[i].field` / `groups[i].field`） |
+| `config.ConfigRuleSet` | — | 规则集：`Required`（bool）/ `Regex`（RE2）/ `Min` / `Max`（`*float64`，仅 int/float 等数值类型生效，指针区分「未设置」与 0）/ `MinLen` / `MaxLen`（`*int`，仅字符串语义类型生效，按 rune 计）/ `Enum []string`（select 以 options 为准，不必重复声明） |
+| `config.ParseConfigRuleSet` | `func config.ParseConfigRuleSet(raw json.RawMessage) (*config.ConfigRuleSet, error)` | 解析 rules 原文；空/nil/null/`{}`/全零值 → nil；严格模式（`DisallowUnknownFields`），未知字段/类型错误/非对象一律报错 |
+| `config.ValidateConfigDefinition` | `func config.ValidateConfigDefinition(item config.ConfigDefinitionItem, groupPaths map[string]struct{}, allowedTypes map[string]struct{}) error` | 单条定义结构校验，返回 `*ConfigValidationError`（Where 为字段名）；`allowedTypes` 传 nil/空 = 不限制（SDK 默认），Hub 侧由 backend 注入控件白名单 |
+| `config.ValidateConfigValue` | `func config.ValidateConfigValue(typ string, options json.RawMessage, rules *config.ConfigRuleSet, value string) error` | 单值校验：type 可解析（int/integer、float/double/number、bool/boolean/switch、select，其余按字符串语义兜底）+ RuleSet；select 以 options 为枚举；空值（去除首尾空白）仅受 required 约束 |
+| `config.ConfigValidationError` | — | 失败明细：`Where` / `Message`，实现 `error` 接口（`where：message`） |
+| `Client.ValidateConfig` | `func (this *Client) ValidateConfig(items map[string]string) []config.ConfigValidationError` | 基于本地平台配置快照（PlatformConfigSync 缓存）的值预校验，供值回推前 fail-fast：**sensitive 定义跳过**（回推的是脱敏值）、无定义放行（前向兼容）；快照为空（未同步）返回 nil，以平台校验为准 |
+| `Client.ValidateConfigDefinitions` | `func (this *Client) ValidateConfigDefinitions(defs config.ConfigDefinitions) []config.ConfigValidationError` | 定义快照本地预校验（CI 拦错）：分组 name 正则、name 路径唯一（含大小写冲突）、parent 闭包与无环、配置项 key 快照内唯一 + 逐条结构校验；失败定位与平台 errors 同构（`configs[i].field` / `groups[i].field`） |
 
 ### 9.6 运行面事件订阅（EventSubscriber）
 
@@ -1002,9 +1002,9 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `pushback.go` | 配置回推：`PushConfig`/`PushTenantConfig` 客户端权威全量快照回推（HTTP/gRPC 双协议） |
 | `pushback_definitions.go` | 配置定义反推：`PushConfigDefinitions` 项目级定义快照回推（403 开关闸门 / 400 errors 明细，HTTP/gRPC 双协议） |
-| `config-validate.go` | `Client.ValidateConfig` / `Client.ValidateConfigDefinitions` 薄壳（校验引擎与定义类型在 `configdef` 子包） |
+| `config-validate.go` | `Client.ValidateConfig` / `Client.ValidateConfigDefinitions` 薄壳（校验引擎与定义类型在 `config` 子包） |
 | `apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口） |
-| `configdef/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
+| `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
 | `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 14 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`） |
