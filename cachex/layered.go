@@ -88,6 +88,26 @@ func (this *LayeredStore) Incr(key string, expired time.Duration) (count int64, 
 	return count, nil
 }
 
+// IncrBy - 原子累加 n（委托 L2 保证重启后计数连续，成功后失效 L1；计数器不可靠双写，失效即正确）
+func (this *LayeredStore) IncrBy(key string, n int64, expired time.Duration) (count int64, err error) {
+	count, err = this.L2.IncrBy(key, n, expired)
+	if err != nil {
+		return 0, err
+	}
+	this.L1.Delete(key)
+	return count, nil
+}
+
+// Decr - 原子自减 1（委托 L2 保证重启后计数连续，成功后失效 L1；计数器不可靠双写，失效即正确）
+func (this *LayeredStore) Decr(key string, expired time.Duration) (count int64, err error) {
+	count, err = this.L2.Decr(key, expired)
+	if err != nil {
+		return 0, err
+	}
+	this.L1.Delete(key)
+	return count, nil
+}
+
 // SetNX - 仅当键不存在时设置（委托 L2，写入成功后失效 L1；已存在或出错原样返回）
 func (this *LayeredStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
 	ok, err = this.L2.SetNX(key, value, expired)

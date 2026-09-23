@@ -84,6 +84,43 @@ func (this *FileStore) Incr(key string, expired time.Duration) (count int64, err
 	return count, nil
 }
 
+// add - 原子累加 n（读-改-写在分段锁内串行；键不存在或已过期时从 0 起算，
+// 仅当本次调用创建键时写入过期时间，已有键保留原过期时间戳）
+func (this *FileStore) add(key string, n int64, expired time.Duration) (count int64, err error) {
+
+	lock := this.locks.lock(key)
+	lock.Lock()
+	defer lock.Unlock()
+
+	dest := this.dest(key)
+	row, readErr := this.read(dest)
+
+	// 已存在且未过期：保留原过期时间戳，仅累加
+	if readErr == nil && row.Expired >= time.Now().Unix() {
+		count = cast.ToInt64(row.Value) + n
+		row.Value = count
+	} else {
+		// 不存在或已过期：从 0 起算并写入过期时间
+		count = n
+		row = fileBody{Expired: this.expiredAt(expired), Value: count}
+	}
+
+	if err = this.write(dest, []byte(utils.Json.Encode(row))); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// IncrBy - 原子累加 n（键不存在或已过期时从 0 起算得 n；n 为负等价于自减）
+func (this *FileStore) IncrBy(key string, n int64, expired time.Duration) (count int64, err error) {
+	return this.add(key, n, expired)
+}
+
+// Decr - 原子自减 1（键不存在或已过期时从 0 起算得 -1，与 Redis DECR 口径一致）
+func (this *FileStore) Decr(key string, expired time.Duration) (count int64, err error) {
+	return this.add(key, -1, expired)
+}
+
 // SetNX - 仅当键不存在时设置（已存在不覆盖、不续期）
 func (this *FileStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
 

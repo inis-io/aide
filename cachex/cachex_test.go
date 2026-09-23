@@ -77,6 +77,24 @@ func (this *fakeStore) Incr(key string, expired time.Duration) (int64, error) {
 	return count, nil
 }
 
+// IncrBy - 原子累加 n（测试实现：键由本次调用创建时记录过期时间）
+func (this *fakeStore) IncrBy(key string, n int64, expired time.Duration) (int64, error) {
+	item, ok := this.items[key]
+	if !ok {
+		this.items[key] = fakeItem{value: n, expired: expired}
+		return n, nil
+	}
+	count := cast.ToInt64(item.value) + n
+	item.value = count
+	this.items[key] = item
+	return count, nil
+}
+
+// Decr - 原子自减 1（测试实现：键由本次调用创建时记录过期时间）
+func (this *fakeStore) Decr(key string, expired time.Duration) (int64, error) {
+	return this.IncrBy(key, -1, expired)
+}
+
 // SetNX - 仅当键不存在时设置（测试实现）
 func (this *fakeStore) SetNX(key string, value any, expired time.Duration) (bool, error) {
 	if _, ok := this.items[key]; ok {
@@ -423,6 +441,12 @@ func TestStoreError(t *testing.T) {
 	if _, err := Cache.Incr("x"); err == nil {
 		t.Fatal("初始化失败的驱动 Incr 应返回错误")
 	}
+	if _, err := Cache.IncrBy("x", 1); err == nil {
+		t.Fatal("初始化失败的驱动 IncrBy 应返回错误")
+	}
+	if _, err := Cache.Decr("x"); err == nil {
+		t.Fatal("初始化失败的驱动 Decr 应返回错误")
+	}
 	if _, err := Cache.SetNX("x", 1); err == nil {
 		t.Fatal("初始化失败的驱动 SetNX 应返回错误")
 	}
@@ -467,7 +491,6 @@ func TestDriverTagsConcurrent(t *testing.T) {
 		t.Fatal("按标签删除后成员与标签列表应已清除")
 	}
 }
-
 
 // TestDriverIncrSetNxTtl - 验证链式实例的原子方法：自增序列、过期时间透传、占位不覆盖、存活查询、空驱动返回错误
 func TestDriverIncrSetNxTtl(t *testing.T) {
@@ -522,6 +545,46 @@ func TestDriverIncrSetNxTtl(t *testing.T) {
 	}
 	if _, err := empty.TTL("x"); err == nil {
 		t.Fatal("底层驱动为空时 TTL 应返回错误")
+	}
+}
+
+// TestDriverIncrByDecr - 验证链式实例的增减方法：累加/自减序列、过期时间透传、空驱动返回错误
+func TestDriverIncrByDecr(t *testing.T) {
+
+	fake := registerFake("mock")
+	driver := NewDriver(fake, "TEST", time.Minute)
+
+	// 新建键：从 0 起算并透传链式过期时间
+	if count, err := driver.IncrBy("quota", 25); err != nil || count != 25 {
+		t.Fatalf("首次累加应为 25，实际: %d, err=%v", count, err)
+	}
+	if item := fake.items[driver.name("quota")]; item.expired != time.Minute {
+		t.Fatalf("链式过期时间应透传到 IncrBy，实际: %v", item.expired)
+	}
+
+	// 已有键：继续累加且不改写原过期时间（固定窗口语义）
+	if count, err := driver.Expired(time.Hour).IncrBy("quota", 5); err != nil || count != 30 {
+		t.Fatalf("累加应为 30，实际: %d, err=%v", count, err)
+	}
+	if item := fake.items[driver.name("quota")]; item.expired != time.Minute {
+		t.Fatalf("已有键累加不应改写过期时间，实际: %v", item.expired)
+	}
+
+	// 自减：已有键递减，键不存在时从 0 起算得 -1
+	if count, err := driver.Decr("quota"); err != nil || count != 29 {
+		t.Fatalf("自减应为 29，实际: %d, err=%v", count, err)
+	}
+	if count, err := driver.Decr("missing"); err != nil || count != -1 {
+		t.Fatalf("键不存在时自减应为 -1，实际: %d, err=%v", count, err)
+	}
+
+	// 底层驱动为 nil 时应返回错误
+	var empty Driver
+	if _, err := empty.IncrBy("x", 1); err == nil {
+		t.Fatal("底层驱动为空时 IncrBy 应返回错误")
+	}
+	if _, err := empty.Decr("x"); err == nil {
+		t.Fatal("底层驱动为空时 Decr 应返回错误")
 	}
 }
 
@@ -603,6 +666,79 @@ func TestFileStoreIncrConcurrent(t *testing.T) {
 	}
 }
 
+// TestFileStoreIncrByDecr - 验证文件驱动的增减方法：从 0 起算、固定窗口只写一次过期时间、n 可为负、过期后重开窗口
+func TestFileStoreIncrByDecr(t *testing.T) {
+
+	store := &FileStore{Fs: afero.NewMemMapFs(), Config: FileConfig{Root: "cache", Suffix: "json"}}
+
+	// 键不存在时从 0 起算：累加得 n
+	if count, _ := store.IncrBy("c", 100, 10*time.Minute); count != 100 {
+		t.Fatalf("首次累加应为 100，实际: %d", count)
+	}
+	row, _ := store.read(store.dest("c"))
+	// 已有键累加：保留原过期时间戳，n 为负等价于自减
+	if count, _ := store.IncrBy("c", -30, time.Hour); count != 70 {
+		t.Fatalf("负数累加应等价于自减，实际: %d", count)
+	}
+	row2, _ := store.read(store.dest("c"))
+	if row.Expired != row2.Expired {
+		t.Fatalf("已有键累加不应改写过期时间戳: %d → %d", row.Expired, row2.Expired)
+	}
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 自减序列；键不存在时从 0 起算得 -1 并按传入窗口写入过期时间
+	if count, _ := store.Decr("c", 10*time.Minute); count != 69 {
+		t.Fatalf("自减应为 69，实际: %d", count)
+	}
+	if count, _ := store.Decr("gate", 10*time.Minute); count != -1 {
+		t.Fatalf("键不存在时自减应为 -1，实际: %d", count)
+	}
+	if seconds, _ := store.TTL("gate"); seconds < 598 || seconds > 600 {
+		t.Fatalf("新建键应写入过期时间，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 窗口过期后重新从 0 起算并重写过期时间（落盘为秒级时间戳，等待需越过秒边界）
+	if _, err := store.IncrBy("e", 5, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2100 * time.Millisecond)
+	if count, _ := store.IncrBy("e", 5, 10*time.Minute); count != 5 {
+		t.Fatalf("窗口过期后应重新从 0 起算，实际: %d", count)
+	}
+}
+
+// TestFileStoreIncrByDecrConcurrent - 验证文件驱动并发增减：闸门场景（进入累加、退出自减）计数不丢
+func TestFileStoreIncrByDecrConcurrent(t *testing.T) {
+
+	store := &FileStore{Fs: afero.NewMemMapFs(), Config: FileConfig{Root: "cache", Suffix: "json"}}
+
+	const goroutines = 50
+	const each = 4
+	var group sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.IncrBy("gate", 1, 10*time.Minute); err != nil {
+					t.Errorf("并发累加失败: %v", err)
+				}
+				if _, err := store.Decr("gate", 10*time.Minute); err != nil {
+					t.Errorf("并发自减失败: %v", err)
+				}
+			}
+		}()
+	}
+	group.Wait()
+
+	// 进入与退出次数相同，最终计数应精确归零（同键读-改-写未丢更新）
+	if got := cast.ToInt64(store.Get("gate")); got != 0 {
+		t.Fatalf("并发增减配平后计数应为 0，实际: %d", got)
+	}
+}
+
 // TestRedisStoreAtomic - 验证 Redis 驱动的原子方法（miniredis 进程内实例，不触网；Incr 走 Lua 脚本路径）
 func TestRedisStoreAtomic(t *testing.T) {
 
@@ -645,6 +781,47 @@ func TestRedisStoreAtomic(t *testing.T) {
 	}
 	if ok, _ := store.SetNX("n", 1, 10*time.Minute); !ok {
 		t.Fatal("键不存在时 SetNX 应返回 true")
+	}
+}
+
+// TestRedisStoreIncrByDecr - 验证 Redis 驱动的增减方法（miniredis 进程内实例，不触网；走 Lua 脚本路径）
+func TestRedisStoreIncrByDecr(t *testing.T) {
+
+	server := miniredis.RunT(t)
+
+	store := &RedisStore{
+		Client: redis.NewClient(&redis.Options{Addr: server.Addr()}),
+		Config: RedisConfig{Host: "127.0.0.1", Port: cast.ToInt(server.Port())},
+	}
+
+	// 键不存在时从 0 起算，新建键写入过期时间
+	if count, err := store.IncrBy("c", 100, 10*time.Minute); err != nil || count != 100 {
+		t.Fatalf("首次累加应为 100，实际: %d, err=%v", count, err)
+	}
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("新建键应写入过期时间，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 已有键累加与自减均不续期（固定窗口语义），n 为负等价于自减
+	if count, err := store.IncrBy("c", -30, time.Hour); err != nil || count != 70 {
+		t.Fatalf("负数累加应为 70，实际: %d, err=%v", count, err)
+	}
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("已有键累加不应续期，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+	if count, err := store.Decr("c", 10*time.Minute); err != nil || count != 69 {
+		t.Fatalf("自减应为 69，实际: %d, err=%v", count, err)
+	}
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("已有键自减不应续期，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 键不存在时自减得 -1（与 Redis DECR 口径一致），expired <= 0 表示永不过期
+	if count, err := store.Decr("f", 0); err != nil || count != -1 {
+		t.Fatalf("键不存在时自减应为 -1，实际: %d, err=%v", count, err)
+	}
+	if seconds, _ := store.TTL("f"); seconds != -1 {
+		t.Fatalf("expired <= 0 时新建键应永不过期，实际 TTL: %d", seconds)
 	}
 }
 
@@ -766,6 +943,58 @@ func TestMemoryStoreAtomic(t *testing.T) {
 	time.Sleep(2100 * time.Millisecond)
 	if count, _ := store.Incr("e", 10*time.Minute); count != 1 {
 		t.Fatalf("窗口过期后应重新从 1 计数，实际: %d", count)
+	}
+}
+
+// TestMemoryStoreIncrByDecr - 验证内存驱动增减方法：从 0 起算、固定窗口只写一次过期时间、n 可为负、并发配平
+func TestMemoryStoreIncrByDecr(t *testing.T) {
+
+	store := newMemory(t, MemoryConfig{})
+
+	// 键不存在时从 0 起算：累加得 n
+	if count, _ := store.IncrBy("c", 100, 10*time.Minute); count != 100 {
+		t.Fatalf("首次累加应为 100，实际: %d", count)
+	}
+	// 已有键累加：保留原过期时间，n 为负等价于自减
+	if count, _ := store.IncrBy("c", -30, time.Hour); count != 70 {
+		t.Fatalf("负数累加应等价于自减，实际: %d", count)
+	}
+	if seconds, _ := store.TTL("c"); seconds < 598 || seconds > 600 {
+		t.Fatalf("已有键累加不应改写过期时间，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 自减序列；键不存在时从 0 起算得 -1 并按传入窗口写入过期时间
+	if count, _ := store.Decr("c", 10*time.Minute); count != 69 {
+		t.Fatalf("自减应为 69，实际: %d", count)
+	}
+	if count, _ := store.Decr("gate", 10*time.Minute); count != -1 {
+		t.Fatalf("键不存在时自减应为 -1，实际: %d", count)
+	}
+	if seconds, _ := store.TTL("gate"); seconds < 598 || seconds > 600 {
+		t.Fatalf("新建键应写入过期时间，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+
+	// 并发配平：进入累加、退出自减次数相同，最终计数应精确归零
+	const goroutines = 50
+	const each = 4
+	var group sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.IncrBy("g", 1, 10*time.Minute); err != nil {
+					t.Errorf("并发累加失败: %v", err)
+				}
+				if _, err := store.Decr("g", 10*time.Minute); err != nil {
+					t.Errorf("并发自减失败: %v", err)
+				}
+			}
+		}()
+	}
+	group.Wait()
+	if got := cast.ToInt64(store.Get("g")); got != 0 {
+		t.Fatalf("并发增减配平后计数应为 0，实际: %d", got)
 	}
 }
 
@@ -1010,6 +1239,38 @@ func TestLayeredAtomic(t *testing.T) {
 	}
 	if seconds, _ := store.TTL("none"); seconds != 0 {
 		t.Fatalf("不存在的键 TTL 应为 0，实际: %d", seconds)
+	}
+}
+
+// TestLayeredIncrByDecr - 验证分层驱动增减方法：委托 L2 保证计数连续、成功后失效 L1、重启后仍连续
+func TestLayeredIncrByDecr(t *testing.T) {
+
+	fs := afero.NewMemMapFs()
+	store := newLayered(t, fs)
+
+	if count, _ := store.IncrBy("c", 10, 10*time.Minute); count != 10 {
+		t.Fatalf("首次累加应为 10，实际: %d", count)
+	}
+	if count, _ := store.Decr("c", 10*time.Minute); count != 9 {
+		t.Fatalf("自减应为 9，实际: %d", count)
+	}
+
+	// 读一次触发 L1 回灌，再增减应失效 L1（下次读仍取 L2 权威值）
+	if got := cast.ToInt64(store.Get("c")); got != 9 {
+		t.Fatalf("回灌后应读到 L2 值 9，实际: %d", got)
+	}
+	if count, _ := store.Decr("c", 10*time.Minute); count != 8 {
+		t.Fatalf("自减应为 8，实际: %d", count)
+	}
+	if store.L1.Has("c") {
+		t.Fatal("增减成功后应失效 L1")
+	}
+	store.Close() // 模拟进程结束：L1 释放，L2 落盘数据仍在
+
+	// 重启：同一文件系统（磁盘）+ 全新内存层，增减结果应连续
+	store2 := newLayered(t, fs)
+	if count, _ := store2.IncrBy("c", 2, 10*time.Minute); count != 10 {
+		t.Fatalf("重启后计数应连续为 10，实际: %d", count)
 	}
 }
 

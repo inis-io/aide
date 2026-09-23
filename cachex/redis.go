@@ -130,6 +130,38 @@ func (this *RedisStore) Incr(key string, expired time.Duration) (count int64, er
 	return incrScript.Run(ctx, this.Client, []string{key}, int64(expired/time.Second)).Int64()
 }
 
+// incrByScript - 累加脚本：键由本次调用创建时写入过期时间（固定窗口语义），Lua 保证原子性
+var incrByScript = redis.NewScript(`
+local created = redis.call('EXISTS', KEYS[1]) == 0
+local c = redis.call('INCRBY', KEYS[1], ARGV[1])
+if created and tonumber(ARGV[2]) > 0 then
+	redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+end
+return c
+`)
+
+// decrScript - 自减脚本：键由本次调用创建时写入过期时间（固定窗口语义），Lua 保证原子性
+var decrScript = redis.NewScript(`
+local created = redis.call('EXISTS', KEYS[1]) == 0
+local c = redis.call('DECR', KEYS[1])
+if created and tonumber(ARGV[1]) > 0 then
+	redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+end
+return c
+`)
+
+// IncrBy - 原子累加 n（键不存在或已过期时从 0 起算得 n；仅当本次调用创建键时写入过期时间；n 为负等价于自减）
+func (this *RedisStore) IncrBy(key string, n int64, expired time.Duration) (count int64, err error) {
+	ctx := context.Background()
+	return incrByScript.Run(ctx, this.Client, []string{key}, n, int64(expired/time.Second)).Int64()
+}
+
+// Decr - 原子自减 1（键不存在或已过期时从 0 起算得 -1；仅当本次调用创建键时写入过期时间）
+func (this *RedisStore) Decr(key string, expired time.Duration) (count int64, err error) {
+	ctx := context.Background()
+	return decrScript.Run(ctx, this.Client, []string{key}, int64(expired/time.Second)).Int64()
+}
+
 // SetNX - 仅当键不存在时设置（已存在不覆盖、不续期；expired <= 0 表示永不过期）
 func (this *RedisStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
 	ctx := context.Background()

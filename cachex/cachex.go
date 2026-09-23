@@ -2,7 +2,7 @@
 //
 // 设计要点：
 //   - Store 是唯一扩展点：新后端实现 Has/Get/Set/Delete/Clear 五个读写方法，
-//     以及 Incr/SetNX/TTL 三个原子方法（计数、占位、存活查询）
+//     以及 Incr/IncrBy/Decr/SetNX/TTL 五个原子方法（计数增减、占位、存活查询）
 //   - 内置驱动在注册表变量初始化时登记（不依赖文件 init 顺序）；外部驱动在自己包内
 //     通过 init() + Register 注册，同名注册会覆盖先注册者（可借此替换内置实现）
 //   - 扩展驱动的自定义配置通过 Config.Options 传入（key 为驱动名）
@@ -30,8 +30,10 @@ import (
 // 约定：键由 Driver 层命名（前缀 + Hash），驱动按原名持久化；
 // Set 的 value 须可 JSON 序列化，expired <= 0 表示永不过期；
 // Get 未命中返回 nil；读写方法以 bool 表示成功与否；
-// 原子方法（Incr/SetNX/TTL）返回 error，调用方可据此区分"未命中"与"后端故障"
-//（安全限流等 fail-closed 场景必须感知故障，不得静默放行）。
+// 原子方法（Incr/IncrBy/Decr/SetNX/TTL）返回 error，调用方可据此区分"未命中"与"后端故障"
+// （安全限流等 fail-closed 场景必须感知故障，不得静默放行）。
+// 计数三方法（Incr/IncrBy/Decr）统一采用固定窗口语义：键不存在或已过期时从 0 起算，
+// 只有"本次调用创建了键"的那一次才写入过期时间，后续增减保留原过期时间。
 type Store interface {
 	// Has - 判断缓存是否存在（过期视为不存在）
 	Has(key string) (ok bool)
@@ -45,6 +47,10 @@ type Store interface {
 	Clear() (ok bool)
 	// Incr - 原子自增 1（仅当自增结果为 1 时写入过期时间，实现固定窗口计数语义；expired <= 0 表示永不过期）
 	Incr(key string, expired time.Duration) (count int64, err error)
+	// IncrBy - 原子累加 n（键不存在或已过期时从 0 起算得 n；仅当本次调用创建键时写入过期时间；n 为负等价于自减；expired <= 0 表示永不过期）
+	IncrBy(key string, n int64, expired time.Duration) (count int64, err error)
+	// Decr - 原子自减 1（键不存在或已过期时从 0 起算得 -1，与 Redis DECR 口径一致；仅当本次调用创建键时写入过期时间；expired <= 0 表示永不过期）
+	Decr(key string, expired time.Duration) (count int64, err error)
 	// SetNX - 仅当键不存在时设置（已存在不覆盖、不续期；expired <= 0 表示永不过期）
 	SetNX(key string, value any, expired time.Duration) (ok bool, err error)
 	// TTL - 剩余存活秒数（>0 有效；0 = 不存在或已过期；-1 = 存在但永不过期）
@@ -60,10 +66,10 @@ var registry = struct {
 	sync.RWMutex
 	items map[string]Factory
 }{items: map[string]Factory{
-	"file":     newFileStore,
-	"redis":    newRedisStore,
-	"memory":   newMemoryStore,
-	"layered":  newLayeredStore,
+	"file":    newFileStore,
+	"redis":   newRedisStore,
+	"memory":  newMemoryStore,
+	"layered": newLayeredStore,
 }}
 
 // Register - 注册缓存驱动
@@ -277,6 +283,37 @@ func (this Driver) Incr(key string) (count int64, err error) {
 	return this.store.Incr(this.name(key), this.expired)
 }
 
+// IncrBy - 原子累加 n（固定窗口计数：仅当本次调用创建键时写入过期时间，过期时间取链式 Expired；n 为负等价于自减；不参与标签簿记）
+/**
+ * @param key string - 缓存键
+ * @param n   int64  - 累加量（可为负）
+ * @return count int64 - 累加后的值
+ * @return err error - 后端故障时返回错误（调用方可据此 fail-closed）
+ * @example：
+ * 	count, err := cachex.Cache.Expired(24 * time.Hour).IncrBy("apis:spend:m:1001:202608", 100)
+ */
+func (this Driver) IncrBy(key string, n int64) (count int64, err error) {
+	if this.store == nil || utils.Is.Empty(key) {
+		return 0, fmt.Errorf("cachex: store 未初始化或键为空")
+	}
+	return this.store.IncrBy(this.name(key), n, this.expired)
+}
+
+// Decr - 原子自减 1（固定窗口计数：仅当本次调用创建键时写入过期时间，过期时间取链式 Expired；键不存在时从 0 起算得 -1；不参与标签簿记）
+/**
+ * @param key string - 缓存键
+ * @return count int64 - 自减后的值
+ * @return err error - 后端故障时返回错误（调用方可据此 fail-closed）
+ * @example：
+ * 	count, err := cachex.Cache.Decr("apis:conc:1001:9")
+ */
+func (this Driver) Decr(key string) (count int64, err error) {
+	if this.store == nil || utils.Is.Empty(key) {
+		return 0, fmt.Errorf("cachex: store 未初始化或键为空")
+	}
+	return this.store.Decr(this.name(key), this.expired)
+}
+
 // SetNX - 仅当键不存在时设置（已存在不覆盖、不续期；过期时间取链式 Expired；不参与标签簿记）
 /**
  * @param key   string - 缓存键
@@ -427,6 +464,12 @@ func (this storeError) Clear() bool { return false }
 
 // Incr - 占位实现，返回初始化错误
 func (this storeError) Incr(string, time.Duration) (int64, error) { return 0, this.err }
+
+// IncrBy - 占位实现，返回初始化错误
+func (this storeError) IncrBy(string, int64, time.Duration) (int64, error) { return 0, this.err }
+
+// Decr - 占位实现，返回初始化错误
+func (this storeError) Decr(string, time.Duration) (int64, error) { return 0, this.err }
 
 // SetNX - 占位实现，返回初始化错误
 func (this storeError) SetNX(string, any, time.Duration) (bool, error) { return false, this.err }

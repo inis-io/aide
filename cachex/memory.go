@@ -104,6 +104,43 @@ func (this *MemoryStore) Incr(key string, expired time.Duration) (count int64, e
 	return count, nil
 }
 
+// add - 原子累加 n（分段锁内读-改-写串行；键不存在或已过期时从 0 起算，
+// 仅当本次调用创建键时写入过期时间，已有键保留原过期时间）
+func (this *MemoryStore) add(key string, n int64, expired time.Duration) (count int64, err error) {
+	lock := this.locks.lock(key)
+	lock.Lock()
+	defer lock.Unlock()
+
+	count = n
+	ttl := expired
+	if value, ok := this.Client.Get(key); ok {
+		// 已存在：累加并保留原过期时间（GetTTL 返回 (0,true) 表示永不过期）
+		count = cast.ToInt64(value) + n
+		if rest, found := this.Client.GetTTL(key); found {
+			ttl = rest
+		}
+	}
+	if ttl < 0 {
+		ttl = 0
+	}
+	if !this.Client.SetWithTTL(key, count, 1, ttl) {
+		return 0, fmt.Errorf("cachex: memory 驱动写入被丢弃")
+	}
+	// 为新键首写兜底：等准入结果对后续 Get 可见（已存在键的更新即时生效，此处只是快路径）
+	this.Client.Wait()
+	return count, nil
+}
+
+// IncrBy - 原子累加 n（键不存在或已过期时从 0 起算得 n；n 为负等价于自减）
+func (this *MemoryStore) IncrBy(key string, n int64, expired time.Duration) (count int64, err error) {
+	return this.add(key, n, expired)
+}
+
+// Decr - 原子自减 1（键不存在或已过期时从 0 起算得 -1，与 Redis DECR 口径一致）
+func (this *MemoryStore) Decr(key string, expired time.Duration) (count int64, err error) {
+	return this.add(key, -1, expired)
+}
+
 // SetNX - 仅当键不存在时设置（已存在不覆盖、不续期）
 func (this *MemoryStore) SetNX(key string, value any, expired time.Duration) (ok bool, err error) {
 	lock := this.locks.lock(key)

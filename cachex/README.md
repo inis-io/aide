@@ -5,8 +5,8 @@
 
 ## 1. 特性
 
-- **接口模式**：`Store` 接口是唯一扩展点（5 个读写方法 + 3 个原子方法），新后端实现即可接入
-- **原子原语**：`Incr`（固定窗口自增）/ `SetNX`（占位不续期）/ `TTL`（存活查询），返回 `error` 可判别后端故障，支撑安全限流等 fail-closed 场景
+- **接口模式**：`Store` 接口是唯一扩展点（5 个读写方法 + 5 个原子方法），新后端实现即可接入
+- **原子原语**：`Incr` / `IncrBy` / `Decr`（固定窗口增减计数，支撑限流与并发闸门）/ `SetNX`（占位不续期）/ `TTL`（存活查询），返回 `error` 可判别后端故障，支撑 fail-closed 场景
 - **内置驱动**：`file`（本地文件，零依赖开箱即用）、`memory`（ristretto v2，进程内高速缓存）、`layered`（内存 + 文件分层，读快且重启不丢）、`redis`（go-redis）
 - **链式调用**：值语义，每次调用返回副本，并发安全，天然隔离上下文
 - **标签分组**：`Tag` 簿记成员、`Delete` 按标签整组清除，簿记收敛在 Driver 层，新后端免费获得
@@ -96,6 +96,8 @@ cachex.Cache.Key("goods:9:price").Tag("user").Delete()
 | `Delete(key ...string)` | 删除缓存（实参键 + 链式累积键 + 各标签成员） |
 | `Clear()` | 清空缓存（redis 按前缀扫描删除，前缀为空回退 `FlushDB`） |
 | `Incr(key)` | 原子自增 1（固定窗口计数：仅首次自增写入链式 `Expired` 指定的过期时间；返回 `(count, err)`，不参与标签簿记） |
+| `IncrBy(key, n)` | 原子累加 `n`（键不存在或已过期时从 0 起算；仅当本次调用创建键时写入链式 `Expired`；`n` 为负等价于自减；返回 `(count, err)`，不参与标签簿记） |
+| `Decr(key)` | 原子自减 1（键不存在或已过期时从 0 起算得 -1；仅当本次调用创建键时写入链式 `Expired`；返回 `(count, err)`，不参与标签簿记。并发闸门：进入 `Incr`、退出 `Decr`） |
 | `SetNX(key, value)` | 仅当键不存在时设置（已存在不覆盖、不续期；返回 `(ok, err)`，不参与标签簿记） |
 | `TTL(key)` | 剩余存活秒数（返回 `(seconds, err)`：`>0` 有效、`0` 不存在或已过期、`-1` 存在但永不过期） |
 | `Store()` | 取出底层驱动（供类型断言访问驱动特有方法） |
@@ -151,7 +153,7 @@ cachex.Cache.Expired(5 * time.Minute).Set("ticket", "T-1") // 落盘，首读回
 语义与边界：
 
 - **写路径 ≈ 磁盘速度**：每次写都落盘（权威层），随后失效内存副本；首次读回源 L2 并回灌 L1
-- **重启恢复**：进程重启后数据仍在文件层，懒加载回源（ristretto 无法枚举键，不做启动预热）；`Incr` 计数重启后连续
+- **重启恢复**：进程重启后数据仍在文件层，懒加载回源（ristretto 无法枚举键，不做启动预热）；`Incr` / `IncrBy` / `Decr` 计数重启后连续
 - **一致性**：L1 是 L2 的保守子集，回灌 TTL 向下取整，L1 只会比 L2 更早过期；文件层写失败即整体失败
 - **适用**：读多写少 + 单进程 + 重启不想丢；高频写/计数请用 `redis`，只要不丢不在乎读速直接用 `file`
 
@@ -202,6 +204,15 @@ func (this store) Incr(key string, expired time.Duration) (int64, error) {
 	this.items[key] = count // 示例从简：生产实现需仅在首次自增（count == 1）时写入过期时间
 	return count, nil
 }
+func (this store) IncrBy(key string, n int64, expired time.Duration) (int64, error) {
+	count, _ := this.items[key].(int64)
+	count += n
+	this.items[key] = count // 示例从简：生产实现需仅在本次调用创建键时写入过期时间
+	return count, nil
+}
+func (this store) Decr(key string, expired time.Duration) (int64, error) {
+	return this.IncrBy(key, -1, expired) // 键不存在时从 0 起算得 -1
+}
 func (this store) SetNX(key string, value any, expired time.Duration) (bool, error) {
 	if _, ok := this.items[key]; ok { return false, nil }
 	this.items[key] = value
@@ -227,7 +238,7 @@ func init() {
 - 键由 Driver 层命名（前缀 + 哈希），驱动按原名持久化，不要自行再加工
 - `Set` 的 value 须可 JSON 序列化，`expired <= 0` 表示永不过期
 - `Get` 未命中或已过期返回 `nil`；返回值 `bool` 仅表示操作是否成功
-- 原子方法 `Incr` / `SetNX` / `TTL` 返回 `error` 暴露后端故障（fail-closed 调用方依赖该错误判别）；`Incr` 仅在自增结果为 1 时写入过期时间（固定窗口语义）；`TTL` 约定 `>0` 有效、`0` 不存在或已过期、`-1` 永不过期
+- 原子方法 `Incr` / `IncrBy` / `Decr` / `SetNX` / `TTL` 返回 `error` 暴露后端故障（fail-closed 调用方依赖该错误判别）；计数三方法 `Incr` / `IncrBy` / `Decr` 统一固定窗口语义（键不存在或已过期时从 0 起算，`Decr` 得 -1 与 Redis DECR 一致；仅写入一次过期时间，已有键保留原过期时间），`IncrBy` 的 `n` 可为负；`TTL` 约定 `>0` 有效、`0` 不存在或已过期、`-1` 永不过期
 
 注册后：`cachex.New("custom", config)` 可用；`Config.Engine` 填 `"custom"` 即可接入全局门面。
 
