@@ -13,7 +13,7 @@
 ├── cachex.go      # Store 接口、registry 注册表（变量初始化登记）、Driver 链式包装
 ├── config.go      # Config 配置结构、normConfig 默认值补齐、defaultContext 分段上下文
 ├── facade.go      # 全局门面：Inst 控制器单例 + Cache 全局实例（storeError 占位）
-├── file.go        # 文件驱动（afero，临时文件 + Rename 原子写入，可注入 MemMapFs 测试）
+├── file.go        # 文件驱动（afero，目录创建收敛在 write 内，临时文件 + Rename 原子写入，可注入 MemMapFs 测试）
 ├── memory.go      # 内存驱动（ristretto v2，TinyLFU 准入 + SampledLFU 淘汰，分段锁原子方法）
 ├── layered.go     # 分层驱动（L1 内存 + L2 文件，cache-aside：读回源回灌、写权威层后失效 L1）
 ├── redis.go       # Redis 驱动（go-redis，Clear 按前缀扫描，前缀空回退 FlushDB）
@@ -36,8 +36,8 @@
 
 ## 测试约定
 
-- 测试与源码同包同目录，标准库 `testing`，**禁止联网**（Redis 用 miniredis）；文件驱动用 `afero.NewMemMapFs` 实测。
-- 现有覆盖：注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动实测、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close 幂等）、分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法（Driver 透传与 nil 驱动报错、file 固定窗口/过期保留/并发自增与增减配平、memory 增减配平、layered 增减委托 L2 与重启连续、redis 经 miniredis 实测 Lua 自增/增减/SetNX/TTL）、storeError 原子方法错误透传。
+- 测试与源码同包同目录，标准库 `testing`，**禁止联网**（Redis 用 miniredis）；文件驱动主用 `afero.NewMemMapFs` 实测，全新根目录回归必须用真实 OsFs + 临时目录（MemMapFs 会自动补父目录，会掩盖「目录未创建」类缺陷）。
+- 现有覆盖：注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动实测、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close 幂等）、分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串、增减配平与不平衡累加）、全新根目录首次原子方法回归（真实 OsFs 多级目录 + Decr/IncrBy/Incr）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法（Driver 透传与 nil 驱动报错、file 固定窗口/过期保留/并发自增与增减配平、memory 增减配平、layered 增减委托 L2 与重启连续、redis 经 miniredis 实测 Lua 自增/增减/SetNX/TTL）、storeError 原子方法错误透传。
 
 ## 构建与测试命令
 

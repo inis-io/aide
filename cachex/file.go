@@ -48,11 +48,8 @@ func (this *FileStore) Get(key string) (value any) {
 	return this.get(key)
 }
 
-// Set - 设置缓存（expired <= 0 表示永不过期；临时文件 + 改名原子写入）
+// Set - 设置缓存（expired <= 0 表示永不过期；临时文件 + 改名原子写入，目录由 write 统一确保）
 func (this *FileStore) Set(key string, value any, expired time.Duration) (ok bool) {
-
-	// 创建存储目录
-	_ = this.Fs.MkdirAll(this.Config.Root, 0755)
 
 	data := utils.Json.Encode(fileBody{Expired: this.expiredAt(expired), Value: value})
 	return this.write(this.dest(key), []byte(data)) == nil
@@ -163,8 +160,11 @@ func (this *FileStore) expiredAt(expired time.Duration) int64 {
 	return at.Unix()
 }
 
-// write - 写入缓存文件：先写临时文件再改名，避免写入中途崩溃留下半个文件
+// write - 写入缓存文件：先确保目录存在，再写临时文件并改名，避免写入中途崩溃留下半个文件
 func (this *FileStore) write(dest string, data []byte) (err error) {
+
+	// 目录创建统一收敛在此：Set / Incr / IncrBy / Decr 首次写入全新根目录时都不会因路径不存在而失败
+	_ = this.Fs.MkdirAll(path.Dir(dest), 0755)
 
 	temp := dest + ".tmp"
 	if err = afero.WriteFile(this.Fs, temp, data, 0755); err != nil {

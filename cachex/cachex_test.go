@@ -3,6 +3,7 @@ package cachex
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -709,7 +710,34 @@ func TestFileStoreIncrByDecr(t *testing.T) {
 	}
 }
 
-// TestFileStoreIncrByDecrConcurrent - 验证文件驱动并发增减：闸门场景（进入累加、退出自减）计数不丢
+// TestFileStoreDecrOnFreshRoot - 验证全新存储目录（多级不存在）首次 IncrBy/Decr/Incr 也能落盘：目录创建收敛在 write 内部
+func TestFileStoreDecrOnFreshRoot(t *testing.T) {
+
+	// 真实文件系统 + 尚不存在的多级目录：复现「全新部署首次原子方法报路径不存在」的回归
+	root := filepath.Join(t.TempDir(), "cache", "nested")
+	store := &FileStore{Fs: afero.NewOsFs(), Config: FileConfig{Root: root, Suffix: "json"}}
+
+	if count, err := store.Decr("gate", 10*time.Minute); err != nil || count != -1 {
+		t.Fatalf("全新目录首次自减应为 -1，实际: %d, err=%v", count, err)
+	}
+	if count, err := store.IncrBy("quota", 70, 10*time.Minute); err != nil || count != 70 {
+		t.Fatalf("全新目录首次累加应为 70，实际: %d, err=%v", count, err)
+	}
+	if count, err := store.Incr("hit", 10*time.Minute); err != nil || count != 1 {
+		t.Fatalf("全新目录首次自增应为 1，实际: %d, err=%v", count, err)
+	}
+
+	// 落盘可回读（目录确实建好、JSON 写入成功）
+	if got := cast.ToInt64(store.Get("quota")); got != 70 {
+		t.Fatalf("全新目录落盘后应可回读 70，实际: %d", got)
+	}
+	if seconds, _ := store.TTL("gate"); seconds < 598 || seconds > 600 {
+		t.Fatalf("全新目录自减应写入过期时间，TTL 应接近 600 秒，实际: %d", seconds)
+	}
+}
+
+// TestFileStoreIncrByDecrConcurrent - 验证文件驱动并发增减：闸门场景（进入累加、退出自减）计数不丢，
+// 并追加不平衡段（只累加不自减）以暴露对称丢更新
 func TestFileStoreIncrByDecrConcurrent(t *testing.T) {
 
 	store := &FileStore{Fs: afero.NewMemMapFs(), Config: FileConfig{Root: "cache", Suffix: "json"}}
@@ -736,6 +764,24 @@ func TestFileStoreIncrByDecrConcurrent(t *testing.T) {
 	// 进入与退出次数相同，最终计数应精确归零（同键读-改-写未丢更新）
 	if got := cast.ToInt64(store.Get("gate")); got != 0 {
 		t.Fatalf("并发增减配平后计数应为 0，实际: %d", got)
+	}
+
+	// 不平衡段：只累加不自减，计数必须恰为总次数（对称丢更新在配平段可能互相抵消，这里无法掩盖）
+	var burst sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		burst.Add(1)
+		go func() {
+			defer burst.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.IncrBy("burst", 1, 10*time.Minute); err != nil {
+					t.Errorf("并发累加失败: %v", err)
+				}
+			}
+		}()
+	}
+	burst.Wait()
+	if got := cast.ToInt64(store.Get("burst")); got != goroutines*each {
+		t.Fatalf("不平衡段并发累加应恰为 %d，实际: %d", goroutines*each, got)
 	}
 }
 
@@ -995,6 +1041,24 @@ func TestMemoryStoreIncrByDecr(t *testing.T) {
 	group.Wait()
 	if got := cast.ToInt64(store.Get("g")); got != 0 {
 		t.Fatalf("并发增减配平后计数应为 0，实际: %d", got)
+	}
+
+	// 不平衡段：只累加不自减，计数必须恰为总次数（对称丢更新在配平段可能互相抵消，这里无法掩盖）
+	var burst sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		burst.Add(1)
+		go func() {
+			defer burst.Done()
+			for j := 0; j < each; j++ {
+				if _, err := store.IncrBy("burst", 1, 10*time.Minute); err != nil {
+					t.Errorf("并发累加失败: %v", err)
+				}
+			}
+		}()
+	}
+	burst.Wait()
+	if got := cast.ToInt64(store.Get("burst")); got != goroutines*each {
+		t.Fatalf("不平衡段并发累加应恰为 %d，实际: %d", goroutines*each, got)
 	}
 }
 

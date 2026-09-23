@@ -33,7 +33,8 @@ import (
 // 原子方法（Incr/IncrBy/Decr/SetNX/TTL）返回 error，调用方可据此区分"未命中"与"后端故障"
 // （安全限流等 fail-closed 场景必须感知故障，不得静默放行）。
 // 计数三方法（Incr/IncrBy/Decr）统一采用固定窗口语义：键不存在或已过期时从 0 起算，
-// 只有"本次调用创建了键"的那一次才写入过期时间，后续增减保留原过期时间。
+// 已有键一律保留原过期时间；Incr 沿用既有判定（自增结果为 1 时写过期时间），
+// IncrBy/Decr 则只在本次调用创建键（新建或过期重开窗口）时写入过期时间。
 type Store interface {
 	// Has - 判断缓存是否存在（过期视为不存在）
 	Has(key string) (ok bool)
