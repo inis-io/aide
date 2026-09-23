@@ -3,7 +3,7 @@ package admin
 import (
 	"encoding/json"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // 本文件 DTO 与平台逐一对齐：
@@ -1315,7 +1315,7 @@ type SaasMenuSaveResult struct {
 	// Version - 清单版本号
 	Version int `json:"version"`
 	// ImpactReport - 发布租户清单时的下游影响报告
-	ImpactReport *licence.SaasMenuImpactReport `json:"impactReport,omitempty"`
+	ImpactReport *LicenceRuntime.SaasMenuImpactReport `json:"impactReport,omitempty"`
 }
 
 // ============================= SaaS 功能字典 =============================

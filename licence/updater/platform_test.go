@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inis-io/aide/licence"
 	"github.com/inis-io/aide/licence/callback"
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // ============================= 假授权平台（契约行为镜像·更新链路迷你版） =============================
@@ -78,7 +79,7 @@ type fakeVersion struct {
 	grayPercent  int
 	artifactData []byte
 	artifacts    []fakeArtifact
-	policy       *licence.ManifestUpdatePolicy
+	policy       *LicenceRuntime.ManifestUpdatePolicy
 }
 
 // fakeEvent - 假订阅事件（eventId 即客户端水位，data 为事件摘要）
@@ -93,8 +94,8 @@ type fakeEvent struct {
 func newFakePlatform(t *testing.T) *fakePlatform {
 
 	t.Helper()
-	seed, publicKey := licence.Licence.GenerateKeyPair().KeyPair()
-	releaseSeed, releasePublicKey := licence.Licence.GenerateKeyPair().KeyPair()
+	seed, publicKey := LicenceProtocol.Licence.GenerateKeyPair().KeyPair()
+	releaseSeed, releasePublicKey := LicenceProtocol.Licence.GenerateKeyPair().KeyPair()
 	platform := &fakePlatform{
 		seed: seed, publicKey: publicKey,
 		releaseSeed: releaseSeed, releasePublicKey: releasePublicKey,
@@ -105,8 +106,8 @@ func newFakePlatform(t *testing.T) *fakePlatform {
 }
 
 // testOptions - 测试用客户端配置（显式指纹，避免依赖真实硬件采集）
-func testOptions(platform *fakePlatform, dir string) licence.Options {
-	return licence.Options{
+func testOptions(platform *fakePlatform, dir string) LicenceRuntime.Options {
+	return LicenceRuntime.Options{
 		ServerURL: platform.server.URL, LicenseNo: "LIC-2026-000123", Salt: "test-salt",
 		PublicKeys:        map[string]string{"license-key-2026-01": platform.publicKey},
 		ReleasePublicKeys: map[string]string{"release-key-2026-01": platform.releasePublicKey},
@@ -176,26 +177,26 @@ func (this *fakePlatform) handleActivate(writer http.ResponseWriter, body []byte
 	}
 	this.clientPublicKey = params.ClientPublicKey
 	this.deviceName = params.DeviceName
-	token := licence.Licence.Nonce() + licence.Licence.Nonce() + licence.Licence.Nonce() // 48 字节 hex
+	token := LicenceProtocol.Licence.Nonce() + LicenceProtocol.Licence.Nonce() + LicenceProtocol.Licence.Nonce() // 48 字节 hex
 	sum := sha256.Sum256([]byte(token))
 	this.tokenHash = hex.EncodeToString(sum[:])
 	this.expiresAt = time.Now().UnixMilli() + 7*24*3600*1000
 
-	envelope, err := licence.Licence.Payload(licence.Payload{
+	envelope, err := LicenceProtocol.Licence.Payload(LicenceProtocol.Payload{
 		LicenseId: "LIC-2026-000123", UserId: "USR-2026-000001", ProjectId: "PRJ-2026-000001",
 		InstanceId: "INS-2026-000001", Environment: "production", ValidFrom: "2026-01-01T00:00:00Z",
 		ValidUntil: "", GraceDays: 7, VersionRange: ">=2.0.0 <3.0.0",
 		Features: map[string]bool{"report.advanced": true}, Limits: map[string]int64{"max_users": 100},
-		Binding:  &licence.Binding{Type: "fingerprint", Value: params.FingerprintHash},
+		Binding:  &LicenceProtocol.Binding{Type: "fingerprint", Value: params.FingerprintHash},
 		IssuedAt: time.Now().UTC().Format(time.RFC3339), KeyVersion: "license-key-2026-01",
-		Nonce: licence.Licence.Nonce(), BindingPolicy: licence.BindingPolicySingle, SeatLimit: 1,
+		Nonce: LicenceProtocol.Licence.Nonce(), BindingPolicy: LicenceProtocol.BindingPolicySingle, SeatLimit: 1,
 	}).Seed(this.seed).Issue()
 	if err != nil {
-		writeJson(writer, map[string]any{"status": licence.StatusError, "serverTime": time.Now().UnixMilli(), "message": "签名服务未就绪"})
+		writeJson(writer, map[string]any{"status": LicenceProtocol.StatusError, "serverTime": time.Now().UnixMilli(), "message": "签名服务未就绪"})
 		return
 	}
 	writeJson(writer, map[string]any{
-		"status": licence.StatusValid, "serverTime": time.Now().UnixMilli(),
+		"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli(),
 		"envelope": envelope, "activationNo": "ACT-2026-000001",
 		"activationToken": token, "seatNo": "SEAT-2026-000001", "expiresAt": this.expiresAt,
 	})
@@ -212,7 +213,7 @@ func (this *fakePlatform) handleValidate(writer http.ResponseWriter, request *ht
 	}
 	this.expiresAt = time.Now().UnixMilli() + 7*24*3600*1000
 	writeJson(writer, map[string]any{
-		"status": licence.StatusValid, "serverTime": time.Now().UnixMilli(), "expiresAt": this.expiresAt,
+		"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli(), "expiresAt": this.expiresAt,
 	})
 }
 
@@ -221,7 +222,7 @@ func (this *fakePlatform) credential(writer http.ResponseWriter, request *http.R
 
 	sum := sha256.Sum256([]byte(request.Header.Get("X-License-Token")))
 	if this.tokenHash == "" || hex.EncodeToString(sum[:]) != this.tokenHash {
-		writeJson(writer, map[string]any{"status": licence.StatusExpired, "serverTime": time.Now().UnixMilli(), "message": "凭证无效或已过期，请重新激活"})
+		writeJson(writer, map[string]any{"status": LicenceProtocol.StatusExpired, "serverTime": time.Now().UnixMilli(), "message": "凭证无效或已过期，请重新激活"})
 		return false
 	}
 
@@ -236,7 +237,7 @@ func (this *fakePlatform) credential(writer http.ResponseWriter, request *http.R
 	}
 	bodySum := sha256.Sum256(body)
 	content := request.Method + "\n" + request.URL.RequestURI() + "\n" + timestamp + "\n" + nonce + "\n" + hex.EncodeToString(bodySum[:])
-	if !licence.Licence.VerifyRaw([]byte(content), signature, this.clientPublicKey) {
+	if !LicenceProtocol.Licence.VerifyRaw([]byte(content), signature, this.clientPublicKey) {
 		writeNotFound(writer)
 		return false
 	}
@@ -265,14 +266,14 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 
 	for _, version := range this.versions {
 		// 目标版本必须高于当前版本
-		if cmp, _ := licence.CompareVersion(version.version, params.Version); cmp <= 0 {
+		if cmp, _ := LicenceProtocol.CompareVersion(version.version, params.Version); cmp <= 0 {
 			continue
 		}
-		if !licence.VersionInRange(params.Version, version.sourceRange) {
+		if !LicenceProtocol.VersionInRange(params.Version, version.sourceRange) {
 			continue
 		}
 		if version.minUpgrade != "" {
-			if cmp, _ := licence.CompareVersion(params.Version, version.minUpgrade); cmp < 0 {
+			if cmp, _ := LicenceProtocol.CompareVersion(params.Version, version.minUpgrade); cmp < 0 {
 				continue
 			}
 		}
@@ -290,64 +291,64 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 
 		artifacts, err := this.signManifestArtifacts(version)
 		if err != nil {
-			writeJson(writer, map[string]any{"status": licence.StatusError, "serverTime": time.Now().UnixMilli()})
+			writeJson(writer, map[string]any{"status": LicenceProtocol.StatusError, "serverTime": time.Now().UnixMilli()})
 			return
 		}
 		manifest, err := this.issueManifest(version, artifacts)
 		if err != nil {
-			writeJson(writer, map[string]any{"status": licence.StatusError, "serverTime": time.Now().UnixMilli()})
+			writeJson(writer, map[string]any{"status": LicenceProtocol.StatusError, "serverTime": time.Now().UnixMilli()})
 			return
 		}
 		writeJson(writer, map[string]any{
-			"status": licence.StatusValid, "serverTime": time.Now().UnixMilli(), "update": true, "manifest": manifest,
+			"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli(), "update": true, "manifest": manifest,
 		})
 		return
 	}
-	writeJson(writer, map[string]any{"status": licence.StatusValid, "serverTime": time.Now().UnixMilli(), "update": false})
+	writeJson(writer, map[string]any{"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli(), "update": false})
 }
 
 // issueManifest - 签发更新清单（release-key 签名，与平台签发端同语义）
-func (this *fakePlatform) issueManifest(version fakeVersion, artifacts []licence.ManifestArtifact) (licence.Manifest, error) {
+func (this *fakePlatform) issueManifest(version fakeVersion, artifacts []LicenceRuntime.ManifestArtifact) (LicenceRuntime.Manifest, error) {
 
-	payload := licence.ManifestPayload{
+	payload := LicenceRuntime.ManifestPayload{
 		ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
 		Version: version.version, BuildNumber: version.buildNumber,
 		SourceVersionRange: version.sourceRange, MinUpgradeVersion: version.minUpgrade,
 		Artifacts: artifacts,
 		IssuedAt:  time.Now().UTC().Format(time.RFC3339), KeyVersion: "release-key-2026-01",
-		Nonce: licence.Licence.Nonce(), UpdatePolicy: version.policy,
+		Nonce: LicenceProtocol.Licence.Nonce(), UpdatePolicy: version.policy,
 	}
-	payloadBytes, err := licence.MarshalManifestPayload(payload)
+	payloadBytes, err := LicenceRuntime.MarshalManifestPayload(payload)
 	if err != nil {
-		return licence.Manifest{}, err
+		return LicenceRuntime.Manifest{}, err
 	}
-	signature, err := licence.Licence.Seed(this.releaseSeed).Sign(payloadBytes)
+	signature, err := LicenceProtocol.Licence.Seed(this.releaseSeed).Sign(payloadBytes)
 	if err != nil {
-		return licence.Manifest{}, err
+		return LicenceRuntime.Manifest{}, err
 	}
-	return licence.Manifest{
-		Version: licence.EnvelopeVersion, Algorithm: licence.Algorithm,
+	return LicenceRuntime.Manifest{
+		Version: LicenceProtocol.EnvelopeVersion, Algorithm: LicenceProtocol.Algorithm,
 		Payload: payload, Signature: signature,
 	}, nil
 }
 
 // signManifestArtifacts - 为假版本签发发布物清单项（多发布物优先，否则回退单 artifactData 兼容既有用例）
-func (this *fakePlatform) signManifestArtifacts(version fakeVersion) ([]licence.ManifestArtifact, error) {
+func (this *fakePlatform) signManifestArtifacts(version fakeVersion) ([]LicenceRuntime.ManifestArtifact, error) {
 
 	if len(version.artifacts) > 0 {
-		var artifacts []licence.ManifestArtifact
+		var artifacts []LicenceRuntime.ManifestArtifact
 		for index, item := range version.artifacts {
 			artifactNo := "ART-2026-" + strings.ReplaceAll(version.version, ".", "") + strconv.Itoa(index)
 			sum := sha256.Sum256(item.data)
 			sha256Hex := hex.EncodeToString(sum[:])
-			payload, _ := json.Marshal(licence.ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
-			sign, err := licence.Licence.Seed(this.releaseSeed).Sign(payload)
+			payload, _ := json.Marshal(LicenceRuntime.ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
+			sign, err := LicenceProtocol.Licence.Seed(this.releaseSeed).Sign(payload)
 			if err != nil {
 				return nil, err
 			}
-			artifacts = append(artifacts, licence.ManifestArtifact{
+			artifacts = append(artifacts, LicenceRuntime.ManifestArtifact{
 				ArtifactNo: artifactNo, FileName: item.fileName,
-				Url: this.server.URL + "/files/" + item.fileName,
+				Url:  this.server.URL + "/files/" + item.fileName,
 				Size: int64(len(item.data)), OsArch: item.osArch,
 				Sha256: sha256Hex, Signature: sign, KeyVersion: "release-key-2026-01",
 				ArtifactType: item.artifactType, SourceVersion: item.sourceVersion,
@@ -359,8 +360,8 @@ func (this *fakePlatform) signManifestArtifacts(version fakeVersion) ([]licence.
 	artifactNo := "ART-2026-" + strings.ReplaceAll(version.version, ".", "")
 	sum := sha256.Sum256(version.artifactData)
 	sha256Hex := hex.EncodeToString(sum[:])
-	payload, _ := json.Marshal(licence.ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
-	sign, err := licence.Licence.Seed(this.releaseSeed).Sign(payload)
+	payload, _ := json.Marshal(LicenceRuntime.ArtifactPayload{ArtifactNo: artifactNo, Version: version.version, Sha256: sha256Hex})
+	sign, err := LicenceProtocol.Licence.Seed(this.releaseSeed).Sign(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -369,9 +370,9 @@ func (this *fakePlatform) signManifestArtifacts(version fakeVersion) ([]licence.
 	if len(version.osArch) > 0 {
 		arch = version.osArch[0]
 	}
-	return []licence.ManifestArtifact{{
+	return []LicenceRuntime.ManifestArtifact{{
 		ArtifactNo: artifactNo, FileName: "app-" + version.version + ".tar.gz",
-		Url: this.server.URL + "/files/" + version.version,
+		Url:  this.server.URL + "/files/" + version.version,
 		Size: int64(len(version.artifactData)), OsArch: arch,
 		Sha256: sha256Hex, Signature: sign, KeyVersion: "release-key-2026-01",
 	}}, nil
@@ -395,7 +396,7 @@ func (this *fakePlatform) handleUpdateReport(writer http.ResponseWriter, request
 		params["recordNo"] = recordNo
 	}
 	this.reports = append(this.reports, params)
-	writeJson(writer, map[string]any{"status": licence.StatusValid, "serverTime": time.Now().UnixMilli(), "recordNo": recordNo})
+	writeJson(writer, map[string]any{"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli(), "recordNo": recordNo})
 }
 
 // handleSubscribe - 事件订阅：凭证校验 → 按 sinceEventId 过滤并现场重签（nonce 每次新鲜）
@@ -422,13 +423,13 @@ func (this *fakePlatform) handleSubscribe(writer http.ResponseWriter, request *h
 		}
 		envelope, err := signCallbackEnvelope(this.seed, event)
 		if err != nil {
-			writeJson(writer, map[string]any{"status": licence.StatusError, "serverTime": time.Now().UnixMilli()})
+			writeJson(writer, map[string]any{"status": LicenceProtocol.StatusError, "serverTime": time.Now().UnixMilli()})
 			return
 		}
 		items = append(items, map[string]any{"eventId": event.eventId, "envelope": envelope})
 	}
 	writeJson(writer, map[string]any{
-		"status": licence.StatusValid, "serverTime": time.Now().UnixMilli(), "events": items,
+		"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli(), "events": items,
 	})
 }
 
@@ -441,19 +442,19 @@ func signCallbackEnvelope(seed []byte, event fakeEvent) (json.RawMessage, error)
 		EventNo: event.eventNo, DeliveryNo: "SUB-" + event.eventNo, Event: event.event,
 		ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
 		OccurredAt: time.Now().UTC().Format(time.RFC3339),
-		Nonce:      licence.Licence.Nonce(), KeyVersion: "license-key-2026-01",
+		Nonce:      LicenceProtocol.Licence.Nonce(), KeyVersion: "license-key-2026-01",
 		Data: event.data,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	signature, err := licence.Licence.Seed(seed).Sign(raw)
+	signature, err := LicenceProtocol.Licence.Seed(seed).Sign(raw)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(callback.CallbackEnvelope{
-		Version: licence.EnvelopeVersion, Algorithm: licence.Algorithm,
+		Version: LicenceProtocol.EnvelopeVersion, Algorithm: LicenceProtocol.Algorithm,
 		Payload: payload, Signature: signature,
 	})
 }
@@ -515,6 +516,6 @@ func writeNotFound(writer http.ResponseWriter) {
 
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(http.StatusNotFound)
-	raw, _ := json.Marshal(map[string]any{"status": licence.StatusNotFound, "serverTime": time.Now().UnixMilli(), "message": "许可证或实例信息无效"})
+	raw, _ := json.Marshal(map[string]any{"status": LicenceProtocol.StatusNotFound, "serverTime": time.Now().UnixMilli(), "message": "许可证或实例信息无效"})
 	_, _ = writer.Write(raw)
 }

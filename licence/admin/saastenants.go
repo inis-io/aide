@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cast"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // SaasTenantsResource - SaaS 租户资源（/api/saas-tenants/*）
@@ -143,10 +143,10 @@ func (this *SaasTenantsResource) Reissue(ctx context.Context, input SaasTenantRe
 // mode: auto(默认，漂移感知：信封与套餐物化结果不一致/存在悬空码/清单版本落后时才重签) /
 // trim(仅裁剪悬空码) / rebase(跳过判定，强制按套餐重新物化全部目标租户)；
 // tenantIds 为空时处理项目下全部在营租户；收敛后为空的租户不签发空信封，计入 Skipped。
-// 结果类型复用运行面 licence.SyncTenantMenusResult（同一平台响应的唯一定义）。
-func (this *SaasTenantsResource) SyncMenus(ctx context.Context, projectId int, tenantIds []int, mode string) (*licence.SyncTenantMenusResult, error) {
+// 结果类型复用运行面 LicenceRuntime.SyncTenantMenusResult（同一平台响应的唯一定义）。
+func (this *SaasTenantsResource) SyncMenus(ctx context.Context, projectId int, tenantIds []int, mode string) (*LicenceRuntime.SyncTenantMenusResult, error) {
 
-	var result licence.SyncTenantMenusResult
+	var result LicenceRuntime.SyncTenantMenusResult
 	if err := this.client.post(ctx, "/api/saas-tenants/sync-menus", map[string]any{
 		"projectId": projectId, "tenantIds": tenantIds, "mode": mode,
 	}, &result); err != nil {

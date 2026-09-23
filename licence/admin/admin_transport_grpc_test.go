@@ -174,7 +174,7 @@ func (s *upgradeRecordAdminServer) FindUpgradeRecords(ctx context.Context, reque
 	s.fullName, _ = grpc.Method(ctx)
 	s.body = request.GetJson()
 	raw, _ := json.Marshal(map[string]any{
-		"data": []map[string]any{{"id": 5, "recordNo": "UPG-2026-000005", "status": "success"}},
+		"data":  []map[string]any{{"id": 5, "recordNo": "UPG-2026-000005", "status": "success"}},
 		"count": 1, "page": 1,
 	})
 	return &licencev1.AdminResponse{Code: 200, Message: "ok", DataJson: raw}, nil

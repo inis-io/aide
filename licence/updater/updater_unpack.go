@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // deleteListName - 增量包根级删除清单文件名（每行一个相对路径，`#` 开头为注释）
@@ -27,7 +27,7 @@ const deleteListName = "delete.list"
 // 增量包（artifactType=incremental）内含变更文件 + 根级 delete.list：
 // 解出的变更文件树合并进目标目录，delete.list 逐行给出应删除的相对路径。
 // 路径安全：条目统一 filepath.Clean，拒绝绝对路径与 `..` 逃逸（设计 §7.3）。
-func (this *Updater) unpackArtifact(ctx context.Context, artifact licence.ManifestArtifact, targetVersion string, src string) (string, []string, error) {
+func (this *Updater) unpackArtifact(ctx context.Context, artifact LicenceRuntime.ManifestArtifact, targetVersion string, src string) (string, []string, error) {
 
 	staging := filepath.Join(this.updateDir(), "work", targetVersion)
 	_ = os.RemoveAll(staging)

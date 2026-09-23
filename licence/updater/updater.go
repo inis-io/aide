@@ -1,6 +1,6 @@
 // Package updater - 在线更新执行器：检查 → 验签 → 下载 → 解包 → 备份 → 替换 → 优雅重启 → 上报 → 失败回滚。
 //
-// 与运行面 *licence.Client 平级组合（NewUpdater(client, options)），状态机持久化于
+// 与运行面 *LicenceRuntime.Client 平级组合（NewUpdater(client, options)），状态机持久化于
 // StorageDir/update/state.json（断电可恢复）；近实时更新提示经 callback 子包订阅
 // （EventUpdates，仅作提示，灰度与升级权仍以 updates/check 判定为准）。
 package updater
@@ -15,8 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inis-io/aide/licence"
 	"github.com/inis-io/aide/licence/callback"
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // ApplyMode - 更新应用模式。
@@ -63,7 +64,7 @@ type UpdaterOptions struct {
 	// KeepBackups - 保留备份份数，默认 1
 	KeepBackups int
 	// OnUpdateAvailable - 发现新版本回调（被动模式 UI 弹窗用）
-	OnUpdateAvailable func(licence.UpdateInfo)
+	OnUpdateAvailable func(LicenceRuntime.UpdateInfo)
 	// OnProgress - 下载/解包进度回调
 	OnProgress func(phase string, done int64, total int64)
 	// OnBeforeRestart - 重启前优雅收尾钩子（关 listener、flush）
@@ -76,7 +77,7 @@ type UpdaterOptions struct {
 // 与 Client 平级组合，状态机持久化于 StorageDir/update/state.json（断电可恢复）。
 type Updater struct {
 	// client - 所属运行面客户端
-	client *licence.Client
+	client *LicenceRuntime.Client
 	// options - 归一化后的配置
 	options UpdaterOptions
 
@@ -85,7 +86,7 @@ type Updater struct {
 	// state - 持久化更新状态
 	state updateState
 	// lastInfo - 最近一次检查结果（Pending / 被动 Apply 用）
-	lastInfo licence.UpdateInfo
+	lastInfo LicenceRuntime.UpdateInfo
 	// running - 更新流水线是否执行中（单飞防并发）
 	running bool
 	// cancel - 周期检查循环取消函数
@@ -93,7 +94,7 @@ type Updater struct {
 }
 
 // NewUpdater - 创建更新执行器（归一化配置，不发起网络请求）
-func NewUpdater(client *licence.Client, options UpdaterOptions) (*Updater, error) {
+func NewUpdater(client *LicenceRuntime.Client, options UpdaterOptions) (*Updater, error) {
 
 	if client == nil {
 		return nil, errors.New("client 不能为空")
@@ -163,7 +164,7 @@ func (this *Updater) Stop() {
 }
 
 // CheckNow - 立即检查更新（绕过周期间隔），结果同时推给 OnUpdateAvailable
-func (this *Updater) CheckNow(ctx context.Context) (licence.UpdateInfo, error) {
+func (this *Updater) CheckNow(ctx context.Context) (LicenceRuntime.UpdateInfo, error) {
 
 	info, err := this.client.CheckUpdate(ctx, this.options.OSArch)
 	if err != nil {
@@ -181,7 +182,7 @@ func (this *Updater) CheckNow(ctx context.Context) (licence.UpdateInfo, error) {
 }
 
 // Apply - 对一次已确认的更新执行完整流水线（含替换与重启触发）
-func (this *Updater) Apply(ctx context.Context, info licence.UpdateInfo) error {
+func (this *Updater) Apply(ctx context.Context, info LicenceRuntime.UpdateInfo) error {
 
 	this.mu.Lock()
 	if this.running {
@@ -215,9 +216,9 @@ func (this *Updater) Commit(ctx context.Context) error {
 	this.mu.Unlock()
 
 	// 上报 success（失败不阻断清理，next 轮不会重复推进：记录已落 success）
-	_, _ = this.client.ReportUpgrade(ctx, licence.UpgradeReport{
+	_, _ = this.client.ReportUpgrade(ctx, LicenceRuntime.UpgradeReport{
 		RecordNo: recordNo, FromVersion: fromVersion, TargetVersion: targetVersion,
-		ArtifactNo: artifactNo, Status: licence.UpgradeSuccess, Message: "升级完成，运行正常",
+		ArtifactNo: artifactNo, Status: LicenceRuntime.UpgradeSuccess, Message: "升级完成，运行正常",
 	})
 	this.cleanupBackups()
 	this.cleanupWork()
@@ -254,7 +255,7 @@ func (this *Updater) EventUpdates() *callback.EventSubscriber {
 }
 
 // Pending - 查询是否存在「已替换待重启」的更新（客户 UI 显示「重启以完成更新」）
-func (this *Updater) Pending() (licence.UpdateInfo, bool) {
+func (this *Updater) Pending() (LicenceRuntime.UpdateInfo, bool) {
 
 	this.mu.RLock()
 	defer this.mu.RUnlock()
@@ -262,7 +263,7 @@ func (this *Updater) Pending() (licence.UpdateInfo, bool) {
 		(this.lastInfo.Manifest != nil || this.state.TargetVersion != "") {
 		return this.lastInfo, true
 	}
-	return licence.UpdateInfo{}, false
+	return LicenceRuntime.UpdateInfo{}, false
 }
 
 // Run - 包装项目 main：启动 Updater（含崩溃恢复），main 返回后检测「更新待重启」并完成重启分流。
@@ -361,7 +362,7 @@ func (this *Updater) recoverState(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-		this.report(ctx, licence.UpgradeInstalling, "新进程启动，健康确认中")
+		this.report(ctx, LicenceRuntime.UpgradeInstalling, "新进程启动，健康确认中")
 		return this.Commit(ctx)
 	case PhaseVerifying:
 		if state.VerifyingUntil > 0 && nowMs() < state.VerifyingUntil {
@@ -395,7 +396,7 @@ func (this *Updater) recoverState(ctx context.Context) error {
 }
 
 // apply - 完整更新流水线（CheckUpdate 已验签；本流程只消费已验签落盘的文件）
-func (this *Updater) apply(ctx context.Context, info licence.UpdateInfo) error {
+func (this *Updater) apply(ctx context.Context, info LicenceRuntime.UpdateInfo) error {
 
 	if info.Manifest == nil {
 		return errors.New("清单为空")
@@ -406,7 +407,7 @@ func (this *Updater) apply(ctx context.Context, info licence.UpdateInfo) error {
 
 	// 防降级（设计 §7.4）：拒绝 targetVersion <= fromVersion（任一版本不可解析时跳过比较，不放任猜测）
 	if from != "" {
-		if cmp, ok := licence.CompareVersion(target, from); ok && cmp <= 0 {
+		if cmp, ok := LicenceProtocol.CompareVersion(target, from); ok && cmp <= 0 {
 			return errors.New("拒绝降级：目标 " + target + " <= 当前 " + from)
 		}
 	}
@@ -425,7 +426,7 @@ func (this *Updater) apply(ctx context.Context, info licence.UpdateInfo) error {
 	if err = this.setState(PhaseDownloading, nil); err != nil {
 		return err
 	}
-	this.report(ctx, licence.UpgradeDownloading, "开始下载更新包 " + artifact.ArtifactNo)
+	this.report(ctx, LicenceRuntime.UpgradeDownloading, "开始下载更新包 "+artifact.ArtifactNo)
 
 	// downloading：DownloadArtifact（验签 + SHA-256 + 原子落盘）
 	downloadDir := filepath.Join(this.updateDir(), "download")
@@ -473,7 +474,7 @@ func (this *Updater) apply(ctx context.Context, info licence.UpdateInfo) error {
 	if err = this.swap(ctx, artifact.ArtifactType, staging, deleteList); err != nil {
 		this.logf(ctx, "替换失败，开始回滚")
 		if rollbackErr := this.rollback(ctx); rollbackErr != nil {
-			this.report(ctx, licence.UpgradeFailed, "替换失败且回滚失败："+rollbackErr.Error())
+			this.report(ctx, LicenceRuntime.UpgradeFailed, "替换失败且回滚失败："+rollbackErr.Error())
 		}
 		this.setState(PhaseFailed, nil)
 		return err
@@ -485,7 +486,7 @@ func (this *Updater) apply(ctx context.Context, info licence.UpdateInfo) error {
 	}); err != nil {
 		return err
 	}
-	this.report(ctx, licence.UpgradeInstalling, "替换完成，准备重启")
+	this.report(ctx, LicenceRuntime.UpgradeInstalling, "替换完成，准备重启")
 	if this.options.OnBeforeRestart != nil {
 		this.options.OnBeforeRestart()
 	}
@@ -497,7 +498,7 @@ func (this *Updater) apply(ctx context.Context, info licence.UpdateInfo) error {
 // fail - 流水线失败统一出口：上报 failed + 持久化 failed 终态
 func (this *Updater) fail(ctx context.Context, err error, message string) error {
 
-	this.report(ctx, licence.UpgradeFailed, message+":"+err.Error())
+	this.report(ctx, LicenceRuntime.UpgradeFailed, message+":"+err.Error())
 	this.setState(PhaseFailed, nil)
 	return err
 }
@@ -509,11 +510,11 @@ func (this *Updater) rollback(ctx context.Context) error {
 		return err
 	}
 	if err := this.restoreBackup(); err != nil {
-		this.report(ctx, licence.UpgradeFailed, "回滚失败："+err.Error())
+		this.report(ctx, LicenceRuntime.UpgradeFailed, "回滚失败："+err.Error())
 		this.setState(PhaseFailed, nil)
 		return err
 	}
-	this.report(ctx, licence.UpgradeRolledBack, "已回滚到上一版本")
+	this.report(ctx, LicenceRuntime.UpgradeRolledBack, "已回滚到上一版本")
 	this.cleanupWork()
 	this.setState(PhaseFailed, nil)
 	return nil
@@ -523,7 +524,7 @@ func (this *Updater) rollback(ctx context.Context) error {
 func (this *Updater) report(ctx context.Context, status string, message string) {
 
 	this.mu.RLock()
-	report := licence.UpgradeReport{
+	report := LicenceRuntime.UpgradeReport{
 		RecordNo: this.state.RecordNo, FromVersion: this.state.FromVersion,
 		TargetVersion: this.state.TargetVersion, ArtifactNo: this.state.ArtifactNo,
 		Status: status, Message: message,
@@ -551,7 +552,7 @@ func (this *Updater) progress(phase string, done int64, total int64) {
 
 // shouldAuto - 自动更新判定（设计 §5.8）：
 // 清单 updatePolicy 随签名背书，force/auto 权威；旧清单无策略时以 SDK AutoUpdate 配置兜底
-func (this *Updater) shouldAuto(info licence.UpdateInfo) bool {
+func (this *Updater) shouldAuto(info LicenceRuntime.UpdateInfo) bool {
 
 	if info.Manifest == nil {
 		return false
@@ -567,7 +568,7 @@ func (this *Updater) shouldAuto(info licence.UpdateInfo) bool {
 }
 
 // selectArtifact - 选包：增量优先（sourceVersion = 当前版本 精确匹配），未命中回退全量（设计 §4.3）
-func (this *Updater) selectArtifact(manifest *licence.Manifest, fromVersion string) (licence.ManifestArtifact, error) {
+func (this *Updater) selectArtifact(manifest *LicenceRuntime.Manifest, fromVersion string) (LicenceRuntime.ManifestArtifact, error) {
 
 	for _, artifact := range manifest.Payload.Artifacts {
 		if artifact.OsArch != "" && artifact.OsArch != this.options.OSArch {
@@ -585,7 +586,7 @@ func (this *Updater) selectArtifact(manifest *licence.Manifest, fromVersion stri
 			return artifact, nil
 		}
 	}
-	return licence.ManifestArtifact{}, errors.New("无匹配当前环境（osArch/来源版本）的发布物")
+	return LicenceRuntime.ManifestArtifact{}, errors.New("无匹配当前环境（osArch/来源版本）的发布物")
 }
 
 // currentVersion - 当前运行版本（来自运行面客户端配置）

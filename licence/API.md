@@ -34,9 +34,9 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | 回调接收与事件订阅 | `licence/callback` | `callback.NewCallbackHandler(CallbackOptions)`、`callback.NewEventSubscriber(client, CallbackOptions)` | 客户项目接收 webhook / 主动订阅平台事件 |
 | 配置定义校验引擎 | `licence/config` | `config.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
 | 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
-| API 商城（骨架） | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（随商城后端就绪落地；面向 `Doer` 窄接口、不 import 根包） |
+| API 商城（骨架） | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（随商城后端就绪落地；面向 `Doer` 窄接口、不 import runtime） |
 
-依赖方向（编译期保证无环）：`admin` / `updater` / `callback` → 根包 → `config` / `apis`；`proto/licence/v1` 与 `protocol` 为共享契约包，自身不 import 根包。
+依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol`/`config`/`apis` 为叶子包。
 
 两类客户端的协议完全不同，互不通用：
 
@@ -69,14 +69,14 @@ type GRPCOptions struct {
 
 ## 2. 常量与状态码
 
-### 2.1 算法与信封版本（`envelope.go`）
+### 2.1 算法与信封版本（`protocol/envelope.go`）
 
 | 常量 | 值 | 说明 |
 |---|---|---|
 | `Algorithm` | `"Ed25519"` | 签名算法标识，所有信封固定 |
 | `EnvelopeVersion` | `1` | 信封结构版本，所有信封固定 |
 
-### 2.2 运行面状态码（`status.go`）
+### 2.2 运行面状态码（`protocol/status.go`）
 
 放行状态（业务闸门放行）：`VALID` / `EXPIRING` / `GRACE` / `CLOCK_TAMPERED`。
 
@@ -98,7 +98,7 @@ type GRPCOptions struct {
 | `StatusNotFound` | `NOT_FOUND` | 许可证/实例信息无效或请求签名不合法（传输层） |
 | `StatusError` | `ERROR` | 服务端故障（按网络异常处理，沿用本地缓存） |
 
-### 2.3 升级记录状态（`update.go`）
+### 2.3 升级记录状态（`runtime/update.go`）
 
 | 常量 | 值 | 说明 |
 |---|---|---|
@@ -133,7 +133,7 @@ type GRPCOptions struct {
 
 ### 3.1 信封结构体
 
-#### `Payload` - 许可证签发载荷（`envelope.go`）
+#### `Payload` - 许可证签发载荷（`protocol/envelope.go`）
 
 **字段顺序即 JSON 序列化顺序，直接决定签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**
 
@@ -206,7 +206,7 @@ ok2 := licence.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey)
 
 ## 4. 版本范围判定
 
-### `VersionInRange`（`version-range.go`）
+### `VersionInRange`（`protocol/version-range.go`）
 
 ```go
 func VersionInRange(version string, rangeExpr string) bool
@@ -228,7 +228,7 @@ licence.VersionInRange("2.3.1", ">=2.0.0 <3.0.0") // true
 
 ## 5. 实例指纹
 
-### `FingerprintProvider`（`fingerprint.go`）
+### `FingerprintProvider`（`runtime/fingerprint.go`）
 
 ```go
 type FingerprintProvider func() (string, error)
@@ -256,7 +256,7 @@ func FingerprintHash(salt string, override string, provider FingerprintProvider)
 
 ## 6. 安全存储接口
 
-### `Store`（`store.go`）
+### `Store`（`runtime/store.go`）
 
 ```go
 type Store interface {
@@ -561,7 +561,7 @@ func ParseCallbackEnvelope(data []byte) (CallbackEnvelope, []byte, error)
 | `config.PushbackDiffStats` | diff 计数：`Created` / `Updated` / `Deleted` / `Unchanged` |
 | `PushbackDefinitionsError` | 400 校验失败（根包）：`Message`（平台汇总文案）+ `Errors []config.ConfigValidationError`（逐条明细） |
 
-**配置校验引擎**（`config` 子包，全系统唯一实现——SDK 本地预校验与 licen-hub backend 复用同一份，禁止另起规则引擎；`Client.ValidateConfig*` 为根包薄壳）：
+**配置校验引擎**（`config` 子包，全系统唯一实现——SDK 本地预校验与 licen-hub backend 复用同一份，禁止另起规则引擎；`Client.ValidateConfig*` 为 `runtime` 包薄壳）：
 
 | 符号 | 签名 | 说明 |
 |---|---|---|
@@ -630,7 +630,7 @@ _ = sub.Run(ctx)              // 或后台循环直到 ctx 取消
 
 > 使用方是商户自有运维系统/CI。HTTP 使用 `{code, msg, data}` JSON 信封；gRPC 使用显式业务 RPC 并映射为相同的 `APIError` 语义。账密登录在生产环境必须使用 TLS。HTTP 的 `safety.api.sign` 开关不套用到 gRPC。
 >
-> **本节全部符号位于 `admin` 子包**（`import "github.com/inis-io/aide/licence/admin"`；`AdminOptions.Transport`/`GRPC` 复用根包 `licence.Transport`/`licence.GRPCOptions`；例外：`SyncTenantMenusResult` 等少量共享类型留在根包，见对应条目）。
+> **本节全部符号位于 `admin` 子包**（`import "github.com/inis-io/aide/licence/admin"`；`AdminOptions.Transport`/`GRPC` 复用根包 `licence.Transport`/`licence.GRPCOptions`；例外：`SyncTenantMenusResult` 等少量共享类型实现于 `runtime` 包、经根包门面镜像，见对应条目）。
 
 ### 10.1 配置与创建
 
@@ -869,7 +869,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Resume` | 恢复（suspended → active，即时生效，reason 必填） | `POST /api/saas-tenants/resume` | `id int, reason string` → `*StatusResult` |
 | `Revoke` | 吊销（active/suspended → revoked，不可逆，reason 必填） | `POST /api/saas-tenants/revoke` | `id int, reason string` → `*StatusResult` |
 | `Reissue` | 重签（以现载荷为基础按入参覆盖，空值沿用现载荷；直通不产生申请单） | `POST /api/saas-tenants/reissue` | `SaasTenantReissueInput` → `*SaasTenantNoResult` |
-| `SyncMenus` | 按「当前 published 租户清单 + 套餐当前权益」收敛并原子重签（mode：`auto` 漂移感知 / `trim` 仅裁悬空码 / `rebase` 强制按套餐重物化）；tenantIds 为空处理全项目在营租户 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int, mode string` → `*licence.SyncTenantMenusResult`（根包运行面共享类型） |
+| `SyncMenus` | 按「当前 published 租户清单 + 套餐当前权益」收敛并原子重签（mode：`auto` 漂移感知 / `trim` 仅裁悬空码 / `rebase` 强制按套餐重物化）；tenantIds 为空处理全项目在营租户 | `POST /api/saas-tenants/sync-menus` | `projectId int, tenantIds []int, mode string` → `*licence.SyncTenantMenusResult`（runtime 包运行面共享类型，经根包门面镜像） |
 | `BatchRenew` | 批量续期（仅 active/suspended 可续；member 逐租户生成 change 申请单走审批；platform 直通重签；ids 须全部处于写数据范围内否则整体拒绝） | `POST /api/saas-tenants/batch-renew` | `SaasTenantBatchRenewInput` → `*SaasTenantBatchRenewResult` |
 | `Applications` | 我的申请分页 | `GET /api/saas-tenants/applications/find` | `*SaasTenantApplicationFindParams` → `*Page[SaasTenantApplication]` |
 | `ApplicationTake` | 我的申请详情 | `GET /api/saas-tenants/applications/take?id=N` | `id int` → `*SaasTenantApplication` |
@@ -990,24 +990,23 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 | 文件 / 子包 | 能力 |
 |---|---|
-| `envelope.go` / `sign.go` / `licence.go` | 纯函数层：信封结构、签发、验签、密钥对、nonce |
-| `status.go` | 运行面状态码与本地时间判定 |
-| `version-range.go` | 版本范围表达式判定 |
-| `fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
-| `store.go` | 安全存储接口与默认加密文件实现 |
-| `client.go` / `transport.go` / `runtime-transport*.go` | 运行面客户端：生命周期、后台刷新、请求签名、信封缓存、HTTP/gRPC 双传输 |
-| `manifest.go` / `update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
-| `tenant.go` / `saas.go` | SaaS 租户：信封结构、同步、校验、本地判定 |
-| `events.go` | 运行面事件拉取原语：`Client.PullEvents` / `Client.PublicKeys`（订阅器在 `callback` 子包） |
-| `platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
-| `pushback.go` | 配置回推：`PushConfig`/`PushTenantConfig` 客户端权威全量快照回推（HTTP/gRPC 双协议） |
-| `pushback_definitions.go` | 配置定义反推：`PushConfigDefinitions` 项目级定义快照回推（403 开关闸门 / 400 errors 明细，HTTP/gRPC 双协议） |
-| `config-validate.go` | `Client.ValidateConfig` / `Client.ValidateConfigDefinitions` 薄壳（校验引擎与定义类型在 `config` 子包） |
-| `apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口） |
+| `doc.go` / `facade.go` | 根包纯门面：86 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
+| `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` | 平台契约镜像层：信封结构、签发、验签、密钥对、nonce、canonical 助手（licen-hub backend 直接 import） |
+| `protocol/status.go` | 运行面状态码与本地时间判定 |
+| `protocol/version-range.go` | 版本范围表达式判定 |
+| `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
+| `runtime/store.go` | 安全存储接口与默认加密文件实现 |
+| `runtime/client.go` | 运行面客户端：生命周期、后台刷新、权益闸门、事件拉取原语（`PullEvents`/`PublicKeys`，订阅器在 `callback` 子包）、消费记录上报 |
+| `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、信封缓存与 HTTP/gRPC 双传输实现 |
+| `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
+| `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |
+| `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
+| `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
+| `runtime/provision.go` | 自助发放 `Provision` 与兑换码兑换 `Redeem`（HTTP/gRPC 双协议） |
+| `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口） |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
 | `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 14 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`） |
 | `apis/` | API 商城 typed 方法包骨架：`Client{doer}` + `New` + `Receipt` + `ErrNotActivated`（typed 方法随商城后端就绪落地） |
 | `proto/licence/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改） |
-| `protocol/` | 签名 canonical 助手（licen-hub backend 直接 import） |

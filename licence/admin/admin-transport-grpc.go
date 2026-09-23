@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 type grpcAdminTransport struct {
@@ -42,7 +42,7 @@ type grpcAdminTransport struct {
 }
 
 func newGRPCAdminTransport(client *AdminClient) (*grpcAdminTransport, error) {
-	conn, err := licence.NewGRPCConn(client.options.ServerURL, client.options.GRPC, client.options.HTTPTimeout)
+	conn, err := LicenceRuntime.NewGRPCConn(client.options.ServerURL, client.options.GRPC, client.options.HTTPTimeout)
 	if err != nil {
 		return nil, adminGRPCError(err)
 	}

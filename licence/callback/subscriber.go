@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // EventPuller - 事件拉取方窄接口（消费方定义，避免 callback 反向依赖具体客户端实现）。
-// *licence.Client 的 PullEvents 方法天然满足本接口；测试可注入假实现。
+// *LicenceRuntime.Client 的 PullEvents 方法天然满足本接口；测试可注入假实现。
 type EventPuller interface {
 	// PullEvents - 一轮事件拉取（长轮询/流式），返回按 eventId 升序的已接收事件批次；
 	// 非放行态/服务端故障/传输错误均以 error 返回
-	PullEvents(ctx context.Context, sinceEventId int64, hold time.Duration) ([]licence.SubscribedEvent, error)
+	PullEvents(ctx context.Context, sinceEventId int64, hold time.Duration) ([]LicenceRuntime.SubscribedEvent, error)
 }
 
-// publicKeysProvider - 拉取方可选实现的公钥提供者（*licence.Client.PublicKeys 满足）；
+// publicKeysProvider - 拉取方可选实现的公钥提供者（*LicenceRuntime.Client.PublicKeys 满足）；
 // 命中时订阅器强制复用其公钥（镜像旧 Client.Subscribe 语义：订阅验签公钥与客户端同源）
 type publicKeysProvider interface {
 	PublicKeys() map[string]string
@@ -34,7 +34,7 @@ type EventSubscriber struct {
 	hold      time.Duration // 单轮长轮询 hold（0 用默认 15s，传输层再收敛到各自超时）
 }
 
-// NewEventSubscriber - 创建事件订阅器（puller 通常为 *licence.Client；
+// NewEventSubscriber - 创建事件订阅器（puller 通常为 *LicenceRuntime.Client；
 // puller 实现 PublicKeys() 时验签公钥强制取自 puller，否则用 options.PublicKeys；
 // options 可覆盖 TimeWindow/DedupTTL 等）。
 /**

@@ -1,4 +1,7 @@
-// Package protocol 提供 Licence HTTP/gRPC 双协议共享的请求签名 canonical。
+// Package protocol 提供 Licen Hub 平台契约镜像层：
+// 许可证签名信封（Envelope/Payload）、Ed25519 签发与验签原语、运行面状态码与本地判定、
+// 版本范围语义，以及 HTTP/gRPC 双协议共享的请求签名 canonical。
+// 载荷字段顺序即签名内容：新增字段只允许追加到末尾，禁止插入、重排或改名。
 package protocol
 
 import (

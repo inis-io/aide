@@ -5,42 +5,50 @@
 
 ## 模块定位与当前状态
 
-- 本目录是 Licen Hub 的 Go SDK，按职责拆为「根包 + 子包」：
-  根包 = 运行面 `Client` + 纯函数层（签名/验签/信封/状态码/版本范围/指纹/安全存储）；
+- 本目录是 Licen Hub 的 Go SDK，按职责拆为「门面根包 + 实现子包」：
+  根包 = 纯门面（`doc.go` + `facade.go`，86 个导出符号全部以别名镜像，无任何实现）；
+  `runtime/` = 运行面 `Client` + 传输/指纹/安全存储/SaaS/在线更新/发放兑换/配置回推；
+  `protocol/` = 平台契约镜像层（信封/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
   RuleSet 校验引擎；`apis/` = API 商城 typed 方法包骨架。
+- 下游 `import licence "github.com/inis-io/aide/licence"` 零改动：门面别名对调用方透明
+  （类型别名同一性、常量/函数签名全部保留）。模块内子包（admin/callback/updater）不经
+  门面，直连 `runtime` 与 `protocol`。
 - 本目录有独立 `go.mod`，不参与 aide 根模块的 `go build ./...`，必须在本目录单独构建测试。
 
 ## 目录结构与依赖方向
 
 ```text
 licence/
-├── *.go              # 根包 licence：运行面 Client + 纯函数层（客户项目接入的唯一必引包）
+├── doc.go + facade.go # 根包 licence：纯门面别名（客户项目接入的唯一必引包）
+├── runtime/          # 运行面 Client、传输（HTTP/gRPC）、指纹、存储、SaaS、更新、发放、回推
+├── protocol/         # 平台契约镜像层（信封/签名/状态码/版本范围；licen-hub backend 直接 import）
 ├── admin/            # 管理面 AdminClient（admin.go + admin-transport*.go + 14 个资源文件）
 ├── updater/          # 在线更新执行器（自更新 swap/unpack/restart/state）
 ├── callback/         # 回调接收端 CallbackHandler + 事件订阅器 EventSubscriber
 ├── config/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
 ├── apis/             # API 商城 typed 方法包骨架（typed 方法随商城后端就绪落地）
-├── proto/            # gRPC 权威契约与生成代码（禁手改）
-└── protocol/         # 签名 canonical 助手（licen-hub backend 直接 import）
+└── proto/            # gRPC 权威契约与生成代码（禁手改）
 ```
 
 依赖方向铁律（改动后必须 `go list -deps` 复核）：
 
-- 根包**只允许** import 两个子包：`config`（`Client.ValidateConfig*` 薄壳的引擎）与
-  `apis`（`Client.Apis` 挂载点）；**禁止** import `admin` / `updater` / `callback`；
-- `admin` / `updater` / `callback` → 根包（共享 `Transport`/`GRPCOptions`、验签纯函数、
-  `ManifestArtifact`/`Upgrade*` 等运行面类型；类型一律留根包，子包反向引用即按此切开）；
-- `apis` / `config` 为叶子包，不 import 根包。apis 面向自声明的 `Doer` 窄接口编程，
-  由根包 `apis.go` 的 `apisDoer` 适配器注入 `doRequest`（withSign=true）调用能力，
+- 根包（门面）**只允许** import `runtime` 与 `protocol` 两个子包做别名，**禁止**新增任何实现；
+- `runtime` → `protocol`（限定引用 `LicenceProtocol.X`，不再导出）、`config`、
+  `apis`、`proto/licence/v1`；**禁止** import 根包 / `admin` / `updater` / `callback`；
+- `protocol` 为叶子包：不 import 模块内任何包（契约镜像语义唯一权威）；
+- `admin` / `updater` / `callback` → `runtime` + `protocol`（共享 `Transport`/`GRPCOptions`、
+  验签纯函数、`ManifestArtifact`/`Upgrade*` 等运行面类型一律留 `runtime`）；
+- `apis` / `config` 为叶子包，不 import 根包与 `runtime`。apis 面向自声明的 `Doer` 窄接口编程，
+  由 `runtime/apis.go` 的 `apisDoer` 适配器注入 `doRequest`（withSign=true）调用能力，
   未激活闸门返回 `apis.ErrNotActivated`；
-- `proto/licence/v1` 与 `protocol` 被各包引用，自身不 import 根包。
+- `proto/licence/v1` 被各包引用，自身不 import 模块内任何包。
 - **截至 2026-08-09，运行面与管理面现有全资源均已实现 HTTP + gRPC**（运行面含许可证、在线更新、
   SaaS 租户、平台配置、事件订阅与配置回推 `ConfigPushbackRuntimeService/Push`；
   另有配置定义反推 `ConfigPushbackRuntimeService/PushDefinitions`（仅项目级，403 开关闸门 /
   400 errors 明细）与配置校验引擎 `config` 子包（全系统唯一实现，licen-hub backend import
-  复用；根包 `config-validate.go` 仅留 `Client` 方法薄壳））。
+  复用；`runtime` 包仅留 `Client` 方法薄壳））。
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`；服务端共同消费该契约，
   禁止在 Licen Hub 仓库复制第二份 proto。

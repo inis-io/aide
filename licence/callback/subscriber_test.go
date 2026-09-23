@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inis-io/aide/licence"
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // ============================= 假事件拉取方（EventPuller 镜像） =============================
@@ -36,7 +37,7 @@ type fakeEventPuller struct {
 }
 
 // PullEvents - 实现 EventPuller
-func (this *fakeEventPuller) PullEvents(_ context.Context, sinceEventId int64, hold time.Duration) ([]licence.SubscribedEvent, error) {
+func (this *fakeEventPuller) PullEvents(_ context.Context, sinceEventId int64, hold time.Duration) ([]LicenceRuntime.SubscribedEvent, error) {
 
 	this.mu.Lock()
 	defer this.mu.Unlock()
@@ -46,7 +47,7 @@ func (this *fakeEventPuller) PullEvents(_ context.Context, sinceEventId int64, h
 	if this.err != nil {
 		return nil, this.err
 	}
-	var events []licence.SubscribedEvent
+	var events []LicenceRuntime.SubscribedEvent
 	for _, item := range this.events {
 		if item.eventId <= sinceEventId {
 			continue
@@ -69,36 +70,36 @@ func (this *fakeKeyPuller) PublicKeys() map[string]string {
 }
 
 // signSubscribedEvent - 现场重签一条订阅事件信封并组装 SubscribedEvent（夹具代码，出错直接 panic）
-func signSubscribedEvent(seed []byte, keyVersion string, event fakePullerEvent) licence.SubscribedEvent {
+func signSubscribedEvent(seed []byte, keyVersion string, event fakePullerEvent) LicenceRuntime.SubscribedEvent {
 
 	payload := CallbackPayload{
 		EventNo: event.eventNo, DeliveryNo: "SUB-" + event.eventNo, Event: event.event,
 		ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
-		OccurredAt: time.Now().UTC().Format(time.RFC3339), Nonce: licence.Licence.Nonce(),
+		OccurredAt: time.Now().UTC().Format(time.RFC3339), Nonce: LicenceProtocol.Licence.Nonce(),
 		KeyVersion: keyVersion, Data: event.data,
 	}
 	rawPayload, err := json.Marshal(payload)
 	if err != nil {
 		panic(err)
 	}
-	signature, err := licence.Licence.Seed(seed).Sign(rawPayload)
+	signature, err := LicenceProtocol.Licence.Seed(seed).Sign(rawPayload)
 	if err != nil {
 		panic(err)
 	}
 	envelope, err := json.Marshal(CallbackEnvelope{
-		Version: licence.EnvelopeVersion, Algorithm: licence.Algorithm, Payload: payload, Signature: signature,
+		Version: LicenceProtocol.EnvelopeVersion, Algorithm: LicenceProtocol.Algorithm, Payload: payload, Signature: signature,
 	})
 	if err != nil {
 		panic(err)
 	}
-	return licence.SubscribedEvent{EventId: event.eventId, Envelope: envelope}
+	return LicenceRuntime.SubscribedEvent{EventId: event.eventId, Envelope: envelope}
 }
 
 // newTestPuller - 创建假拉取方（返回其验签公钥）
 func newTestPuller(t *testing.T, events ...fakePullerEvent) (*fakeEventPuller, string) {
 
 	t.Helper()
-	seed, publicKey := licence.Licence.GenerateKeyPair().KeyPair()
+	seed, publicKey := LicenceProtocol.Licence.GenerateKeyPair().KeyPair()
 	if len(seed) == 0 || publicKey == "" {
 		t.Fatal("生成测试密钥失败")
 	}

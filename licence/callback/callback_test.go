@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inis-io/aide/licence"
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 )
 
 func callbackRequest(t *testing.T, seed []byte, payload CallbackPayload) []byte {
@@ -18,12 +18,12 @@ func callbackRequest(t *testing.T, seed []byte, payload CallbackPayload) []byte 
 	if err != nil {
 		t.Fatalf("序列化回调载荷失败: %v", err)
 	}
-	signature, err := licence.Licence.Seed(seed).Sign(rawPayload)
+	signature, err := LicenceProtocol.Licence.Seed(seed).Sign(rawPayload)
 	if err != nil {
 		t.Fatalf("签发回调失败: %v", err)
 	}
 	raw, err := json.Marshal(CallbackEnvelope{
-		Version: licence.EnvelopeVersion, Algorithm: licence.Algorithm, Payload: payload, Signature: signature,
+		Version: LicenceProtocol.EnvelopeVersion, Algorithm: LicenceProtocol.Algorithm, Payload: payload, Signature: signature,
 	})
 	if err != nil {
 		t.Fatalf("序列化回调信封失败: %v", err)
@@ -33,7 +33,7 @@ func callbackRequest(t *testing.T, seed []byte, payload CallbackPayload) []byte 
 
 func newCallbackTestHandler(t *testing.T) (*CallbackHandler, []byte) {
 	t.Helper()
-	seed, publicKey := licence.Licence.GenerateKeyPair().KeyPair()
+	seed, publicKey := LicenceProtocol.Licence.GenerateKeyPair().KeyPair()
 	if len(seed) == 0 || publicKey == "" {
 		t.Fatal("生成测试密钥失败")
 	}
@@ -46,7 +46,7 @@ func defaultCallbackPayload() CallbackPayload {
 	return CallbackPayload{
 		EventNo: "EVT-2026-000001", DeliveryNo: "DLV-2026-000001",
 		Event: "saas.plan.updated", ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
-		OccurredAt: time.Now().UTC().Format(time.RFC3339), Nonce: licence.Licence.Nonce(),
+		OccurredAt: time.Now().UTC().Format(time.RFC3339), Nonce: LicenceProtocol.Licence.Nonce(),
 		KeyVersion: "license-key-test", Data: json.RawMessage(`{"planCode":"pro"}`),
 	}
 }
@@ -143,7 +143,7 @@ func TestCallbackHandlerDedup(t *testing.T) {
 	if recorder := serveCallback(handler, body); recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("nonce 重放应返回 401，实际 %d", recorder.Code)
 	}
-	payload.Nonce = licence.Licence.Nonce()
+	payload.Nonce = LicenceProtocol.Licence.Nonce()
 	if recorder := serveCallback(handler, callbackRequest(t, seed, payload)); recorder.Code != http.StatusOK || recorder.Body.String() != string(AckOk) {
 		t.Fatalf("重复 deliveryNo 未重放原应答: code=%d body=%q", recorder.Code, recorder.Body.String())
 	}

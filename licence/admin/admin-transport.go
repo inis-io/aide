@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 type adminCall struct {
@@ -36,10 +36,10 @@ type adminTransport interface {
 
 func newAdminTransport(client *AdminClient) (adminTransport, error) {
 	switch client.options.Transport {
-	case "", licence.TransportHTTP:
-		client.options.Transport = licence.TransportHTTP
+	case "", LicenceRuntime.TransportHTTP:
+		client.options.Transport = LicenceRuntime.TransportHTTP
 		return newHTTPAdminTransport(client), nil
-	case licence.TransportGRPC:
+	case LicenceRuntime.TransportGRPC:
 		return newGRPCAdminTransport(client)
 	default:
 		return nil, errors.New("不支持的管理面传输协议：" + string(client.options.Transport))

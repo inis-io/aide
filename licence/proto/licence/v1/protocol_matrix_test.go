@@ -45,11 +45,9 @@ func TestGeneratedRPCsAreBoundBySDKTransports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeSource, err := os.ReadFile("../../../runtime-transport-grpc.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	extendedSource, err := os.ReadFile("../../../runtime-transport-grpc-extended.go")
+	// runtime 传输层已合并为单文件 runtime/runtime-transport-grpc.go
+	//（原 runtime-transport-grpc.go + runtime-transport-grpc-extended.go）
+	runtimeSource, err := os.ReadFile("../../../runtime/runtime-transport-grpc.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,5 +63,5 @@ func TestGeneratedRPCsAreBoundBySDKTransports(t *testing.T) {
 		}
 	}
 	assertMethods(File_licence_v1_admin_proto.Services(), string(adminSource))
-	assertMethods(File_licence_v1_runtime_proto.Services(), string(runtimeSource)+string(extendedSource))
+	assertMethods(File_licence_v1_runtime_proto.Services(), string(runtimeSource))
 }

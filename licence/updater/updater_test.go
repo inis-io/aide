@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inis-io/aide/licence"
 	"github.com/inis-io/aide/licence/callback"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // TestMain - 包级安全桩：流水线走到 pending_restart 后 executeRestart 会按
@@ -33,10 +33,10 @@ func TestMain(m *testing.M) {
 
 // newTestUpdater - 构造指向假平台的 Updater：
 // 先同步激活 client（token 落内存）再停止后台循环，避免 validate 干扰流水线断言
-func newTestUpdater(t *testing.T, platform *fakePlatform, dir string, opts UpdaterOptions) (*licence.Client, *Updater) {
+func newTestUpdater(t *testing.T, platform *fakePlatform, dir string, opts UpdaterOptions) (*LicenceRuntime.Client, *Updater) {
 
 	t.Helper()
-	client, err := licence.New(testOptions(platform, dir))
+	client, err := LicenceRuntime.New(testOptions(platform, dir))
 	if err != nil {
 		t.Fatalf("New 失败: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestNewUpdaterDefaultOSArch(t *testing.T) {
 	})
 	platform.mu.Unlock()
 
-	client, err := licence.New(testOptions(platform, t.TempDir()))
+	client, err := LicenceRuntime.New(testOptions(platform, t.TempDir()))
 	if err != nil {
 		t.Fatalf("New 失败: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestUpdaterRecoverPendingRestartCommits(t *testing.T) {
 	if _, err := os.Stat(updater.statePath()); !os.IsNotExist(err) {
 		t.Fatalf("Commit 后状态文件应清理，实际 err=%v", err)
 	}
-	if got := lastReportStatus(t, platform); got != licence.UpgradeSuccess {
+	if got := lastReportStatus(t, platform); got != LicenceRuntime.UpgradeSuccess {
 		t.Fatalf("恢复成功应上报 success，实际 %q", got)
 	}
 }
@@ -281,7 +281,7 @@ func TestUpdaterRecoverVerifyingWithinTimeoutCommits(t *testing.T) {
 	if err := updater.Start(t.Context()); err != nil {
 		t.Fatalf("Start 恢复失败: %v", err)
 	}
-	if got := lastReportStatus(t, platform); got != licence.UpgradeSuccess {
+	if got := lastReportStatus(t, platform); got != LicenceRuntime.UpgradeSuccess {
 		t.Fatalf("未超时应直接确认 success，实际 %q", got)
 	}
 }
@@ -319,7 +319,7 @@ func TestUpdaterRecoverVerifyingTimeoutRollsBack(t *testing.T) {
 	if got := readFileString(t, filepath.Join(target, "app.txt")); got != "old" {
 		t.Fatalf("超时后应回滚到备份内容，实际 %q", got)
 	}
-	if got := lastReportStatus(t, platform); got != licence.UpgradeRolledBack {
+	if got := lastReportStatus(t, platform); got != LicenceRuntime.UpgradeRolledBack {
 		t.Fatalf("回滚应上报 rolled_back，实际 %q", got)
 	}
 }
@@ -370,7 +370,7 @@ func TestUpdaterRecoverSwappingTargetPresentCommits(t *testing.T) {
 	if err := updater.Start(t.Context()); err != nil {
 		t.Fatalf("Start 恢复失败: %v", err)
 	}
-	if got := lastReportStatus(t, platform); got != licence.UpgradeSuccess {
+	if got := lastReportStatus(t, platform); got != LicenceRuntime.UpgradeSuccess {
 		t.Fatalf("新文件已落位应确认 success，实际 %q", got)
 	}
 }
@@ -413,7 +413,7 @@ func TestUpdaterUnpackZip(t *testing.T) {
 		t.Fatalf("写 zip 失败: %v", err)
 	}
 
-	staging, deleteList, err := updater.unpackArtifact(t.Context(), licence.ManifestArtifact{FileName: "pkg.zip"}, "2.4.0", src)
+	staging, deleteList, err := updater.unpackArtifact(t.Context(), LicenceRuntime.ManifestArtifact{FileName: "pkg.zip"}, "2.4.0", src)
 	if err != nil {
 		t.Fatalf("解包失败: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestUpdaterUnpackTarGz(t *testing.T) {
 		t.Fatalf("写 tar.gz 失败: %v", err)
 	}
 
-	staging, _, err := updater.unpackArtifact(t.Context(), licence.ManifestArtifact{FileName: "pkg.tar.gz"}, "2.4.0", src)
+	staging, _, err := updater.unpackArtifact(t.Context(), LicenceRuntime.ManifestArtifact{FileName: "pkg.tar.gz"}, "2.4.0", src)
 	if err != nil {
 		t.Fatalf("解包失败: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestUpdaterUnpackRawBinary(t *testing.T) {
 		t.Fatalf("写裸二进制失败: %v", err)
 	}
 
-	staging, _, err := updater.unpackArtifact(t.Context(), licence.ManifestArtifact{FileName: "myapp"}, "2.4.0", src)
+	staging, _, err := updater.unpackArtifact(t.Context(), LicenceRuntime.ManifestArtifact{FileName: "myapp"}, "2.4.0", src)
 	if err != nil {
 		t.Fatalf("解包失败: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestUpdaterUnpackIncrementalDeleteList(t *testing.T) {
 		t.Fatalf("写 zip 失败: %v", err)
 	}
 
-	_, deleteList, err := updater.unpackArtifact(t.Context(), licence.ManifestArtifact{FileName: "inc.zip"}, "2.4.0", src)
+	_, deleteList, err := updater.unpackArtifact(t.Context(), LicenceRuntime.ManifestArtifact{FileName: "inc.zip"}, "2.4.0", src)
 	if err != nil {
 		t.Fatalf("解包失败: %v", err)
 	}
@@ -505,7 +505,7 @@ func TestUpdaterUnpackRejectsPathEscape(t *testing.T) {
 		t.Fatalf("写 zip 失败: %v", err)
 	}
 
-	if _, _, err := updater.unpackArtifact(t.Context(), licence.ManifestArtifact{FileName: "evil.zip"}, "2.4.0", src); err == nil {
+	if _, _, err := updater.unpackArtifact(t.Context(), LicenceRuntime.ManifestArtifact{FileName: "evil.zip"}, "2.4.0", src); err == nil {
 		t.Fatalf("路径逃逸应被拒绝")
 	}
 }
@@ -549,7 +549,7 @@ func TestUpdaterSelectArtifactPreferIncremental(t *testing.T) {
 
 	platform := newFakePlatform(t)
 	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
-	manifest := &licence.Manifest{Payload: licence.ManifestPayload{Artifacts: []licence.ManifestArtifact{
+	manifest := &LicenceRuntime.Manifest{Payload: LicenceRuntime.ManifestPayload{Artifacts: []LicenceRuntime.ManifestArtifact{
 		{ArtifactNo: "full", ArtifactType: "full"},
 		{ArtifactNo: "inc", ArtifactType: "incremental", SourceVersion: "2.3.1"},
 	}}}
@@ -569,7 +569,7 @@ func TestUpdaterSelectArtifactFiltersOsArch(t *testing.T) {
 
 	platform := newFakePlatform(t)
 	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{OSArch: "linux-amd64"})
-	manifest := &licence.Manifest{Payload: licence.ManifestPayload{Artifacts: []licence.ManifestArtifact{
+	manifest := &LicenceRuntime.Manifest{Payload: LicenceRuntime.ManifestPayload{Artifacts: []LicenceRuntime.ManifestArtifact{
 		{ArtifactNo: "other", OsArch: "darwin-arm64", ArtifactType: "full"},
 		{ArtifactNo: "match", ArtifactType: "full"},
 	}}}
@@ -586,13 +586,13 @@ func TestUpdaterShouldAutoPolicy(t *testing.T) {
 	platform := newFakePlatform(t)
 	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
 
-	info := func(policy *licence.ManifestUpdatePolicy) licence.UpdateInfo {
-		return licence.UpdateInfo{Manifest: &licence.Manifest{Payload: licence.ManifestPayload{UpdatePolicy: policy}}}
+	info := func(policy *LicenceRuntime.ManifestUpdatePolicy) LicenceRuntime.UpdateInfo {
+		return LicenceRuntime.UpdateInfo{Manifest: &LicenceRuntime.Manifest{Payload: LicenceRuntime.ManifestPayload{UpdatePolicy: policy}}}
 	}
-	if !updater.shouldAuto(info(&licence.ManifestUpdatePolicy{Force: true})) {
+	if !updater.shouldAuto(info(&LicenceRuntime.ManifestUpdatePolicy{Force: true})) {
 		t.Fatalf("force 策略应自动执行")
 	}
-	if !updater.shouldAuto(info(&licence.ManifestUpdatePolicy{Auto: true})) {
+	if !updater.shouldAuto(info(&LicenceRuntime.ManifestUpdatePolicy{Auto: true})) {
 		t.Fatalf("auto 策略应自动执行")
 	}
 	if updater.shouldAuto(info(nil)) {
@@ -604,7 +604,7 @@ func TestUpdaterShouldAutoPolicy(t *testing.T) {
 		t.Fatalf("本地 AutoUpdate=true 应兜底自动执行")
 	}
 	updater.options.AutoUpdate = boolPtr(false)
-	if !updater.shouldAuto(info(&licence.ManifestUpdatePolicy{Auto: true, Force: false})) {
+	if !updater.shouldAuto(info(&LicenceRuntime.ManifestUpdatePolicy{Auto: true, Force: false})) {
 		t.Fatalf("清单 auto 策略权威，本地配置不得覆盖")
 	}
 }
@@ -616,8 +616,8 @@ func TestUpdaterRejectsDowngrade(t *testing.T) {
 
 	platform := newFakePlatform(t)
 	_, updater := newTestUpdater(t, platform, t.TempDir(), UpdaterOptions{})
-	err := updater.apply(t.Context(), licence.UpdateInfo{Manifest: &licence.Manifest{
-		Payload: licence.ManifestPayload{Version: "2.0.0"},
+	err := updater.apply(t.Context(), LicenceRuntime.UpdateInfo{Manifest: &LicenceRuntime.Manifest{
+		Payload: LicenceRuntime.ManifestPayload{Version: "2.0.0"},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "拒绝降级") {
 		t.Fatalf("降级应被拒绝，实际 %v", err)
@@ -642,7 +642,7 @@ func TestUpdaterPending(t *testing.T) {
 	updater.mu.Lock()
 	updater.state.Phase = PhasePendingRestart
 	updater.state.TargetVersion = "2.4.0"
-	updater.lastInfo = licence.UpdateInfo{Available: true, Manifest: &licence.Manifest{Payload: licence.ManifestPayload{Version: "2.4.0"}}}
+	updater.lastInfo = LicenceRuntime.UpdateInfo{Available: true, Manifest: &LicenceRuntime.Manifest{Payload: LicenceRuntime.ManifestPayload{Version: "2.4.0"}}}
 	updater.mu.Unlock()
 	if info, pending := updater.Pending(); !pending || info.Manifest == nil {
 		t.Fatalf("pending_restart 应处于待重启")
@@ -702,7 +702,7 @@ func TestUpdaterApplyDirectoryFullFlow(t *testing.T) {
 	}
 
 	statuses := reportStatuses(t, platform)
-	if len(statuses) != 2 || statuses[0] != licence.UpgradeDownloading || statuses[1] != licence.UpgradeInstalling {
+	if len(statuses) != 2 || statuses[0] != LicenceRuntime.UpgradeDownloading || statuses[1] != LicenceRuntime.UpgradeInstalling {
 		t.Fatalf("上报轨迹应为 [downloading installing]，实际 %v", statuses)
 	}
 	records := reportRecordNos(t, platform)
@@ -840,7 +840,7 @@ func TestUpdaterEventHintAutoApplies(t *testing.T) {
 		version: "2.4.0", buildNumber: "2026081801", sourceRange: ">=2.0.0",
 		artifacts: []fakeArtifact{{fileName: "app.zip",
 			data: buildZip(t, map[string]string{"bin/new.txt": "new-content"})}},
-		policy: &licence.ManifestUpdatePolicy{Auto: true},
+		policy: &LicenceRuntime.ManifestUpdatePolicy{Auto: true},
 	}}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
@@ -867,7 +867,7 @@ func TestUpdaterEventHintAutoApplies(t *testing.T) {
 		t.Fatalf("auto 策略应经事件提示自动执行流水线，新文件未落位: %q", got)
 	}
 	statuses := reportStatuses(t, platform)
-	if len(statuses) < 2 || statuses[0] != licence.UpgradeDownloading {
+	if len(statuses) < 2 || statuses[0] != LicenceRuntime.UpgradeDownloading {
 		t.Fatalf("上报轨迹应以 downloading 开头，实际 %v", statuses)
 	}
 }
@@ -981,7 +981,7 @@ func TestUpdaterApplyBackupFailureReportsFailed(t *testing.T) {
 	if err = updater.Apply(t.Context(), info); err == nil {
 		t.Fatalf("目标目录缺失应导致流水线失败")
 	}
-	if got := lastReportStatus(t, platform); got != licence.UpgradeFailed {
+	if got := lastReportStatus(t, platform); got != LicenceRuntime.UpgradeFailed {
 		t.Fatalf("备份失败应上报 failed，实际 %q", got)
 	}
 	updater.mu.RLock()

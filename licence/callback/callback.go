@@ -1,9 +1,9 @@
 // Package callback - 平台回调接收端（webhook）与项目事件订阅器。
 //
-// 本包 import 根包 licence（验签与信封常量），覆盖两类入口：
+// 本包 import protocol 子包（验签与信封常量）与 runtime 子包（Client 作为事件拉取源），覆盖两类入口：
 //   - CallbackHandler：实现 http.Handler 的 webhook 接收端（平台 → 客户项目），
 //     验签 + 防重放 + 前缀通配分发；
-//   - EventSubscriber：项目事件订阅器，经 EventPuller（通常由 *licence.Client 的
+//   - EventSubscriber：项目事件订阅器，经 EventPuller（通常由 *LicenceRuntime.Client 的
 //     PullEvents 满足）长轮询拉取平台现场重签的信封，复用 CallbackHandler 分发内核。
 //
 // 信封格式与平台签发端字节级镜像，payload 字段顺序即签名内容，新增字段只允许追加到末尾。
@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inis-io/aide/licence"
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 )
 
 const (
@@ -205,7 +205,7 @@ func (this *CallbackHandler) OnAny(fn CallbackFunc) *CallbackHandler {
 
 // validateCallbackEnvelope - 校验信封版本/算法与必填载荷字段（ServeHTTP 的 400 分支；订阅也先调用）。
 func validateCallbackEnvelope(envelope CallbackEnvelope) error {
-	if envelope.Version != licence.EnvelopeVersion || envelope.Algorithm != licence.Algorithm {
+	if envelope.Version != LicenceProtocol.EnvelopeVersion || envelope.Algorithm != LicenceProtocol.Algorithm {
 		return errors.New("invalid callback envelope")
 	}
 	if envelope.Payload.Event == "" || envelope.Payload.DeliveryNo == "" || envelope.Payload.Nonce == "" ||
@@ -231,7 +231,7 @@ func (this *CallbackHandler) dispatchEnvelope(ctx context.Context, envelope Call
 	}()
 
 	publicKey, exists := this.options.PublicKeys[envelope.Payload.KeyVersion]
-	if !exists || !licence.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
+	if !exists || !LicenceProtocol.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
 		return "", errors.New("callback signature verification failed")
 	}
 	occurredAt, err := time.Parse(time.RFC3339, envelope.Payload.OccurredAt)

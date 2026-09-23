@@ -1,7 +1,7 @@
 // 管理面客户端（AdminClient）：Licen Hub 授权平台「管理面」Go SDK（typed client）
 //
 // 管理面是平台后台登录态接口。HTTP 使用 {code,msg,data} JSON 信封，gRPC 使用显式资源 RPC；
-// 两者统一映射为同一公开返回值/APIError，与运行面（licence 根包 Client，Ed25519 信封）鉴权不同。
+// 两者统一映射为同一公开返回值/APIError，与运行面（runtime 包 Client，Ed25519 信封）鉴权不同。
 // 使用方是商户自有运维系统/CI：账密登录换取 JWT，随后按资源调用受控接口。
 //
 // 平台事实（与 licen-hub/backend 逐一对齐）：
@@ -27,7 +27,7 @@ import (
 
 	"github.com/spf13/cast"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // signInPath - 登录接口路径（公开接口，不携带 token，不参与 401 重登）
@@ -46,10 +46,10 @@ type AdminOptions struct {
 	TOTP string
 	// HTTPTimeout - 单次请求超时（默认 15 秒）
 	HTTPTimeout time.Duration
-	// Transport - 管理面传输协议，零值保持 HTTP；可显式选择 licence.TransportGRPC。
-	Transport licence.Transport
+	// Transport - 管理面传输协议，零值保持 HTTP；可显式选择 LicenceRuntime.TransportGRPC。
+	Transport LicenceRuntime.Transport
 	// GRPC - gRPC TLS、h2c、authority 与消息大小配置。
-	GRPC licence.GRPCOptions
+	GRPC LicenceRuntime.GRPCOptions
 }
 
 // AdminClient - 管理面客户端（登录态 + 各资源 typed 入口）

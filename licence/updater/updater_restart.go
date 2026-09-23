@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/inis-io/aide/licence"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 // exitProcess - 进程退出函数（包级可替换：单测替换为 no-op，避免真实退出测试进程）
@@ -16,7 +16,7 @@ var exitProcess = os.Exit
 var startProcess = os.StartProcess
 
 // resolveRestartMode - 解析生效的重启模式：清单策略 > SDK 集成配置 > auto 自动探测
-func (this *Updater) resolveRestartMode(manifest *licence.Manifest) string {
+func (this *Updater) resolveRestartMode(manifest *LicenceRuntime.Manifest) string {
 
 	if manifest != nil && manifest.Payload.UpdatePolicy != nil &&
 		manifest.Payload.UpdatePolicy.RestartMode != "" {
