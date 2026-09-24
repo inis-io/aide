@@ -97,8 +97,9 @@ type ApisPlan struct {
 	DeleteAt int64 `json:"deleteAt"`
 }
 
-// ApisOfferProduct - 商品浏览的产品白名单视图（平台 service/apis.OfferProduct）
-// 剥离 upstreamConfig（上游端点/参数模板/密钥引用键名）、uid 与内部字段（version/deleteAt 等）。
+// ApisOfferProduct - 商品浏览的产品白名单视图（平台 service/apis.OfferProduct）：
+// 商品浏览的两条路由返回的整体是 ApisProductOffer（`find` 的页元素 / `take` 的返回），
+// 本类型是其 `product` 字段的组件类型（同样剥离 upstreamConfig、uid 与内部字段）。
 type ApisOfferProduct struct {
 	// Id - 主键
 	Id int `json:"id"`

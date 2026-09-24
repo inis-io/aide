@@ -128,10 +128,11 @@ const (
 // ============================= 商品浏览（apis-market，2） =============================
 
 // FindMarketProducts - 在售商品分页（仅 on_sale 产品及其在售套餐）：GET /api/apis-market/find
-// 权限码 apis.market.read；返回产品白名单视图（剥离 upstreamConfig/uid 等内部字段）。
-func (this *ApisResource) FindMarketProducts(ctx context.Context, params *ApisProductQuery) (*Page[ApisOfferProduct], error) {
+// 权限码 apis.market.read；页元素是**商品视图**（产品 + 在售套餐，双协议同形）——
+// 产品与套餐均经白名单投影（剥离 upstreamConfig/uid 等内部字段），见 ApisProductOffer。
+func (this *ApisResource) FindMarketProducts(ctx context.Context, params *ApisProductQuery) (*Page[ApisProductOffer], error) {
 
-	var result Page[ApisOfferProduct]
+	var result Page[ApisProductOffer]
 	if err := this.client.get(ctx, "/api/apis-market/find", params, &result); err != nil {
 		return nil, err
 	}

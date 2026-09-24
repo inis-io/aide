@@ -396,7 +396,7 @@ pub, _ := adm.SigningKeys.Public(ctx, "license", "", projectId)   // 按项目�
 verify, _ := adm.Artifacts.VerifyWithFile(ctx, 3, "app.tar.gz", file) // 服务端代验
 
 // API 商城管理面（53 条受控路由：目录 / 订单 / 订阅 / 余额充值 / 账单 / 用量 / 监控）
-offer, _ := adm.Apis.FindMarketProducts(ctx, &admin.ApisProductQuery{Page: 1, Status: "on_sale"})
+offers, _ := adm.Apis.FindMarketProducts(ctx, &admin.ApisProductQuery{Page: 1, Status: "on_sale"}) // 页元素是商品视图（product + plans）
 order, _ := adm.Apis.CreateOrder(ctx, admin.ApisOrderInput{
 	PlanId: 3, PayChannel: "balance", RequestId: "req-20260817-1", // requestId 由调用方生成（幂等键）
 })
@@ -1394,7 +1394,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 | 方法 | 说明 | 路由 | 参数 → 返回 |
 |---|---|---|---|
-| `FindMarketProducts` | 在售商品分页（仅 `on_sale` 产品及其在售套餐） | `GET /api/apis-market/find` | `*ApisProductQuery` → `*Page[ApisOfferProduct]` |
+| `FindMarketProducts` | 在售商品分页（仅 `on_sale` 产品及其在售套餐；页元素是嵌套商品视图） | `GET /api/apis-market/find` | `*ApisProductQuery` → `*Page[ApisProductOffer]` |
 | `GetMarketProduct` | 在售商品详情（含在售套餐；未上架返回 404） | `GET /api/apis-market/take?id=N` | `id int` → `*ApisProductOffer` |
 
 **ApisCatalogAdminService（目录维护，10）**
@@ -1568,7 +1568,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `SaasTenantSubscribeResult` / `SaasTenantChangeResult` | 开通/变更结果，三种形态：member 待审（`Id`=申请单 ID）/ 自动过单（`AutoApproved=true`）/ platform 直通 |
 | `SaasTenantUsageRow` / `SaasTenantUsageSummary` / `SaasTenantHistoryExport` | 用量历史行（`HourBucket` 整点水位）/ 用量水位（`Limit`/`Value` 为指针，nil 表示未定义/未上报）/ 留痕 CSV 导出 |
 | `ProjectModule` | 项目功能模块（`ModuleCode` 项目内唯一、`ParentCode` 父模块编码） |
-| `ApisOfferProduct` / `ApisOfferPlan` / `ApisProductOffer` | 商品浏览白名单视图（剥离 `UpstreamConfig` / `Uid` 等内部字段；`ApisProductOffer` = 产品 + 在售套餐） |
+| `ApisOfferProduct` / `ApisOfferPlan` / `ApisProductOffer` | 商品浏览白名单视图（剥离 `UpstreamConfig` / `Uid` 等内部字段）：`ApisProductOffer` = `product` + `plans`，商品浏览的两条路由（`find` 的**页元素**与 `take`）都返回它，组件类型分别是 `ApisOfferProduct` / `ApisOfferPlan` |
 | `ApisProduct` / `ApisPlan` | 产品（draft/on_sale/off_sale/archived）/ 套餐（subscription 订阅制、metered 付费制按量；`Price` 单位随计费模式为「分」或「万分/次」） |
 | `ApisOrder` / `ApisSubscription` | 订单（pending→paid→refunded / cancelled / closed；退款单 `OrderType=refund` + `RefundOrderNo`）/ 订阅（active ↔ expired/cancelled，含周期与自动续费偏好） |
 | `ApisBalanceAccount` / `ApisBalanceLog` / `ApisRecharge` | 余额账户（`Balance` / `Frozen` / `MonthlySpendLimit` / `Status`）/ 流水（只追加，`TxType` 为 recharge/consume/hold/release/refund/subscribe/adjust）/ 充值单（pending→paid/cancelled/closed） |

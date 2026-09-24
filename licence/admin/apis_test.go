@@ -78,6 +78,26 @@ func apisBillExportData(fileName string) map[string]any {
 	}
 }
 
+// apisProductOfferRow - 商品视图行（平台 service/apis.buildOffers 的组装形状：{product, plans}，
+// 产品与套餐均为白名单投影，无 upstreamConfig/uid/version 等内部字段）。
+// 商品浏览的两条路由（find 的页元素、take 的整体）共用该形状。
+func apisProductOfferRow() map[string]any {
+	return map[string]any{
+		"product": map[string]any{
+			"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
+			"summary": "查 IP 归属地", "description": "详情", "status": "on_sale",
+			"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50,
+			"cachePrice": 0, "cacheQuotaRatio": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000,
+		},
+		"plans": []any{map[string]any{
+			"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "包月-基础版",
+			"billingMode": "subscription", "price": 9900, "period": "monthly", "quota": 10000,
+			"quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+			"concurrencyLimit": 10, "qpsLimit": 20, "status": "on_sale",
+		}},
+	}
+}
+
 // apisRouteCases - 53 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
 func apisRouteCases() []apisRouteCase {
 	autoRenew := false
@@ -86,11 +106,8 @@ func apisRouteCases() []apisRouteCase {
 		{
 			name: "FindMarketProducts", service: "ApisMarketAdminService",
 			method: http.MethodGet, path: "/api/apis-market/find",
-			data: apisPageData([]any{map[string]any{
-				"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
-				"summary": "查 IP 归属地", "status": "on_sale", "freeDailyQuota": 100,
-				"cachePrice": 0, "cacheQuotaRatio": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000,
-			}}, 1, 2),
+			// 页元素是嵌套商品视图（product + plans），与平台 service/apis.buildOffers 组装形状一致
+			data: apisPageData([]any{apisProductOfferRow()}, 1, 2),
 			invoke: func(t *testing.T, client *AdminClient) {
 				page, err := client.Apis.FindMarketProducts(context.Background(), &ApisProductQuery{
 					Page: 2, Limit: 10, Capability: "ip-locate", Status: "on_sale", Keyword: "IP",
@@ -101,8 +118,12 @@ func apisRouteCases() []apisRouteCase {
 				if page.Count != 1 || page.Page != 2 || len(page.Data) != 1 {
 					t.Fatalf("分页结构解析不符: %+v", page)
 				}
-				if page.Data[0].Capability != "ip-locate" || page.Data[0].Status != "on_sale" {
-					t.Fatalf("浏览视图解析不符: %+v", page.Data[0])
+				offer := page.Data[0]
+				if offer.Product.Capability != "ip-locate" || offer.Product.ProductNo != "APD-2026-000003" {
+					t.Fatalf("商品视图 product 解析不符: %+v", offer.Product)
+				}
+				if len(offer.Plans) != 1 || offer.Plans[0].Price != 9900 {
+					t.Fatalf("商品视图 plans 解析不符: %+v", offer.Plans)
 				}
 			},
 			wantQuery: map[string]string{"page": "2", "limit": "10", "capability": "ip-locate", "status": "on_sale", "keyword": "IP"},
@@ -110,13 +131,7 @@ func apisRouteCases() []apisRouteCase {
 		{
 			name: "GetMarketProduct", service: "ApisMarketAdminService",
 			method: http.MethodGet, path: "/api/apis-market/take",
-			data: map[string]any{
-				"product": map[string]any{"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "status": "on_sale"},
-				"plans": []any{map[string]any{
-					"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "包月-基础版",
-					"billingMode": "subscription", "price": 9900, "period": "monthly", "quota": 10000, "status": "on_sale",
-				}},
-			},
+			data: apisProductOfferRow(),
 			invoke: func(t *testing.T, client *AdminClient) {
 				offer, err := client.Apis.GetMarketProduct(context.Background(), 3)
 				if err != nil {
@@ -1084,6 +1099,67 @@ func TestApisRoutesHTTP(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestApisFindMarketProductsPlatformShape - 商品分页的页元素是平台真实形状（嵌套商品视图 `{product, plans}`）：
+// 用平台 `buildOffers` 投影结果的 JSON 原文（含 plans 为空数组的行）走完整信封链路反序列化，
+// 断言 product 与 plans 真的被解析。
+//
+// 回归 B1：页元素若被声明成扁平类型（曾用 `Page[ApisOfferProduct]`），反序列化**不报错**，
+// 但整行是零值空壳（静默数据丢失）；本用例的 plans 空数组分支同时钉住平台「plans 恒为数组、不为 null」的契约。
+func TestApisFindMarketProductsPlatformShape(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes[http.MethodGet+" /api/apis-market/find"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeEnvelope(writer, 200, "数据请求成功！", json.RawMessage(`{
+			"data": [
+				{
+					"product": {
+						"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
+						"summary": "查 IP 归属地", "description": "详情", "status": "on_sale",
+						"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50,
+						"cachePrice": 0, "cacheQuotaRatio": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000
+					},
+					"plans": [
+						{
+							"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "包月-基础版",
+							"billingMode": "subscription", "price": 9900, "period": "monthly", "quota": 10000,
+							"quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+							"concurrencyLimit": 10, "qpsLimit": 20, "status": "on_sale"
+						}
+					]
+				},
+				{
+					"product": {"id": 4, "productNo": "APD-2026-000004", "capability": "mail-send", "status": "on_sale"},
+					"plans": []
+				}
+			],
+			"count": 2,
+			"page": 1
+		}`))
+	}
+	client := hub.newClient(t)
+
+	page, err := client.Apis.FindMarketProducts(context.Background(), &ApisProductQuery{Page: 1})
+	if err != nil {
+		t.Fatalf("在售商品分页失败: %v", err)
+	}
+	if page.Count != 2 || page.Page != 1 || len(page.Data) != 2 {
+		t.Fatalf("分页结构解析不符: %+v", page)
+	}
+
+	first := page.Data[0]
+	if first.Product.Id != 3 || first.Product.Capability != "ip-locate" || first.Product.FreeMonthlyQuota != 5000 {
+		t.Fatalf("product 未按平台形状解析（疑似退回扁平类型）: %+v", first.Product)
+	}
+	if len(first.Plans) != 1 || first.Plans[0].PlanNo != "PLN-2026-000008" || first.Plans[0].Price != 9900 {
+		t.Fatalf("plans 未按平台形状解析: %+v", first.Plans)
+	}
+
+	// 平台对无在售套餐的产品输出空数组（buildOffers 用 []OfferPlan{} 兜底），不是 null
+	if page.Data[1].Plans == nil || len(page.Data[1].Plans) != 0 {
+		t.Fatalf("空套餐应为非 nil 空切片: %#v", page.Data[1].Plans)
 	}
 }
 
