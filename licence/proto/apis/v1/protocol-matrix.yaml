@@ -18,8 +18,9 @@ defaults:
 #   5 权限码（运行面身份由许可证凭证推导，不进 IAM 权限码体系，留空）
 #   6 数据域  7 操作（read / write）  8 风险（normal / high / critical）
 #   9 幂等（true / false / read-only）
-#   10 关键业务码（空格分隔，是各 rpc 最需要客户侧处置的关键码而非全集——完整 17 码集合与
-#      gRPC status 映射以 runtime.proto 服务注释为准；与 HTTP 运行面失败信封 code 同源）
+#   10 关键业务码（空格分隔，是各 rpc 最需要客户侧处置的关键码而非全集——完整 17 码集合见
+#      runtime.proto 服务注释，逐码 → gRPC status 映射表见 licen-hub 04 §2.4；
+#      业务码逐字挂在 status 的 errdetails.ErrorInfo.Reason，与 HTTP 运行面失败信封 code 同源）
 #   11 HTTP 路由落地状态（landed 已落地 / pending 待落地）
 #
 # 凭证族与幂等键不进消息：token/时间戳/nonce/签名走 metadata x-license-*，
@@ -30,9 +31,8 @@ runtime:
   # 来自用户状态闸门（gateUserStatus，全 rpc 生效）；ACCOUNT_FROZEN 等资金码对含按量定价的能力都适用。
   - [Client.Apis.Invoke, POST, /api/v1/apis/invoke, licenhub.apis.v1.ApisRuntimeService/Invoke, activation-sign-v1, "", apis, write, normal, true, "CAPABILITY_NOT_FOUND NOT_FOUND UNAUTHORIZED FORBIDDEN INVALID_ARGUMENT NO_ENTITLEMENT QUOTA_EXCEEDED INSUFFICIENT_BALANCE SPEND_LIMIT_EXCEEDED ACCOUNT_FROZEN CONCURRENCY_LIMITED RATE_LIMITED UPSTREAM_ERROR INTERNAL_ERROR", landed]
   - [Client.Apis.IPLocate, POST, /api/v1/apis/ip-locate/query, licenhub.apis.v1.ApisRuntimeService/IPLocate, activation-sign-v1, "", apis, write, normal, true, "IP_NOT_FOUND NOT_FOUND UNAUTHORIZED FORBIDDEN INVALID_ARGUMENT NO_ENTITLEMENT QUOTA_EXCEEDED INSUFFICIENT_BALANCE SPEND_LIMIT_EXCEEDED ACCOUNT_FROZEN CONCURRENCY_LIMITED RATE_LIMITED UPSTREAM_ERROR INTERNAL_ERROR", landed]
-  # Usage 的 HTTP 路由（GET /api/v1/apis/usage）属 T18 范围，尚未在服务端落地：
-  # state=pending，自检测试对 pending 行只校验与 04 设计文档一致、不校验服务端实现。
-  # T18 落地时按 04 §1 分层放回 apis-runtime.go（自检已放宽为「声明 v1/apis 表的文件」目录级扫描，
-  # 落别的文件也能被覆盖，但运行面 HTTP 适配器仍应唯一）。
-  - [Client.Apis.Usage, GET, /api/v1/apis/usage, licenhub.apis.v1.ApisRuntimeService/Usage, activation-sign-v1, "", apis, read, normal, read-only, "UNAUTHORIZED NOT_FOUND INVALID_ARGUMENT INTERNAL_ERROR", pending]
+  # Usage 的 HTTP 路由（GET /api/v1/apis/usage）与 gRPC 服务端已随 T18 落地（licen-hub
+  # app/api/control/apis-runtime.go 的 Get: {Key: "usage"} + grpc/apis/v1 的 ApisRuntimeService.Usage）。
+  # 服务端只读（幂等列 read-only）：不占闸门、不计量不收费，归属强制由凭证推导，客户端不可指定。
+  - [Client.Apis.Usage, GET, /api/v1/apis/usage, licenhub.apis.v1.ApisRuntimeService/Usage, activation-sign-v1, "", apis, read, normal, read-only, "UNAUTHORIZED NOT_FOUND INVALID_ARGUMENT INTERNAL_ERROR", landed]
 # MailSend 的 typed RPC 属阶段 5（T23）范围，落地时按只追加纪律在 runtime.proto 追加 rpc 并在此登记行。
