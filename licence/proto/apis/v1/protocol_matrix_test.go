@@ -55,6 +55,7 @@ var (
 		"Invoke":   ApisRuntimeService_Invoke_FullMethodName,
 		"IPLocate": ApisRuntimeService_IPLocate_FullMethodName,
 		"Usage":    ApisRuntimeService_Usage_FullMethodName,
+		"MailSend": ApisRuntimeService_MailSend_FullMethodName,
 	}
 )
 

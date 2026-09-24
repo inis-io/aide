@@ -491,6 +491,25 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return apisFailureEnvelope(err)
 		}
 		return apisEnvelope(apisUsageData(response))
+
+	case http.MethodPost + " /api/v1/apis/mail-send/send":
+		var input apisMailSendBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &apisv1.MailSendRequest{
+			To: input.To, Subject: input.Subject, Content: input.Content, Html: input.Html,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, apisv1.ApisRuntimeService_MailSend_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.apis.MailSend(callCtx, request)
+		if err != nil {
+			return apisFailureEnvelope(err)
+		}
+		return apisEnvelope(apisMailSendData(response))
 	}
 	return this.roundTripExtended(ctx, method, path, requestURI, body, withSign)
 }
@@ -916,6 +935,15 @@ type apisIPLocateBody struct {
 	Ip string `json:"ip"`
 }
 
+// apisMailSendBody - 邮件代发 typed 请求体（能力/动作/计量数由服务端固定：计量数 = 归一后收件人数，
+// 客户端只上送收件人/主题/正文/正文类型；正文原样透传，客户端与传输层都不做模板替换）。
+type apisMailSendBody struct {
+	To      []string `json:"to"`
+	Subject string   `json:"subject"`
+	Content string   `json:"content"`
+	Html    bool     `json:"html"`
+}
+
 // apisCreateAtQuery - Usage 的 createAt 数组参数解析（平台约定 key[]=v 重复键，
 // 与 apis 包 usageQuery / admin 子包 toQuery 的序列化口径一致）。
 // 非法文本由 cast 归一为 0（服务端对 0/单侧值按不限处理），此处只做转换不做校验。
@@ -1038,6 +1066,19 @@ func apisIPLocateData(response *apisv1.IPLocateResponse) map[string]any {
 			"city": result.GetCity(), "adcode": result.GetAdcode(), "rectangle": result.GetRectangle(),
 			"isp": result.GetIsp(), "source": result.GetSource(),
 			"cacheHit": result.GetCacheHit(), "stale": result.GetStale(),
+		}
+	}
+	return data
+}
+
+// apisMailSendData - MailSendResponse → 信封 data（{result, receipt}，字段与 HTTP data.result
+// 逐一对应：sent / recipients / subject；recipients 为空时保持 nil，与 HTTP 侧 nil slice 同形）。
+func apisMailSendData(response *apisv1.MailSendResponse) map[string]any {
+
+	data := map[string]any{"result": nil, "receipt": apisReceiptMap(response.GetReceipt())}
+	if result := response.GetResult(); result != nil {
+		data["result"] = map[string]any{
+			"sent": result.GetSent(), "recipients": result.GetRecipients(), "subject": result.GetSubject(),
 		}
 	}
 	return data

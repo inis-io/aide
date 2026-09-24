@@ -22,6 +22,7 @@ const (
 	ApisRuntimeService_Invoke_FullMethodName   = "/licenhub.apis.v1.ApisRuntimeService/Invoke"
 	ApisRuntimeService_IPLocate_FullMethodName = "/licenhub.apis.v1.ApisRuntimeService/IPLocate"
 	ApisRuntimeService_Usage_FullMethodName    = "/licenhub.apis.v1.ApisRuntimeService/Usage"
+	ApisRuntimeService_MailSend_FullMethodName = "/licenhub.apis.v1.ApisRuntimeService/MailSend"
 )
 
 // ApisRuntimeServiceClient is the client API for ApisRuntimeService service.
@@ -33,7 +34,7 @@ const (
 // 凭证不进消息：activation token / 时间戳 / nonce / 签名 / 签名版本全部走 gRPC metadata
 // （x-license-token / x-license-timestamp / x-license-nonce / x-license-sign /
 // x-license-sign-version，与 HTTP 头族一一对应）；调用级幂等键走 metadata x-request-id
-// （等价 HTTP X-Request-Id，04 §2.2），故三个请求消息都不含凭证与 request_id 字段。
+// （等价 HTTP X-Request-Id，04 §2.2），故四个请求消息都不含凭证与 request_id 字段。
 // 签名 canonical 沿用运行面既有口径（licence/protocol.GRPCContent）：
 //
 //	GRPC\n{fullMethod}\n{timestamp}\n{nonce}\n{sha256(deterministic protobuf request)}
@@ -61,8 +62,10 @@ type ApisRuntimeServiceClient interface {
 	// IPLocate - IP 归属地查询（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
 	IPLocate(ctx context.Context, in *IPLocateRequest, opts ...grpc.CallOption) (*IPLocateResponse, error)
 	// Usage - 调用流水自助查询（只读；身份由凭证推导，只能查自己）。
-	// MailSend typed RPC 属阶段 5 范围，落地时按只追加纪律在本服务追加 rpc 与消息字段号。
 	Usage(ctx context.Context, in *UsageRequest, opts ...grpc.CallOption) (*UsageResponse, error)
+	// MailSend - 邮件代发（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
+	// 正文原样投递（不做模板替换、不自动追加验证码），按实际收件人数计量（每封计 1）。
+	MailSend(ctx context.Context, in *MailSendRequest, opts ...grpc.CallOption) (*MailSendResponse, error)
 }
 
 type apisRuntimeServiceClient struct {
@@ -103,6 +106,16 @@ func (c *apisRuntimeServiceClient) Usage(ctx context.Context, in *UsageRequest, 
 	return out, nil
 }
 
+func (c *apisRuntimeServiceClient) MailSend(ctx context.Context, in *MailSendRequest, opts ...grpc.CallOption) (*MailSendResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MailSendResponse)
+	err := c.cc.Invoke(ctx, ApisRuntimeService_MailSend_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ApisRuntimeServiceServer is the server API for ApisRuntimeService service.
 // All implementations must embed UnimplementedApisRuntimeServiceServer
 // for forward compatibility.
@@ -112,7 +125,7 @@ func (c *apisRuntimeServiceClient) Usage(ctx context.Context, in *UsageRequest, 
 // 凭证不进消息：activation token / 时间戳 / nonce / 签名 / 签名版本全部走 gRPC metadata
 // （x-license-token / x-license-timestamp / x-license-nonce / x-license-sign /
 // x-license-sign-version，与 HTTP 头族一一对应）；调用级幂等键走 metadata x-request-id
-// （等价 HTTP X-Request-Id，04 §2.2），故三个请求消息都不含凭证与 request_id 字段。
+// （等价 HTTP X-Request-Id，04 §2.2），故四个请求消息都不含凭证与 request_id 字段。
 // 签名 canonical 沿用运行面既有口径（licence/protocol.GRPCContent）：
 //
 //	GRPC\n{fullMethod}\n{timestamp}\n{nonce}\n{sha256(deterministic protobuf request)}
@@ -140,8 +153,10 @@ type ApisRuntimeServiceServer interface {
 	// IPLocate - IP 归属地查询（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
 	IPLocate(context.Context, *IPLocateRequest) (*IPLocateResponse, error)
 	// Usage - 调用流水自助查询（只读；身份由凭证推导，只能查自己）。
-	// MailSend typed RPC 属阶段 5 范围，落地时按只追加纪律在本服务追加 rpc 与消息字段号。
 	Usage(context.Context, *UsageRequest) (*UsageResponse, error)
+	// MailSend - 邮件代发（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
+	// 正文原样投递（不做模板替换、不自动追加验证码），按实际收件人数计量（每封计 1）。
+	MailSend(context.Context, *MailSendRequest) (*MailSendResponse, error)
 	mustEmbedUnimplementedApisRuntimeServiceServer()
 }
 
@@ -160,6 +175,9 @@ func (UnimplementedApisRuntimeServiceServer) IPLocate(context.Context, *IPLocate
 }
 func (UnimplementedApisRuntimeServiceServer) Usage(context.Context, *UsageRequest) (*UsageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Usage not implemented")
+}
+func (UnimplementedApisRuntimeServiceServer) MailSend(context.Context, *MailSendRequest) (*MailSendResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MailSend not implemented")
 }
 func (UnimplementedApisRuntimeServiceServer) mustEmbedUnimplementedApisRuntimeServiceServer() {}
 func (UnimplementedApisRuntimeServiceServer) testEmbeddedByValue()                            {}
@@ -236,6 +254,24 @@ func _ApisRuntimeService_Usage_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ApisRuntimeService_MailSend_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MailSendRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ApisRuntimeServiceServer).MailSend(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ApisRuntimeService_MailSend_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ApisRuntimeServiceServer).MailSend(ctx, req.(*MailSendRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ApisRuntimeService_ServiceDesc is the grpc.ServiceDesc for ApisRuntimeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -254,6 +290,10 @@ var ApisRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Usage",
 			Handler:    _ApisRuntimeService_Usage_Handler,
+		},
+		{
+			MethodName: "MailSend",
+			Handler:    _ApisRuntimeService_MailSend_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -11,7 +11,7 @@ option go_package = "github.com/inis-io/aide/licence/proto/apis/v1;apisv1";
 // 凭证不进消息：activation token / 时间戳 / nonce / 签名 / 签名版本全部走 gRPC metadata
 // （x-license-token / x-license-timestamp / x-license-nonce / x-license-sign /
 // x-license-sign-version，与 HTTP 头族一一对应）；调用级幂等键走 metadata x-request-id
-// （等价 HTTP X-Request-Id，04 §2.2），故三个请求消息都不含凭证与 request_id 字段。
+// （等价 HTTP X-Request-Id，04 §2.2），故四个请求消息都不含凭证与 request_id 字段。
 // 签名 canonical 沿用运行面既有口径（licence/protocol.GRPCContent）：
 //
 //	GRPC\n{fullMethod}\n{timestamp}\n{nonce}\n{sha256(deterministic protobuf request)}
@@ -39,8 +39,10 @@ service ApisRuntimeService {
   // IPLocate - IP 归属地查询（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
   rpc IPLocate(IPLocateRequest) returns (IPLocateResponse);
   // Usage - 调用流水自助查询（只读；身份由凭证推导，只能查自己）。
-  // MailSend typed RPC 属阶段 5 范围，落地时按只追加纪律在本服务追加 rpc 与消息字段号。
   rpc Usage(UsageRequest) returns (UsageResponse);
+  // MailSend - 邮件代发（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
+  // 正文原样投递（不做模板替换、不自动追加验证码），按实际收件人数计量（每封计 1）。
+  rpc MailSend(MailSendRequest) returns (MailSendResponse);
 }
 
 // InvokeRequest - 通用调用入参（镜像运行面 InvokeParams，凭证族 Proof 与 requestId 走 metadata）。
@@ -134,4 +136,26 @@ message UsageRecord {
   string result = 12;          // 调用结果：success / provider_error / rejected / settle_error
   int64 upstream_ms = 13;      // 上游耗时（毫秒，监控用）
   int64 create_at = 14;        // 创建时间（毫秒戳）
+}
+
+// MailSendRequest - 邮件代发请求（typed 便捷方法；能力与动作由服务端固定，凭证族与
+// 调用级幂等键走 metadata）。业务参数默认不入应用日志（05 §脱敏红线）。
+message MailSendRequest {
+  repeated string to = 1;    // 收件人裸地址（1..20 个；服务端逐个解析并去重，含非法地址整单拒绝）
+  string subject = 2;        // 主题（去首尾空白后 1..200 字符）
+  string content = 3;        // 正文原文（1 字符..128 KiB；原样投递，不做任何模板替换）
+  bool html = 4;             // 正文类型：false = text/plain; charset=UTF-8，true = text/html; charset=UTF-8
+}
+
+// MailSendResult - 邮件代发结果（能力出参，与 HTTP data.result 字段一致）。
+message MailSendResult {
+  int32 sent = 1;                  // 实际投递成功的收件人数（全部成功才返回 = 去重后的收件人数）
+  repeated string recipients = 2;  // 归一化收件人裸地址（去重、保持上送顺序）
+  string subject = 3;              // 主题（服务端去空白后的实际投递值）
+}
+
+// MailSendResponse - 邮件代发响应（typed 契约：result + receipt）。
+message MailSendResponse {
+  MailSendResult result = 1;
+  Receipt receipt = 2;
 }

@@ -797,6 +797,190 @@ func (x *UsageRecord) GetCreateAt() int64 {
 	return 0
 }
 
+// MailSendRequest - 邮件代发请求（typed 便捷方法；能力与动作由服务端固定，凭证族与
+// 调用级幂等键走 metadata）。业务参数默认不入应用日志（05 §脱敏红线）。
+type MailSendRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	To            []string               `protobuf:"bytes,1,rep,name=to,proto3" json:"to,omitempty"`           // 收件人裸地址（1..20 个；服务端逐个解析并去重，含非法地址整单拒绝）
+	Subject       string                 `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"` // 主题（去首尾空白后 1..200 字符）
+	Content       string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"` // 正文原文（1 字符..128 KiB；原样投递，不做任何模板替换）
+	Html          bool                   `protobuf:"varint,4,opt,name=html,proto3" json:"html,omitempty"`      // 正文类型：false = text/plain; charset=UTF-8，true = text/html; charset=UTF-8
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MailSendRequest) Reset() {
+	*x = MailSendRequest{}
+	mi := &file_apis_v1_runtime_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MailSendRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MailSendRequest) ProtoMessage() {}
+
+func (x *MailSendRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_apis_v1_runtime_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MailSendRequest.ProtoReflect.Descriptor instead.
+func (*MailSendRequest) Descriptor() ([]byte, []int) {
+	return file_apis_v1_runtime_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *MailSendRequest) GetTo() []string {
+	if x != nil {
+		return x.To
+	}
+	return nil
+}
+
+func (x *MailSendRequest) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *MailSendRequest) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *MailSendRequest) GetHtml() bool {
+	if x != nil {
+		return x.Html
+	}
+	return false
+}
+
+// MailSendResult - 邮件代发结果（能力出参，与 HTTP data.result 字段一致）。
+type MailSendResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sent          int32                  `protobuf:"varint,1,opt,name=sent,proto3" json:"sent,omitempty"`            // 实际投递成功的收件人数（全部成功才返回 = 去重后的收件人数）
+	Recipients    []string               `protobuf:"bytes,2,rep,name=recipients,proto3" json:"recipients,omitempty"` // 归一化收件人裸地址（去重、保持上送顺序）
+	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`       // 主题（服务端去空白后的实际投递值）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MailSendResult) Reset() {
+	*x = MailSendResult{}
+	mi := &file_apis_v1_runtime_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MailSendResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MailSendResult) ProtoMessage() {}
+
+func (x *MailSendResult) ProtoReflect() protoreflect.Message {
+	mi := &file_apis_v1_runtime_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MailSendResult.ProtoReflect.Descriptor instead.
+func (*MailSendResult) Descriptor() ([]byte, []int) {
+	return file_apis_v1_runtime_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MailSendResult) GetSent() int32 {
+	if x != nil {
+		return x.Sent
+	}
+	return 0
+}
+
+func (x *MailSendResult) GetRecipients() []string {
+	if x != nil {
+		return x.Recipients
+	}
+	return nil
+}
+
+func (x *MailSendResult) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+// MailSendResponse - 邮件代发响应（typed 契约：result + receipt）。
+type MailSendResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        *MailSendResult        `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	Receipt       *Receipt               `protobuf:"bytes,2,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MailSendResponse) Reset() {
+	*x = MailSendResponse{}
+	mi := &file_apis_v1_runtime_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MailSendResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MailSendResponse) ProtoMessage() {}
+
+func (x *MailSendResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_apis_v1_runtime_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MailSendResponse.ProtoReflect.Descriptor instead.
+func (*MailSendResponse) Descriptor() ([]byte, []int) {
+	return file_apis_v1_runtime_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MailSendResponse) GetResult() *MailSendResult {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *MailSendResponse) GetReceipt() *Receipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
 var File_apis_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_apis_v1_runtime_proto_rawDesc = "" +
@@ -885,11 +1069,26 @@ const file_apis_v1_runtime_proto_rawDesc = "" +
 	"\x06result\x18\f \x01(\tR\x06result\x12\x1f\n" +
 	"\vupstream_ms\x18\r \x01(\x03R\n" +
 	"upstreamMs\x12\x1b\n" +
-	"\tcreate_at\x18\x0e \x01(\x03R\bcreateAt2\xfe\x01\n" +
+	"\tcreate_at\x18\x0e \x01(\x03R\bcreateAt\"i\n" +
+	"\x0fMailSendRequest\x12\x0e\n" +
+	"\x02to\x18\x01 \x03(\tR\x02to\x12\x18\n" +
+	"\asubject\x18\x02 \x01(\tR\asubject\x12\x18\n" +
+	"\acontent\x18\x03 \x01(\tR\acontent\x12\x12\n" +
+	"\x04html\x18\x04 \x01(\bR\x04html\"^\n" +
+	"\x0eMailSendResult\x12\x12\n" +
+	"\x04sent\x18\x01 \x01(\x05R\x04sent\x12\x1e\n" +
+	"\n" +
+	"recipients\x18\x02 \x03(\tR\n" +
+	"recipients\x12\x18\n" +
+	"\asubject\x18\x03 \x01(\tR\asubject\"\x81\x01\n" +
+	"\x10MailSendResponse\x128\n" +
+	"\x06result\x18\x01 \x01(\v2 .licenhub.apis.v1.MailSendResultR\x06result\x123\n" +
+	"\areceipt\x18\x02 \x01(\v2\x19.licenhub.apis.v1.ReceiptR\areceipt2\xd1\x02\n" +
 	"\x12ApisRuntimeService\x12K\n" +
 	"\x06Invoke\x12\x1f.licenhub.apis.v1.InvokeRequest\x1a .licenhub.apis.v1.InvokeResponse\x12Q\n" +
 	"\bIPLocate\x12!.licenhub.apis.v1.IPLocateRequest\x1a\".licenhub.apis.v1.IPLocateResponse\x12H\n" +
-	"\x05Usage\x12\x1e.licenhub.apis.v1.UsageRequest\x1a\x1f.licenhub.apis.v1.UsageResponseB6Z4github.com/inis-io/aide/licence/proto/apis/v1;apisv1b\x06proto3"
+	"\x05Usage\x12\x1e.licenhub.apis.v1.UsageRequest\x1a\x1f.licenhub.apis.v1.UsageResponse\x12Q\n" +
+	"\bMailSend\x12!.licenhub.apis.v1.MailSendRequest\x1a\".licenhub.apis.v1.MailSendResponseB6Z4github.com/inis-io/aide/licence/proto/apis/v1;apisv1b\x06proto3"
 
 var (
 	file_apis_v1_runtime_proto_rawDescOnce sync.Once
@@ -903,7 +1102,7 @@ func file_apis_v1_runtime_proto_rawDescGZIP() []byte {
 	return file_apis_v1_runtime_proto_rawDescData
 }
 
-var file_apis_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_apis_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_apis_v1_runtime_proto_goTypes = []any{
 	(*InvokeRequest)(nil),    // 0: licenhub.apis.v1.InvokeRequest
 	(*InvokeResponse)(nil),   // 1: licenhub.apis.v1.InvokeResponse
@@ -914,26 +1113,33 @@ var file_apis_v1_runtime_proto_goTypes = []any{
 	(*UsageRequest)(nil),     // 6: licenhub.apis.v1.UsageRequest
 	(*UsageResponse)(nil),    // 7: licenhub.apis.v1.UsageResponse
 	(*UsageRecord)(nil),      // 8: licenhub.apis.v1.UsageRecord
-	(*structpb.Struct)(nil),  // 9: google.protobuf.Struct
+	(*MailSendRequest)(nil),  // 9: licenhub.apis.v1.MailSendRequest
+	(*MailSendResult)(nil),   // 10: licenhub.apis.v1.MailSendResult
+	(*MailSendResponse)(nil), // 11: licenhub.apis.v1.MailSendResponse
+	(*structpb.Struct)(nil),  // 12: google.protobuf.Struct
 }
 var file_apis_v1_runtime_proto_depIdxs = []int32{
-	9, // 0: licenhub.apis.v1.InvokeRequest.params:type_name -> google.protobuf.Struct
-	9, // 1: licenhub.apis.v1.InvokeResponse.result:type_name -> google.protobuf.Struct
-	5, // 2: licenhub.apis.v1.InvokeResponse.receipt:type_name -> licenhub.apis.v1.Receipt
-	3, // 3: licenhub.apis.v1.IPLocateResponse.result:type_name -> licenhub.apis.v1.IPLocateResult
-	5, // 4: licenhub.apis.v1.IPLocateResponse.receipt:type_name -> licenhub.apis.v1.Receipt
-	8, // 5: licenhub.apis.v1.UsageResponse.records:type_name -> licenhub.apis.v1.UsageRecord
-	0, // 6: licenhub.apis.v1.ApisRuntimeService.Invoke:input_type -> licenhub.apis.v1.InvokeRequest
-	2, // 7: licenhub.apis.v1.ApisRuntimeService.IPLocate:input_type -> licenhub.apis.v1.IPLocateRequest
-	6, // 8: licenhub.apis.v1.ApisRuntimeService.Usage:input_type -> licenhub.apis.v1.UsageRequest
-	1, // 9: licenhub.apis.v1.ApisRuntimeService.Invoke:output_type -> licenhub.apis.v1.InvokeResponse
-	4, // 10: licenhub.apis.v1.ApisRuntimeService.IPLocate:output_type -> licenhub.apis.v1.IPLocateResponse
-	7, // 11: licenhub.apis.v1.ApisRuntimeService.Usage:output_type -> licenhub.apis.v1.UsageResponse
-	9, // [9:12] is the sub-list for method output_type
-	6, // [6:9] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	12, // 0: licenhub.apis.v1.InvokeRequest.params:type_name -> google.protobuf.Struct
+	12, // 1: licenhub.apis.v1.InvokeResponse.result:type_name -> google.protobuf.Struct
+	5,  // 2: licenhub.apis.v1.InvokeResponse.receipt:type_name -> licenhub.apis.v1.Receipt
+	3,  // 3: licenhub.apis.v1.IPLocateResponse.result:type_name -> licenhub.apis.v1.IPLocateResult
+	5,  // 4: licenhub.apis.v1.IPLocateResponse.receipt:type_name -> licenhub.apis.v1.Receipt
+	8,  // 5: licenhub.apis.v1.UsageResponse.records:type_name -> licenhub.apis.v1.UsageRecord
+	10, // 6: licenhub.apis.v1.MailSendResponse.result:type_name -> licenhub.apis.v1.MailSendResult
+	5,  // 7: licenhub.apis.v1.MailSendResponse.receipt:type_name -> licenhub.apis.v1.Receipt
+	0,  // 8: licenhub.apis.v1.ApisRuntimeService.Invoke:input_type -> licenhub.apis.v1.InvokeRequest
+	2,  // 9: licenhub.apis.v1.ApisRuntimeService.IPLocate:input_type -> licenhub.apis.v1.IPLocateRequest
+	6,  // 10: licenhub.apis.v1.ApisRuntimeService.Usage:input_type -> licenhub.apis.v1.UsageRequest
+	9,  // 11: licenhub.apis.v1.ApisRuntimeService.MailSend:input_type -> licenhub.apis.v1.MailSendRequest
+	1,  // 12: licenhub.apis.v1.ApisRuntimeService.Invoke:output_type -> licenhub.apis.v1.InvokeResponse
+	4,  // 13: licenhub.apis.v1.ApisRuntimeService.IPLocate:output_type -> licenhub.apis.v1.IPLocateResponse
+	7,  // 14: licenhub.apis.v1.ApisRuntimeService.Usage:output_type -> licenhub.apis.v1.UsageResponse
+	11, // 15: licenhub.apis.v1.ApisRuntimeService.MailSend:output_type -> licenhub.apis.v1.MailSendResponse
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_apis_v1_runtime_proto_init() }
@@ -947,7 +1153,7 @@ func file_apis_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_apis_v1_runtime_proto_rawDesc), len(file_apis_v1_runtime_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
