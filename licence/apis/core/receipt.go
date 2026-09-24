@@ -1,4 +1,4 @@
-package apis
+package core
 
 // Receipt - 计量回执：每次商城调用的计费凭证（客户侧对账依据，跨 HTTP/gRPC 字段一致）。
 // 对应响应信封 data.receipt；字段与 licen-hub API 商城套件 04 文档 §2.3、06 文档 §4 对齐。

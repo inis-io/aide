@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/inis-io/aide/licence/apis"
+	"github.com/inis-io/aide/licence/apis/iplocate"
+	"github.com/inis-io/aide/licence/apis/mailsend"
 	apisv1 "github.com/inis-io/aide/licence/proto/apis/v1"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 	"github.com/spf13/cast"
@@ -145,10 +147,10 @@ func apisCannedUsageRowOf(filter apisUsageFilter) apisCannedUsageRow {
 
 // ============================= 客户端侧期望值（apis 包类型） =============================
 
-// apisExpectedLocate - 客户端应解析出的归属地结果
-func apisExpectedLocate(ip string) apis.IPLocateResult {
+// apisExpectedLocate - 客户端应解析出的归属地结果（iplocate 能力子包类型）
+func apisExpectedLocate(ip string) iplocate.Result {
 	canned := apisCannedLocate(ip)
-	return apis.IPLocateResult{
+	return iplocate.Result{
 		Ip: canned.Ip, Nation: canned.Nation, Province: canned.Province, City: canned.City,
 		Adcode: canned.Adcode, Rectangle: canned.Rectangle, Isp: canned.Isp, Source: canned.Source,
 		CacheHit: canned.CacheHit, Stale: canned.Stale,
@@ -165,9 +167,9 @@ func apisExpectedReceipt(requestId string) apis.Receipt {
 	}
 }
 
-// apisExpectedMailSend - 客户端应解析出的代发结果
-func apisExpectedMailSend(canned apisCannedMailSend) apis.MailSendResult {
-	return apis.MailSendResult{Sent: int(canned.Sent), Recipients: canned.Recipients, Subject: canned.Subject}
+// apisExpectedMailSend - 客户端应解析出的代发结果（mailsend 能力子包类型）
+func apisExpectedMailSend(canned apisCannedMailSend) mailsend.Result {
+	return mailsend.Result{Sent: int(canned.Sent), Recipients: canned.Recipients, Subject: canned.Subject}
 }
 
 // apisExpectedUsageRow - 客户端应解析出的流水行
@@ -696,7 +698,7 @@ func runApisDual(t *testing.T, run func(t *testing.T, fake *apisFake, client *Cl
 func TestApisDualIPLocate(t *testing.T) {
 
 	runApisDual(t, func(t *testing.T, fake *apisFake, client *Client) {
-		loc, receipt, err := client.Apis.IPLocate(t.Context(), "203.0.113.10")
+		loc, receipt, err := client.Apis.IPLocate.Query(t.Context(), "203.0.113.10")
 		if err != nil {
 			t.Fatalf("IPLocate 失败: %v", err)
 		}
@@ -765,7 +767,7 @@ func TestApisDualMailSend(t *testing.T) {
 		to := []string{"a@example.com", "b@example.com"}
 		// 正文刻意含 pushx 内置占位符：SDK 与传输层都不得做任何模板替换（服务端才是唯一投递方）
 		content := "验证码 ${code}（收件人 ${target}）"
-		result, receipt, err := client.Apis.MailSend(t.Context(), apis.MailSendInput{
+		result, receipt, err := client.Apis.MailSend.Send(t.Context(), mailsend.Input{
 			To: to, Subject: "  对账单  ", Content: content, HTML: true,
 		}, "req_mail_dual")
 		if err != nil {
@@ -811,7 +813,7 @@ func TestApisDualMailSendBusinessError(t *testing.T) {
 			t.Run(item.name, func(t *testing.T) {
 				message := "代发拒绝：" + item.code
 				fake.setFailure(item.code, message, nil)
-				_, _, err := client.Apis.MailSend(t.Context(), apis.MailSendInput{
+				_, _, err := client.Apis.MailSend.Send(t.Context(), mailsend.Input{
 					To: []string{"user@example.com"}, Subject: "对账单", Content: "正文",
 				})
 				var apiErr *apis.Error
@@ -881,7 +883,7 @@ func TestApisDualBusinessErrorEquivalence(t *testing.T) {
 			t.Run(item.name, func(t *testing.T) {
 				message := "商城拒绝：" + item.code
 				fake.setFailure(item.code, message, item.detail)
-				_, _, err := client.Apis.IPLocate(t.Context(), "203.0.113.10")
+				_, _, err := client.Apis.IPLocate.Query(t.Context(), "203.0.113.10")
 				var apiErr *apis.Error
 				if !errors.As(err, &apiErr) {
 					t.Fatalf("业务失败应归一为 *apis.Error：%v", err)
@@ -921,7 +923,7 @@ func TestApisDualGateNotActivated(t *testing.T) {
 		client.mu.Lock()
 		client.state.ActivationToken = ""
 		client.mu.Unlock()
-		if _, _, err := client.Apis.IPLocate(t.Context(), "203.0.113.10"); !errors.Is(err, apis.ErrNotActivated) {
+		if _, _, err := client.Apis.IPLocate.Query(t.Context(), "203.0.113.10"); !errors.Is(err, apis.ErrNotActivated) {
 			t.Fatalf("无 token 应返回 ErrNotActivated，实际 %v", err)
 		}
 		for _, status := range []string{
@@ -1045,7 +1047,7 @@ func TestApisDualMountedOnClientApis(t *testing.T) {
 		if client.Apis == nil {
 			t.Fatalf("Client.Apis 挂载点缺失")
 		}
-		if _, _, err := client.Apis.IPLocate(t.Context(), "203.0.113.10"); err != nil {
+		if _, _, err := client.Apis.IPLocate.Query(t.Context(), "203.0.113.10"); err != nil {
 			t.Fatalf("经 Client.Apis 调用失败：%v", err)
 		}
 		if got := len(fake.requestsSnapshot()); got != 1 {
@@ -1062,7 +1064,7 @@ func TestApisDualContextCancellation(t *testing.T) {
 	runApisDual(t, func(t *testing.T, fake *apisFake, client *Client) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		_, _, err := client.Apis.IPLocate(ctx, "203.0.113.10")
+		_, _, err := client.Apis.IPLocate.Query(ctx, "203.0.113.10")
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("取消上下文应返回 context.Canceled，实际 %v", err)
 		}

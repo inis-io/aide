@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/inis-io/aide/licence/apis/core"
 )
 
 // invokePath - 通用能力调用路径（protocol-matrix.yaml 第 1 行；HTTP ↔ gRPC Invoke 一一对应）
@@ -42,7 +44,7 @@ type invokeBody struct {
 //
 // 已知边界（属 proto 契约层，非本包可修）：gRPC 侧 result 经 google.protobuf.Struct，
 // 数字一律按 IEEE-754 double 往返，绝对值 >2^53 的整数会丢精度（HTTP 侧精确）。当前内置能力
-// （如 ip-locate）出参全为字符串/布尔，不受影响；未来能力若需要精确大整数（雪花 ID、纳秒
+//（如 ip-locate）出参全为字符串/布尔，不受影响；未来能力若需要精确大整数（雪花 ID、纳秒
 // 时间戳等）应升级为 typed RPC，或以字符串承载这些字段。
 /**
  * @param ctx context.Context - 调用上下文
@@ -64,7 +66,7 @@ func (this *Client) Invoke(ctx context.Context, input InvokeInput) (json.RawMess
 	if err != nil {
 		return nil, Receipt{}, err
 	}
-	data, err := this.do(ctx, http.MethodPost, invokePath, body, resolveRequestID(input.RequestId))
+	data, err := this.do(ctx, http.MethodPost, invokePath, body, core.ResolveRequestID(input.RequestId))
 	if err != nil {
 		return nil, Receipt{}, err
 	}

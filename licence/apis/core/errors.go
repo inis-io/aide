@@ -1,4 +1,4 @@
-package apis
+package core
 
 import (
 	"encoding/json"
@@ -58,7 +58,7 @@ const (
 
 // HTTPStatusByCode - 业务码 → HTTP 等价状态码（licen-hub API 商城 04 文档 §2.4 映射表，
 // 与服务端 ServiceError.HTTPStatus 同源）。未登记业务码一律 500（服务端同口径：回落 INTERNAL_ERROR）。
-// 供 apis.Error.HTTPStatus 推导与 gRPC 失败信封合成共用，保证双协议看到同一取值。
+// 供 Error.HTTPStatus 推导与 gRPC 失败信封合成共用，保证双协议看到同一取值。
 func HTTPStatusByCode(code string) int {
 
 	switch code {
@@ -124,11 +124,11 @@ type envelope struct {
 	Detail map[string]any `json:"detail"`
 }
 
-// parseEnvelope - 双协议统一的信封解析点：成功返回 data 原文，
-// 业务失败（code 为字符串业务码）返回 *apis.Error（errors.As 断言）。
+// ParseEnvelope - 双协议统一的信封解析点：成功返回 data 原文，
+// 业务失败（code 为字符串业务码）返回 *Error（errors.As 断言）。
 // 信封本身不可解析（既非成功也非业务失败，如网关返回 HTML 错误页）按协议错误返回，
 // 不伪装成业务码。
-func parseEnvelope(raw []byte) (json.RawMessage, error) {
+func ParseEnvelope(raw []byte) (json.RawMessage, error) {
 
 	var body envelope
 	if err := json.Unmarshal(raw, &body); err != nil {
