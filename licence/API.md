@@ -34,7 +34,7 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | 回调接收与事件订阅 | `licence/callback` | `callback.NewCallbackHandler(CallbackOptions)`、`callback.NewEventSubscriber(client, CallbackOptions)` | 客户项目接收 webhook / 主动订阅平台事件 |
 | 配置定义校验引擎 | `licence/config` | `config.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
 | 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
-| API 商城（骨架） | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（随商城后端就绪落地；面向 `Doer` 窄接口、不 import runtime） |
+| API 商城 | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（`Invoke`/`IPLocate`/`Usage`，见 §7.4；面向 `Doer` 窄接口、不 import runtime，HTTP/gRPC 双协议随根 Client） |
 
 依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol`/`config`/`apis` 为叶子包。
 
@@ -348,6 +348,58 @@ if client.HasFeature("report.advanced") { /* 开放高级报表 */ }
 if maxUsers, ok := client.GetLimit("max_users"); ok { /* 额度内 */ }
 if !client.CheckVersion("2.3.1") { /* 当前版本不在授权范围 */ }
 ```
+
+### 7.4 API 商城调用（`lic.Apis`，阶段 4 已落地）
+
+API 商城（IP 定位等付费能力）挂在**已激活的同一个 `Client`** 上，零额外凭证、零额外客户端。
+typed 方法走与运行面相同的双协议传输与请求签名（`Options.Transport` 切换不改业务调用），
+依赖方向 `runtime` → `apis`（`apis` 为叶子包，只处理 JSON，不 import proto/传输实现）。
+
+```go
+import "github.com/inis-io/aide/licence/apis"
+
+type InvokeInput struct {           // 通用调用入参（新能力零发版兜底）
+    Capability string               // 能力编码（须已注册且有在售产品）
+    Action     string               // 动作（单动作能力可为空）
+    Params     map[string]any       // 业务参数（能力自定义）
+    ProductId  int64                // 显式产品选择（0 = 服务端解析）
+    Quantity   int64                // 声明最大计量数（默认 1）
+    RequestId  string               // 调用级幂等键（缺省自动生成 req_ + 32 位 UUID）
+}
+type UsageQuery struct {            // 流水查询（proto UsageRequest 的客户端子集）
+    Page, Limit int
+    Order, Capability string
+    ProductId   int64
+    ChargeMode, Result, CacheHit string
+    RequestId   string              // 流水筛选（完整行 request_id 精确匹配，与调用级幂等键无关）
+    CreateAt    []int64             // 调用时间区间 [起, 止]（毫秒；HTTP 序列化为 createAt[]=v）
+}
+type Error struct {                 // 业务拒绝（errors.As 断言）
+    Code       string               // 业务码（ErrorCode* 常量，双协议逐字一致）
+    Message    string
+    Detail     map[string]any       // 闸门明细（retryAfterMs/scope/resetAt/limit/monthSpent …）
+    HTTPStatus int                  // HTTP 等价状态码（licen-hub docs/plan/apis/04 §2.4 表推导）
+}
+```
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `Invoke` | `func (this *Client) Invoke(ctx context.Context, input InvokeInput) (json.RawMessage, Receipt, error)` | 通用能力调用（`POST /api/v1/apis/invoke` / `ApisRuntimeService.Invoke`）；出参 JSON 返回（HTTP 原文直传 / gRPC 经 `google.protobuf.Struct` 重新序列化的等价 JSON，键序不保证一致），客户按 JSON 解析自解 |
+| `IPLocate` | `func (this *Client) IPLocate(ctx context.Context, ip string, requestId ...string) (IPLocateResult, Receipt, error)` | IP 归属地查询（`POST /api/v1/apis/ip-locate/query` / `ApisRuntimeService.IPLocate`）；能力/动作/计量数由服务端固定 |
+| `Usage` | `func (this *Client) Usage(ctx context.Context, query UsageQuery) (UsagePage, error)` | 调用流水自助查询（`GET /api/v1/apis/usage` / `ApisRuntimeService.Usage`）；只读，不计量不收费，**无回执** |
+
+配套类型：`Receipt`（计量回执：`RequestId/ChargeMode/CacheHit/Quantity/Amount/QuotaRemaining/BalanceAfter/ServerTime`）、
+`IPLocateResult`（归属地 10 字段）、`UsagePage{Records, Count, Page}` / `UsageRecord`（14 字段）、
+`Error` + `ErrNotActivated` + `ErrorCode*`（17 个业务码常量）+ `HTTPStatusByCode(code) int`。
+
+语义要点：
+
+- **幂等键**：`Invoke`/`IPLocate` 缺省自动生成 `req_` + 32 位无横线 UUID，随 `X-Request-Id`（HTTP）或
+  metadata `x-request-id`（gRPC）下发，**不进签名 canonical**；`Receipt.RequestId` 回显本次实际用键。
+  自填时不得使用系统保留前缀 `renew:` / `sys:`；重试必须复用同一值。
+- **错误**：双协议统一 `*apis.Error`（HTTP 失败信封 `code/msg/detail` 与 gRPC `errdetails.ErrorInfo.Reason`
+  在传输层合成为同一形态）；调用方取消/超时与传输层故障保持传输错误形态（不伪装业务码）。
+- **未激活闸门**：无 activation token 或授权状态非放行态时本地返回 `apis.ErrNotActivated`（不发请求）。
 
 ---
 
@@ -1003,10 +1055,10 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
 | `runtime/provision.go` | 自助发放 `Provision` 与兑换码兑换 `Redeem`（HTTP/gRPC 双协议） |
-| `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口） |
+| `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
 | `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 14 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`） |
-| `apis/` | API 商城 typed 方法包骨架：`Client{doer}` + `New` + `Receipt` + `ErrNotActivated`（typed 方法随商城后端就绪落地） |
-| `proto/licence/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改） |
+| `apis/` | API 商城 typed 方法包：`Client{doer}` + `New` + `Invoke`/`IPLocate`/`Usage` + `Receipt` + `Error`（业务码常量与 `HTTPStatusByCode`）+ `ErrNotActivated`（叶子包，只认 JSON） |
+| `proto/licence/v1/` / `proto/apis/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改；apis 契约含 `ApisRuntimeService{Invoke,IPLocate,Usage}`） |

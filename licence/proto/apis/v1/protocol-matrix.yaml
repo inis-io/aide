@@ -25,7 +25,8 @@ defaults:
 #
 # 凭证族与幂等键不进消息：token/时间戳/nonce/签名走 metadata x-license-*，
 # 调用级幂等键走 metadata x-request-id（等价 HTTP X-Request-Id）。
-# SDK typed 方法与 runtime 包 gRPC 传输绑定属阶段 4 后续任务（T19），本矩阵先行冻结协议面。
+# 本矩阵为唯一映射清单；SDK 侧 typed 方法与 runtime 包 gRPC 传输绑定已随阶段 4 T19 落地
+# （licence/apis 三方法 + runtime-transport-grpc.go 三 case，绑定门禁见 protocol_matrix_test.go）。
 runtime:
   # NOT_FOUND 是认证失败的唯一外显码（模糊 404，防爆破），三个 rpc 皆可达；UNAUTHORIZED/FORBIDDEN
   # 来自用户状态闸门（gateUserStatus，全 rpc 生效）；ACCOUNT_FROZEN 等资金码对含按量定价的能力都适用。

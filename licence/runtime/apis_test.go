@@ -33,7 +33,7 @@ func TestApisDoerGateNotActivated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New 失败: %v", err)
 	}
-	if _, err = (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/anything", nil); !errors.Is(err, apis.ErrNotActivated) {
+	if _, err = (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/anything", nil, ""); !errors.Is(err, apis.ErrNotActivated) {
 		t.Fatalf("无 token 应返回 ErrNotActivated，实际 %v", err)
 	}
 
@@ -51,7 +51,7 @@ func TestApisDoerGateNotActivated(t *testing.T) {
 		client.mu.Lock()
 		client.state.Status = status
 		client.mu.Unlock()
-		if _, err = (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/anything", nil); !errors.Is(err, apis.ErrNotActivated) {
+		if _, err = (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/anything", nil, ""); !errors.Is(err, apis.ErrNotActivated) {
 			t.Fatalf("状态 %s 应返回 ErrNotActivated，实际 %v", status, err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestApisDoerGateNotActivated(t *testing.T) {
 		client.mu.Lock()
 		client.state.Status = status
 		client.mu.Unlock()
-		if _, err = (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/anything", nil); errors.Is(err, apis.ErrNotActivated) {
+		if _, err = (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/anything", nil, ""); errors.Is(err, apis.ErrNotActivated) {
 			t.Fatalf("放行状态 %s 不应返回 ErrNotActivated", status)
 		}
 	}
@@ -83,7 +83,7 @@ func TestApisDoerPassThroughAfterActivation(t *testing.T) {
 	defer client.Stop()
 
 	raw, err := (apisDoer{client: client}).Do(t.Context(), "POST", "/api/v1/licenses/validate",
-		[]byte(`{"licenseNo":"LIC-2026-000123"}`))
+		[]byte(`{"licenseNo":"LIC-2026-000123"}`), "")
 	if err != nil {
 		t.Fatalf("激活后 Do 应放行: %v", err)
 	}

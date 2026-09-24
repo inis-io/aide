@@ -24,6 +24,9 @@ const (
 	MetadataSignature = "x-license-sign"
 	// MetadataSignVersion - gRPC 请求签名版本 metadata key。
 	MetadataSignVersion = "x-license-sign-version"
+	// MetadataRequestID - 调用级幂等键 metadata key（等价 HTTP 头 X-Request-Id，头族映射见
+	// licen-hub API 商城 04 文档 §2.2）。**不进签名 canonical**，与 HTTP 侧头不入签名同口径。
+	MetadataRequestID = "x-request-id"
 	// SignVersionV1 - 当前 gRPC 请求签名版本。
 	SignVersionV1 = "1"
 )

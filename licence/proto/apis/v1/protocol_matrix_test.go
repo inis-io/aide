@@ -18,8 +18,9 @@ import (
 //	   与生成代码的 FullMethodName 常量逐字相同（真名 licenhub.apis.v1.ApisRuntimeService/*）；
 //	3) HTTP 方法与路径与 licen-hub 04 设计文档一致，landed/pending 状态与服务端路由现实一致。
 //
-// 与 licence/v1 同名测试的差异：那里还断言「每个 rpc 已被 SDK gRPC 传输绑定」，apis 的
-// runtime 传输绑定属阶段 4 后续任务（T19），故此处以「生成代码 ↔ 矩阵」双向绑定替代。
+// 与 licence/v1 同名测试的差异：那里的绑定断言在 TestGeneratedRPCsAreBoundBySDKTransports，
+// 本文件对应断言为 TestGeneratedRPCsAreBoundBySDKTransport（T19 SDK 传输绑定已落地，
+// 除 stub 方法调用外额外要求引用 FullMethodName 常量与矩阵 landed 行的 HTTP 路径）。
 
 const (
 	// matrixColumns - 矩阵固定列数（列序见 protocol-matrix.yaml 头部注记）。
@@ -30,6 +31,8 @@ const (
 	routePrefix = "/api/v1/apis/"
 	// routeTable - licen-hub 运行面路由表标识（GenRoute 返回的 table 字面量）。
 	routeTable = `"v1/apis"`
+	// clientTransportPath - SDK 侧 gRPC 运行面传输层（T19 落地物：apis 三路径 switch 与 typed stub）。
+	clientTransportPath = "../../../runtime/runtime-transport-grpc.go"
 	// designDocPath - licen-hub 04 设计文档（兄弟仓库；未检出时相关断言跳过）。
 	designDocPath = "../../../../../licen-hub/docs/plan/apis/04-HTTP与gRPC双协议设计.md"
 	// serverRouteDir - licen-hub 运行面 HTTP 适配层目录（landed 行的落地事实来源，按目录整体扫描）。
@@ -320,4 +323,45 @@ func loadRuntimeRouteSource(t *testing.T) string {
 		t.Fatalf("运行面路由目录 %s 下没有声明 %s 表的文件（运行面 HTTP 适配层缺失或已迁移）", serverRouteDir, routeTable)
 	}
 	return builder.String()
+}
+
+// TestGeneratedRPCsAreBoundBySDKTransport - T19 SDK 传输绑定门禁（对照 licence/v1 的
+// TestGeneratedRPCsAreBoundBySDKTransports，本契约的三项额外要求）：
+//
+//  1. 每个 rpc 的生成代码客户端方法在 SDK gRPC 传输层被调用（typed stub 绑定，防漏绑）；
+//  2. 每个 rpc 的 FullMethodName 常量被引用（gRPC 签名 canonical 必须取常量原值，禁止手拼）；
+//  3. 矩阵中每条 landed 行的 HTTP 路径都出现在传输层路由 switch 中
+//     （HTTP/gRPC 两协议对同一能力同批落地，任一侧缺失即未完成）。
+func TestGeneratedRPCsAreBoundBySDKTransport(t *testing.T) {
+
+	raw, err := os.ReadFile(clientTransportPath)
+	if err != nil {
+		t.Fatalf("读取 SDK gRPC 传输层失败（%s，T19 落地物）：%v", clientTransportPath, err)
+	}
+	transport := string(raw)
+
+	services := File_apis_v1_runtime_proto.Services()
+	for index := 0; index < services.Len(); index++ {
+		service := services.Get(index)
+		for methodIndex := 0; methodIndex < service.Methods().Len(); methodIndex++ {
+			method := service.Methods().Get(methodIndex)
+			name := string(method.Name())
+			if !strings.Contains(transport, "."+name+"(") {
+				t.Errorf("SDK gRPC transport 未绑定 %s/%s（缺少 typed stub 调用）", service.Name(), name)
+			}
+			if !strings.Contains(transport, name+"_FullMethodName") {
+				t.Errorf("%s/%s 未引用生成代码 FullMethodName 常量（gRPC 签名 canonical 必须取常量原值）", service.Name(), name)
+			}
+		}
+	}
+
+	rows, _ := loadMatrix(t)
+	for _, row := range rows {
+		if row.state != "landed" {
+			continue
+		}
+		if !strings.Contains(transport, row.httpPath) {
+			t.Errorf("矩阵行 %s 标记 landed，但 SDK gRPC 传输未映射 HTTP 路径 %s", row.sdkMethod, row.httpPath)
+		}
+	}
 }

@@ -6,8 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/inis-io/aide/licence/apis"
+	apisv1 "github.com/inis-io/aide/licence/proto/apis/v1"
 	licencev1 "github.com/inis-io/aide/licence/proto/licence/v1"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
+	"github.com/spf13/cast"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -15,6 +20,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"io"
 	"net/http"
 	"net/url"
@@ -34,6 +40,7 @@ type grpcRuntimeTransport struct {
 	platformConfig licencev1.PlatformConfigRuntimeServiceClient
 	event          licencev1.EventRuntimeServiceClient
 	pushback       licencev1.ConfigPushbackRuntimeServiceClient
+	apis           apisv1.ApisRuntimeServiceClient
 	closeOnce      sync.Once
 	closeErr       error
 }
@@ -51,6 +58,7 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 		platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn),
 		event:          licencev1.NewEventRuntimeServiceClient(conn),
 		pushback:       licencev1.NewConfigPushbackRuntimeServiceClient(conn),
+		apis:           apisv1.NewApisRuntimeServiceClient(conn),
 	}, nil
 }
 
@@ -264,6 +272,11 @@ func (this *grpcRuntimeTransport) mapSubscribeError(err error) error {
 
 func (this *grpcRuntimeTransport) invokeContext(ctx context.Context, fullMethod string, request proto.Message, withSign bool) (context.Context, context.CancelFunc, error) {
 	callCtx, cancel := this.callContext(ctx)
+	// 调用级幂等键（apis typed 方法经 context 注入）：与签名 metadata 同批挂载，
+	// 不进 gRPC 签名 canonical（04 §2.2；服务端从 metadata x-request-id 读取）
+	if requestID := apisRequestID(ctx); requestID != "" {
+		callCtx = metadata.AppendToOutgoingContext(callCtx, LicenceProtocol.MetadataRequestID, requestID)
+	}
 	if !withSign {
 		return callCtx, cancel, nil
 	}
@@ -410,6 +423,74 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			result["message"] = response.GetMessage()
 		}
 		return marshalMap(result)
+
+	case http.MethodPost + " /api/v1/apis/invoke":
+		var input apisInvokeBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &apisv1.InvokeRequest{
+			Capability: input.Capability, Action: input.Action,
+			ProductId: input.ProductId, Quantity: input.Quantity,
+		}
+		if len(input.Params) > 0 {
+			params, err := structpb.NewStruct(input.Params)
+			if err != nil {
+				return 0, nil, err
+			}
+			request.Params = params
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, apisv1.ApisRuntimeService_Invoke_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.apis.Invoke(callCtx, request)
+		if err != nil {
+			return apisFailureEnvelope(err)
+		}
+		return apisEnvelope(apisInvokeData(response))
+
+	case http.MethodPost + " /api/v1/apis/ip-locate/query":
+		var input apisIPLocateBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &apisv1.IPLocateRequest{Ip: input.Ip}
+		callCtx, cancel, err := this.invokeContext(ctx, apisv1.ApisRuntimeService_IPLocate_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.apis.IPLocate(callCtx, request)
+		if err != nil {
+			return apisFailureEnvelope(err)
+		}
+		return apisEnvelope(apisIPLocateData(response))
+
+	case http.MethodGet + " /api/v1/apis/usage":
+		parsed, err := url.ParseRequestURI(requestURI)
+		if err != nil {
+			return 0, nil, err
+		}
+		query := parsed.Query()
+		request := &apisv1.UsageRequest{
+			Page: int32(cast.ToInt(query.Get("page"))), Limit: int32(cast.ToInt(query.Get("limit"))),
+			Order: query.Get("order"), Capability: query.Get("capability"),
+			ProductId: cast.ToInt64(query.Get("productId")), ChargeMode: query.Get("chargeMode"),
+			Result: query.Get("result"), CacheHit: query.Get("cacheHit"), RequestId: query.Get("requestId"),
+			CreateAt: apisCreateAtQuery(query),
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, apisv1.ApisRuntimeService_Usage_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.apis.Usage(callCtx, request)
+		if err != nil {
+			return apisFailureEnvelope(err)
+		}
+		return apisEnvelope(apisUsageData(response))
 	}
 	return this.roundTripExtended(ctx, method, path, requestURI, body, withSign)
 }
@@ -816,4 +897,187 @@ type unsupportedRuntimeRouteError struct {
 
 func (this *unsupportedRuntimeRouteError) Error() string {
 	return "gRPC 运行面未映射请求：" + this.method + " " + this.requestURI
+}
+
+// ============================= gRPC 扩展传输（API 商城运行面） =============================
+
+// apisInvokeBody - 通用调用请求体（镜像 apis 包 invokeBody 与 HTTP 侧 JSON：requestId 与凭证族
+// 不进消息体，分别走 metadata x-request-id 与 x-license-*）。
+type apisInvokeBody struct {
+	Capability string         `json:"capability"`
+	Action     string         `json:"action"`
+	Params     map[string]any `json:"params"`
+	ProductId  int64          `json:"productId"`
+	Quantity   int64          `json:"quantity"`
+}
+
+// apisIPLocateBody - IP 定位 typed 请求体（能力/动作/计量数由服务端固定，客户端只上送 ip）
+type apisIPLocateBody struct {
+	Ip string `json:"ip"`
+}
+
+// apisCreateAtQuery - Usage 的 createAt 数组参数解析（平台约定 key[]=v 重复键，
+// 与 apis 包 usageQuery / admin 子包 toQuery 的序列化口径一致）。
+// 非法文本由 cast 归一为 0（服务端对 0/单侧值按不限处理），此处只做转换不做校验。
+func apisCreateAtQuery(query url.Values) []int64 {
+
+	values := query["createAt[]"]
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]int64, 0, len(values))
+	for _, value := range values {
+		result = append(result, cast.ToInt64(value))
+	}
+	return result
+}
+
+// apisEnvelope - API 商城成功信封：{code:0, msg:"ok", data:…}，与 HTTP 侧
+// app/api/control/apis-runtime.go 的 runtimeJSON/usageJSON 信封同形（04 §2.3）。
+func apisEnvelope(data map[string]any) (int, []byte, error) {
+	return marshalMap(map[string]any{"code": 0, "msg": "ok", "data": data})
+}
+
+// apisFailureEnvelope - gRPC 业务错误 → 与 HTTP 失败信封同形的 JSON 字节 + HTTP 等价状态码。
+//
+// 业务码以 errdetails.ErrorInfo.Reason 为准（服务端逐字等于 ServiceError.Code，04 §2.4）；
+// detail 取 ErrorInfo.Metadata（服务端已把结构化明细扁平化为字符串，键名与 HTTP detail 一致）。
+// 服务端未挂 ErrorInfo 时按 gRPC status code 反推业务码（映射表反转），Unknown/Internal 等
+// 一律 INTERNAL_ERROR——使 apis 包的单一解析点在双协议下看到完全同一形态。
+//
+// 例外（错误分层跨协议一致，不伪装业务码）：Canceled / DeadlineExceeded / Unavailable 属
+// 客户端取消与传输层故障——HTTP 侧同场景返回的是传输错误而非信封，故此处原样透传：
+//   - Canceled / DeadlineExceeded 归一为 context.Canceled / context.DeadlineExceeded 语义
+//     （grpc 的 *status.Error 不实现 Is(context.Canceled)，需显式还原，调用方才能区分
+//     「我取消了/超时了」与「服务端拒绝」）；
+//   - Unavailable 直接透传（拨号失败/连接中断，等价 HTTP 侧的连接错误）。
+func apisFailureEnvelope(err error) (int, []byte, error) {
+
+	grpcStatus := status.Convert(err)
+	switch grpcStatus.Code() {
+	case codes.Canceled:
+		return 0, nil, fmt.Errorf("apis: 调用已取消：%w", context.Canceled)
+	case codes.DeadlineExceeded:
+		return 0, nil, fmt.Errorf("apis: 调用已超时：%w", context.DeadlineExceeded)
+	case codes.Unavailable:
+		return 0, nil, err
+	}
+	code := apisCodeByGRPCStatus(grpcStatus.Code())
+	detail := map[string]any{}
+	for _, item := range grpcStatus.Details() {
+		info, ok := item.(*errdetails.ErrorInfo)
+		if !ok {
+			continue
+		}
+		if info.GetReason() != "" {
+			code = info.GetReason()
+		}
+		for key, value := range info.GetMetadata() {
+			detail[key] = value
+		}
+		break
+	}
+	body := map[string]any{"code": code, "msg": grpcStatus.Message()}
+	if len(detail) > 0 {
+		body["detail"] = detail
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return apis.HTTPStatusByCode(code), raw, nil
+}
+
+// apisCodeByGRPCStatus - gRPC status code → 业务码（04 §2.4 映射表反转，仅用于服务端未挂
+// ErrorInfo.Reason 的降级场景；正常平台响应恒挂 ErrorInfo，不走此路径）。同族多码取代表：
+// PermissionDenied→FORBIDDEN（NO_ENTITLEMENT 同族）、FailedPrecondition→INVALID_STATE
+// （ACCOUNT_FROZEN/CONFLICT 同族）、ResourceExhausted→QUOTA_EXCEEDED（余额/速率/限额同族）。
+// 同族 status 折叠时 HTTPStatus 一并折叠为族代表值（由族代表业务码查 04 §2.4 表得到：
+// ResourceExhausted 家族的真实 402/403/429 一律合成 403，FailedPrecondition 家族合成 409，
+// Internal 家族的真实 502 合成 500）——仅此降级路径可见，正常路径 HTTPStatus 取 Reason 对应值。
+// 注：Canceled/DeadlineExceeded/Unavailable 不在此表内——它们在 apisFailureEnvelope 已原样透传。
+func apisCodeByGRPCStatus(code codes.Code) string {
+
+	switch code {
+	case codes.InvalidArgument:
+		return apis.ErrorCodeInvalidArgument
+	case codes.Unauthenticated:
+		return apis.ErrorCodeUnauthorized
+	case codes.PermissionDenied:
+		return apis.ErrorCodeForbidden
+	case codes.FailedPrecondition:
+		return apis.ErrorCodeInvalidState
+	case codes.ResourceExhausted:
+		return apis.ErrorCodeQuotaExceeded
+	case codes.NotFound:
+		return apis.ErrorCodeNotFound
+	default:
+		return apis.ErrorCodeInternal
+	}
+}
+
+// apisInvokeData - InvokeResponse → 信封 data（{result, receipt}；result 为能力出参对象，
+// nil 保持 null，与 HTTP 侧 result 同源）。
+func apisInvokeData(response *apisv1.InvokeResponse) map[string]any {
+
+	data := map[string]any{"result": nil}
+	if response.GetResult() != nil {
+		data["result"] = response.GetResult().AsMap()
+	}
+	data["receipt"] = apisReceiptMap(response.GetReceipt())
+	return data
+}
+
+// apisIPLocateData - IPLocateResponse → 信封 data（{result, receipt}，字段与 HTTP data.result 逐一对应）。
+func apisIPLocateData(response *apisv1.IPLocateResponse) map[string]any {
+
+	data := map[string]any{"result": nil, "receipt": apisReceiptMap(response.GetReceipt())}
+	if result := response.GetResult(); result != nil {
+		data["result"] = map[string]any{
+			"ip": result.GetIp(), "nation": result.GetNation(), "province": result.GetProvince(),
+			"city": result.GetCity(), "adcode": result.GetAdcode(), "rectangle": result.GetRectangle(),
+			"isp": result.GetIsp(), "source": result.GetSource(),
+			"cacheHit": result.GetCacheHit(), "stale": result.GetStale(),
+		}
+	}
+	return data
+}
+
+// apisUsageData - UsageResponse → 信封 data（{records, count, page}，04 §2.3 只读分页信封）。
+// records 为空时保持 nil（JSON null，与 HTTP 侧空结果 nil slice 同形）。
+func apisUsageData(response *apisv1.UsageResponse) map[string]any {
+
+	data := map[string]any{"count": response.GetCount(), "page": response.GetPage()}
+	if records := response.GetRecords(); len(records) > 0 {
+		items := make([]map[string]any, 0, len(records))
+		for _, record := range records {
+			items = append(items, map[string]any{
+				"id": record.GetId(), "requestId": record.GetRequestId(), "userId": record.GetUserId(),
+				"capability": record.GetCapability(), "productId": record.GetProductId(),
+				"activationNo": record.GetActivationNo(), "subId": record.GetSubId(),
+				"quantity": record.GetQuantity(), "chargeMode": record.GetChargeMode(),
+				"cacheHit": record.GetCacheHit(), "amount": record.GetAmount(), "result": record.GetResult(),
+				"upstreamMs": record.GetUpstreamMs(), "createAt": record.GetCreateAt(),
+			})
+		}
+		data["records"] = items
+	} else {
+		data["records"] = nil
+	}
+	return data
+}
+
+// apisReceiptMap - 计量回执 → 信封 data.receipt（8 字段恒全量输出，与 HTTP 侧 Receipt 结构
+// 无 omitempty 的序列化形态一致：回执是计费的客户侧凭证，字段缺失即对账歧义）。
+func apisReceiptMap(receipt *apisv1.Receipt) map[string]any {
+
+	if receipt == nil {
+		return nil
+	}
+	return map[string]any{
+		"requestId": receipt.GetRequestId(), "chargeMode": receipt.GetChargeMode(),
+		"cacheHit": receipt.GetCacheHit(), "quantity": receipt.GetQuantity(),
+		"amount": receipt.GetAmount(), "quotaRemaining": receipt.GetQuotaRemaining(),
+		"balanceAfter": receipt.GetBalanceAfter(), "serverTime": receipt.GetServerTime(),
+	}
 }

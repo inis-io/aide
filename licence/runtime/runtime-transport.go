@@ -75,6 +75,11 @@ func (this *httpRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			request.Header.Set(key, value)
 		}
 	}
+	// 调用级幂等键（apis typed 方法经 context 注入）：与签名头族同批设置在头部，
+	// 但不参与签名 canonical（04 §2.2：X-Request-Id 不进 canonical）
+	if requestID := apisRequestID(ctx); requestID != "" {
+		request.Header.Set(apisRequestIDHeader, requestID)
+	}
 	response, err := this.http.Do(request)
 	if err != nil {
 		return 0, nil, err

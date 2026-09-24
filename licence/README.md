@@ -31,6 +31,7 @@
 16. [安全存储接口](#16-安全存储接口)
 17. [运行面客户端 Client](#17-运行面客户端-client)
    - [装机自动申领与激活码兑换（包级函数）](#174-装机自动申领与激活码兑换包级函数)
+   - [API 商城调用（`lic.Apis`）](#175-api-商城调用licapis)
 18. [在线更新模块](#18-在线更新模块)
 19. [SaaS 多租户接口](#19-saas-多租户接口)
 20. [管理面客户端 AdminClient](#20-管理面客户端-adminclient)
@@ -466,7 +467,7 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | 回调接收与事件订阅 | `licence/callback` | `callback.NewCallbackHandler(CallbackOptions)`、`callback.NewEventSubscriber(client, CallbackOptions)` | 客户项目接收 webhook / 主动订阅平台事件 |
 | 配置定义校验引擎 | `licence/config` | `config.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
 | 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
-| API 商城（骨架） | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（随商城后端就绪落地；面向 `Doer` 窄接口、不 import runtime） |
+| API 商城 | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（`Invoke`/`IPLocate`/`Usage`，见 §17.5；面向 `Doer` 窄接口、不 import runtime，HTTP/gRPC 双协议随根 Client） |
 
 依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol`/`config`/`apis` 为叶子包。
 
@@ -770,6 +771,69 @@ type ProvisionError struct { // 业务拒绝，errors.As 断言
 | `Redeem` | `func Redeem(ctx context.Context, opts RedeemOptions) (ProvisionResult, error)` | 商业激活码兑换，语义同上 |
 
 `install.sn` 生命周期：显式 `InstallSN` 优先；否则读 `StorageDir/install.sn` 幂等复用；不存在则懒生成 UUID v4 原子落盘（`MkdirAll 0700` + tmp/rename + `0600`）。卸载清理删除该文件属预期行为（重装生成新 SN，视为新装机）。
+
+### 17.5 API 商城调用（`lic.Apis`）
+
+API 商城（IP 定位等付费能力）挂在**已激活的同一个 `Client`** 上：`Client.Apis` 是 `*apis.Client`，
+零额外凭证、零额外客户端（`licence/apis` 子包面向 `Doer` 窄接口编程，宿主由根 `Client` 注入）。
+typed 方法走与运行面完全相同的双协议传输与请求签名，切换 `Options.Transport` 不改业务调用。
+
+```go
+import (
+    "errors"
+    "fmt"
+
+    "github.com/inis-io/aide/licence/apis"
+)
+
+// lic 已完成 New + Start（见 §3），商城调用不需要第二个客户端
+
+// 1) IP 定位（typed 便捷方法）：结果 + 计量回执
+loc, receipt, err := lic.Apis.IPLocate(ctx, "203.0.113.10")
+if err != nil {
+    var apiErr *apis.Error
+    if errors.As(err, &apiErr) && apiErr.Code == apis.ErrorCodeQuotaExceeded {
+        // 额度耗尽：切本地缓存数据源，或按 apiErr.Detail["resetAt"] 安排恢复
+    }
+    return err
+}
+fmt.Println(loc.Province, loc.City, loc.Source, receipt.CacheHit, receipt.QuotaRemaining)
+
+// 2) 通用调用（新能力零发版兜底）：result 为能力出参 JSON，客户自行解码
+out, receipt, err := lic.Apis.Invoke(ctx, apis.InvokeInput{
+    Capability: "mail-send", Action: "send",
+    Params: map[string]any{"to": "user@example.com"},
+})
+if err != nil {
+    return err
+}
+fmt.Println(string(out), receipt.Amount)
+
+// 3) 调用流水自助对账（只读：不计量、不收费，故无回执）
+page, err := lic.Apis.Usage(ctx, apis.UsageQuery{
+    Capability: "ip-locate", Limit: 20,
+    CreateAt:   []int64{startMs, endMs}, // 调用时间区间 [起, 止]（毫秒，最多两个元素）
+})
+fmt.Println(page.Count, page.Page, len(page.Records))
+```
+
+| 能力 | SDK 方法 | HTTP | gRPC |
+|---|---|---|---|
+| 通用调用 | `lic.Apis.Invoke(ctx, apis.InvokeInput{…})` | `POST /api/v1/apis/invoke` | `ApisRuntimeService.Invoke` |
+| IP 定位 | `lic.Apis.IPLocate(ctx, ip, requestId…)` | `POST /api/v1/apis/ip-locate/query` | `ApisRuntimeService.IPLocate` |
+| 流水查询 | `lic.Apis.Usage(ctx, apis.UsageQuery{…})` | `GET /api/v1/apis/usage` | `ApisRuntimeService.Usage` |
+
+要点：
+
+- **幂等键**：`Invoke` / `IPLocate` 缺省自动生成 `req_` + 32 位无横线 UUID，随 `X-Request-Id`（HTTP）或
+  metadata `x-request-id`（gRPC）下发，不进签名 canonical；`Receipt.RequestId` 回显本次实际用键。
+  调用方自填时不得使用系统保留前缀 `renew:` / `sys:`；重试必须复用同一值（SDK 不做跨协议回退）。
+- **错误归一**：双协议统一为 `*apis.Error{Code, Message, Detail, HTTPStatus}`（`errors.As` 断言），
+  业务码与平台 `ServiceError.Code` 逐字一致（`apis.ErrorCodeQuotaExceeded` /
+  `apis.ErrorCodeInsufficientBalance` / `apis.ErrorCodeIPNotFound` / `apis.ErrorCodeNotFound` … 17 码常量）。
+  未激活或授权状态非放行态时本地返回 `apis.ErrNotActivated`（不发请求）。
+- **契约出处**：`proto/apis/v1/runtime.proto` + 同目录 `protocol-matrix.yaml`（协议矩阵）；
+  服务端实现为 licen-hub `backend/app/api/control/apis-runtime.go` 与 `backend/grpc/apis/v1`。
 
 ## 18. 在线更新模块
 
@@ -1375,10 +1439,10 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
 | `runtime/provision.go` | 自助发放 `Provision` 与兑换码兑换 `Redeem`（HTTP/gRPC 双协议） |
-| `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口） |
+| `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
 | `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 14 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`） |
-| `apis/` | API 商城 typed 方法包骨架：`Client{doer}` + `New` + `Receipt` + `ErrNotActivated`（typed 方法随商城后端就绪落地） |
-| `proto/licence/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改） |
+| `apis/` | API 商城 typed 方法包：`Client{doer}` + `New` + `Invoke`/`IPLocate`/`Usage`（typed + 通用兜底 + 只读对账）+ `Receipt` + `Error`（业务码常量与 `HTTPStatusByCode`）+ `ErrNotActivated`（叶子包，只认 JSON，不 import runtime/proto） |
+| `proto/licence/v1/` / `proto/apis/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改；apis 契约含 `ApisRuntimeService{Invoke,IPLocate,Usage}`，SDK 传输绑定自检见 `protocol_matrix_test.go`） |

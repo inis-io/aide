@@ -32,7 +32,7 @@
 ├── logx/        # 日志：zap + lumberjack 结构化日志，按级别分文件精确收录，单例 + 独立实例（**嵌套独立模块**）
 ├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理（**嵌套独立模块**，依赖 logx）
 ├── pay/         # 支付能力工厂（**嵌套独立模块** `github.com/inis-io/aide/pay`，有自己的 go.mod，不参与父模块 `go build ./...`）：支付协议 + 统一 Driver + 多网关 Pool，providers/ 内置支付宝 / 微信 V3 / PayPal 适配，约定详见 pay/AGENTS.md
-└── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：根包 = 纯门面别名层（下游 `import licence` 零改动）；实现子包 `runtime/`（运行面客户端：激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储 + 在线更新 + SaaS 租户）、`protocol/`（契约镜像：信封/签发验签/状态码/版本范围/canonical 助手）；另有 `admin/`（管理面 AdminClient）、`updater/`（自更新执行器）、`callback/`（回调接收 + 事件订阅）、`config/`（配置校验引擎，licen-hub backend 复用）、`apis/`（API 商城挂载骨架）
+└── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：根包 = 纯门面别名层（下游 `import licence` 零改动）；实现子包 `runtime/`（运行面客户端：激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储 + 在线更新 + SaaS 租户）、`protocol/`（契约镜像：信封/签发验签/状态码/版本范围/canonical 助手）；另有 `admin/`（管理面 AdminClient）、`updater/`（自更新执行器）、`callback/`（回调接收 + 事件订阅）、`config/`（配置校验引擎，licen-hub backend 复用）、`apis/`（API 商城 typed 方法包：`Invoke`/`IPLocate`/`Usage`）
 ```
 
 > **模块拆分说明**：除空占位 `main.go` 外，`utils`/`dto`/`pushx`/`cachex`/`storagex`/`logx`/`taskx` 均为嵌套独立模块（各自有 `go.mod` 与 `AGENTS.md`）。子模块经 `replace` 引用本地路径：`utils` 引用 `../dto`；`pushx`/`cachex`/`storagex`/`logx` 引用 `../utils` 与 `../dto`；`taskx` 额外引用 `../logx`。修改子模块依赖时必须同步维护其 `go.mod` 的 `require` / `replace` 列表。子模块的 `AGENTS.md` 与根文件同构，变更对应包时优先阅读子目录的 `AGENTS.md`。
@@ -100,7 +100,7 @@
 
 > 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
 
-- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，86 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/发放兑换/配置回推；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城挂载骨架（叶子包）。依赖方向：根包（门面）→ `runtime`/`protocol`；`runtime` → `protocol`/`config`/`apis`；`admin`/`updater`/`callback` → `runtime` + `protocol`，编译期保证无环；详见 `licence/AGENTS.md`。
+- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，86 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/发放兑换/配置回推；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（`Invoke`/`IPLocate`/`Usage`，叶子包）。依赖方向：根包（门面）→ `runtime`/`protocol`；`runtime` → `protocol`/`config`/`apis`；`admin`/`updater`/`callback` → `runtime` + `protocol`，编译期保证无环；详见 `licence/AGENTS.md`。
 - **纯函数层**（`protocol/` 包：`envelope.go` / `sign.go` / `licence.go`）：`Issue`（签发）、`VerifyEnvelope`/`VerifyRaw`（验签）、`Parse`/`ParseEnvelope`（解析）、`GenerateKeyPair`、`Nonce`。信封格式（`Envelope`/`Payload`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**
 - **验签首选原文模式**：`ParseEnvelope` 返回载荷原始字节，`VerifyRaw` 基于原文验签——平台只追加新字段时重序列化会丢字段导致验签失败，原文验签天然兼容。
 - **运行面客户端**（`runtime/` 包 `client.go` / `transport.go`）：`licence.New(Options)` 创建、`Start/Stop` 管理后台滑动刷新循环；`Options.ServerURL` 是平台 URI 唯一入口；内部完成激活、token 与客户端密钥对管理、逐请求 Ed25519 签名（契约 §2.4）、信封缓存与离线宽限降级、用量合并上报；业务侧只感知 `Status()` / `HasFeature()` / `GetLimit()` / `CheckVersion()` / `ReportUsage()`。
