@@ -31,7 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// 本文件覆盖 API 商城三路径（invoke / ip-locate/query / usage）的 SDK 传输绑定：
+// 本文件覆盖 API 商城四路径（invoke / ip-locate/query / mail-send/send / usage）的 SDK 传输绑定：
 // 同一组用例分别跑 HTTP httptest 与 gRPC bufconn（licence/AGENTS.md 双协议同组用例纪律），
 // 断言结果字段、幂等键透传、业务错误等价与未激活闸门在两种传输下逐项一致。
 // 假平台按「服务端视角」自声明字段名（不复用 apis 包类型），避免客户端字段漂移自我掩盖。
@@ -61,6 +61,19 @@ type apisCannedIPLocate struct {
 	Source    string `json:"source"`
 	CacheHit  bool   `json:"cacheHit"`
 	Stale     bool   `json:"stale"`
+}
+
+// apisCannedMailSend - 假平台邮件代发出参（字段名与 proto MailSendResult / 后端 provider 逐字对齐）
+type apisCannedMailSend struct {
+	Sent       int32    `json:"sent"`
+	Recipients []string `json:"recipients"`
+	Subject    string   `json:"subject"`
+}
+
+// apisCannedMailSendOf - 罐头代发出参：收件人回显请求值（证明入参真实抵达服务端）、发送数 = 收件人数、
+// 主题取服务端归一后的值（回显请求主题的去空白形态）
+func apisCannedMailSendOf(to []string, subject string) apisCannedMailSend {
+	return apisCannedMailSend{Sent: int32(len(to)), Recipients: to, Subject: strings.TrimSpace(subject)}
 }
 
 // apisCannedReceipt - 假平台计量回执（字段名与 proto Receipt / 后端 metering.Receipt 逐字对齐）
@@ -152,6 +165,11 @@ func apisExpectedReceipt(requestId string) apis.Receipt {
 	}
 }
 
+// apisExpectedMailSend - 客户端应解析出的代发结果
+func apisExpectedMailSend(canned apisCannedMailSend) apis.MailSendResult {
+	return apis.MailSendResult{Sent: int(canned.Sent), Recipients: canned.Recipients, Subject: canned.Subject}
+}
+
 // apisExpectedUsageRow - 客户端应解析出的流水行
 func apisExpectedUsageRow(filter apisUsageFilter) apis.UsageRecord {
 	canned := apisCannedUsageRowOf(filter)
@@ -165,7 +183,7 @@ func apisExpectedUsageRow(filter apisUsageFilter) apis.UsageRecord {
 
 // ============================= 假平台模型（HTTP 与 gRPC 共用） =============================
 
-// apisFake - API 商城运行面假平台：三能力的罐头响应 + 请求留痕 + 失败态开关。
+// apisFake - API 商城运行面假平台：四能力的罐头响应 + 请求留痕 + 失败态开关。
 // HTTP handler 与 gRPC server 共用本模型，保证「同一组用例跑两协议」时服务端行为同源。
 type apisFake struct {
 	// t - 用例句柄（HTTP handler 在服务端 goroutine 内运行，失败用 Errorf 记录）
@@ -180,6 +198,17 @@ type apisFake struct {
 	failDetail map[string]any
 	// requests - 请求留痕（幂等键为 HTTP 头 X-Request-Id / gRPC metadata x-request-id）
 	requests []apisFakeRequest
+	// mailBodies - 邮件代发请求体留痕（仅 /api/v1/apis/mail-send/send 路径填充：HTTP 取请求原文、
+	// gRPC 取 proto 请求字段，两协议同形比对——证明 typed 请求体与 gRPC 映射逐字段一致）
+	mailBodies []apisFakeMailBody
+}
+
+// apisFakeMailBody - 假平台收到的代发请求体（字段与平台 typed 入口 / proto MailSendRequest 一致）
+type apisFakeMailBody struct {
+	To      []string `json:"to"`
+	Subject string   `json:"subject"`
+	Content string   `json:"content"`
+	Html    bool     `json:"html"`
 }
 
 // apisFakeRequest - 单向请求留痕
@@ -213,6 +242,24 @@ func (this *apisFake) record(method, path, requestId string) {
 	this.mu.Lock()
 	defer this.mu.Unlock()
 	this.requests = append(this.requests, apisFakeRequest{method: method, path: path, requestId: requestId})
+}
+
+// recordMail - 记录一次代发请求体（仅 mail-send/send 路径调用）
+func (this *apisFake) recordMail(body apisFakeMailBody) {
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	this.mailBodies = append(this.mailBodies, body)
+}
+
+// lastMailBody - 最近一次代发请求体（无请求即测试失败）
+func (this *apisFake) lastMailBody(t *testing.T) apisFakeMailBody {
+	t.Helper()
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	if len(this.mailBodies) == 0 {
+		t.Fatalf("假平台未收到代发请求体")
+	}
+	return this.mailBodies[len(this.mailBodies)-1]
 }
 
 // setFailure - 设置业务失败态（后续请求按该业务码拒绝）
@@ -269,6 +316,14 @@ func (this *apisFake) serveHTTP(writer http.ResponseWriter, request *http.Reques
 		_ = json.Unmarshal(body, &input)
 		this.writeSuccessEnvelope(writer, map[string]any{
 			"result": apisCannedLocate(input.Ip), "receipt": apisCannedReceiptOf(request.Header.Get(apisRequestIDHeader)),
+		})
+	case "/api/v1/apis/mail-send/send":
+		var input apisFakeMailBody
+		_ = json.Unmarshal(body, &input)
+		this.recordMail(input)
+		this.writeSuccessEnvelope(writer, map[string]any{
+			"result":  apisCannedMailSendOf(input.To, input.Subject),
+			"receipt": apisCannedReceiptOf(request.Header.Get(apisRequestIDHeader)),
 		})
 	case "/api/v1/apis/invoke":
 		var input struct {
@@ -512,6 +567,28 @@ func (this *apisFakeGRPCServer) IPLocate(ctx context.Context, request *apisv1.IP
 	}, nil
 }
 
+// MailSend - typed 邮件代发：能力/动作由服务端固定，收件人回显请求值（出参字段与后端 MailSendResult 一致）
+func (this *apisFakeGRPCServer) MailSend(ctx context.Context, request *apisv1.MailSendRequest) (*apisv1.MailSendResponse, error) {
+	this.check(ctx, http.MethodPost, "/api/v1/apis/mail-send/send", apisv1.ApisRuntimeService_MailSend_FullMethodName, request)
+	if err := this.failure(); err != nil {
+		return nil, err
+	}
+	canned := apisCannedMailSendOf(request.GetTo(), request.GetSubject())
+	this.fake.recordMail(apisFakeMailBody{
+		To: request.GetTo(), Subject: request.GetSubject(), Content: request.GetContent(), Html: request.GetHtml(),
+	})
+	requestId := ""
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		requestId = metadataFirst(md, LicenceProtocol.MetadataRequestID)
+	}
+	return &apisv1.MailSendResponse{
+		Result: &apisv1.MailSendResult{
+			Sent: canned.Sent, Recipients: canned.Recipients, Subject: canned.Subject,
+		},
+		Receipt: apisCannedReceiptProto(apisCannedReceiptOf(requestId)),
+	}, nil
+}
+
 // Usage - 流水自助查询：查询条件回显进流水行（断言筛选条件抵达服务端），page 按归一口径回显
 func (this *apisFakeGRPCServer) Usage(ctx context.Context, request *apisv1.UsageRequest) (*apisv1.UsageResponse, error) {
 	this.check(ctx, http.MethodGet, "/api/v1/apis/usage", apisv1.ApisRuntimeService_Usage_FullMethodName, request)
@@ -544,7 +621,7 @@ func (this *apisFakeGRPCServer) Usage(ctx context.Context, request *apisv1.Usage
 
 // ============================= 双协议客户端装配与用例驱动 =============================
 
-// activateApisClient - 置入已激活状态（本测试只验证 apis 三路径与闸门，不重跑激活链路），
+// activateApisClient - 置入已激活状态（本测试只验证 apis 四路径与闸门，不重跑激活链路），
 // 返回客户端验签公钥（假平台据此复核请求签名）
 func activateApisClient(t *testing.T, client *Client) string {
 	t.Helper()
@@ -675,6 +752,76 @@ func TestApisDualInvokeGeneral(t *testing.T) {
 		}
 		if receipt.RequestId != "req_invoke_dual" {
 			t.Fatalf("回执应回显显式幂等键：%+v", receipt)
+		}
+	})
+}
+
+// TestApisDualMailSend - 双协议 MailSend 成功：收件人/主题/正文/正文类型逐字段抵达服务端（留痕断言，
+// 正文含 ${code} 占位符原样透传）、出参三字段（sent/recipients/subject）、计量回执、
+// 显式幂等键透传（写操作失败重试必须复用同一键）
+func TestApisDualMailSend(t *testing.T) {
+
+	runApisDual(t, func(t *testing.T, fake *apisFake, client *Client) {
+		to := []string{"a@example.com", "b@example.com"}
+		// 正文刻意含 pushx 内置占位符：SDK 与传输层都不得做任何模板替换（服务端才是唯一投递方）
+		content := "验证码 ${code}（收件人 ${target}）"
+		result, receipt, err := client.Apis.MailSend(t.Context(), apis.MailSendInput{
+			To: to, Subject: "  对账单  ", Content: content, HTML: true,
+		}, "req_mail_dual")
+		if err != nil {
+			t.Fatalf("MailSend 失败: %v", err)
+		}
+		request := fake.lastRequest(t)
+		if request.method != http.MethodPost || request.path != "/api/v1/apis/mail-send/send" {
+			t.Fatalf("请求路由不符：%+v", request)
+		}
+		if request.requestId != "req_mail_dual" {
+			t.Fatalf("显式幂等键应原样下发：%+v", request)
+		}
+		// 请求体逐字段抵达服务端（主题保持客户端原文——归一由服务端做，SDK 不改业务参数）
+		wantBody := apisFakeMailBody{To: to, Subject: "  对账单  ", Content: content, Html: true}
+		if body := fake.lastMailBody(t); !reflect.DeepEqual(body, wantBody) {
+			t.Fatalf("代发请求体不符：got=%+v want=%+v", body, wantBody)
+		}
+		// 出参：服务端归一后的主题 + 收件人回显 + 发送数
+		if want := apisExpectedMailSend(apisCannedMailSendOf(to, "对账单")); !reflect.DeepEqual(result, want) {
+			t.Fatalf("出参不符：got=%+v want=%+v", result, want)
+		}
+		if want := apisExpectedReceipt(request.requestId); receipt != want {
+			t.Fatalf("计量回执不符：%+v（期望 %+v）", receipt, want)
+		}
+	})
+}
+
+// TestApisDualMailSendBusinessError - 双协议 MailSend 业务失败等价：
+// INVALID_ARGUMENT（非法收件人；服务端拒绝、不触上游）与 UPSTREAM_ERROR（SMTP 投递失败）两个码
+// 在 HTTP 与 gRPC 下 Error.Code / HTTPStatus / Message 逐字一致（04 §2.4 同一映射表）
+func TestApisDualMailSendBusinessError(t *testing.T) {
+
+	cases := []struct {
+		name       string
+		code       string
+		httpStatus int
+	}{
+		{"非法收件人", apis.ErrorCodeInvalidArgument, http.StatusBadRequest},
+		{"投递失败", apis.ErrorCodeUpstreamError, http.StatusBadGateway},
+	}
+	runApisDual(t, func(t *testing.T, fake *apisFake, client *Client) {
+		for _, item := range cases {
+			t.Run(item.name, func(t *testing.T) {
+				message := "代发拒绝：" + item.code
+				fake.setFailure(item.code, message, nil)
+				_, _, err := client.Apis.MailSend(t.Context(), apis.MailSendInput{
+					To: []string{"user@example.com"}, Subject: "对账单", Content: "正文",
+				})
+				var apiErr *apis.Error
+				if !errors.As(err, &apiErr) {
+					t.Fatalf("业务失败应归一为 *apis.Error：%v", err)
+				}
+				if apiErr.Code != item.code || apiErr.Message != message || apiErr.HTTPStatus != item.httpStatus {
+					t.Fatalf("业务码/提示/HTTP 等价码不符：%+v（期望 %s / %s / %d）", apiErr, item.code, message, item.httpStatus)
+				}
+			})
 		}
 	})
 }

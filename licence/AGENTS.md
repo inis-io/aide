@@ -11,7 +11,7 @@
   `protocol/` = 平台契约镜像层（信封/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
-  RuleSet 校验引擎；`apis/` = API 商城 typed 方法包（`Invoke`/`IPLocate`/`Usage` 已落地，见下）。
+  RuleSet 校验引擎；`apis/` = API 商城 typed 方法包（`Invoke`/`IPLocate`/`MailSend`/`Usage` 已落地，见下）。
 - 下游 `import licence "github.com/inis-io/aide/licence"` 零改动：门面别名对调用方透明
   （类型别名同一性、常量/函数签名全部保留）。模块内子包（admin/callback/updater）不经
   门面，直连 `runtime` 与 `protocol`。
@@ -31,7 +31,7 @@ licence/
 ├── updater/          # 在线更新执行器（自更新 swap/unpack/restart/state）
 ├── callback/         # 回调接收端 CallbackHandler + 事件订阅器 EventSubscriber
 ├── config/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
-├── apis/             # API 商城 typed 方法包（Invoke 通用兜底 / IPLocate typed / Usage 只读对账）
+├── apis/             # API 商城 typed 方法包（Invoke 通用兜底 / IPLocate、MailSend typed / Usage 只读对账）
 └── proto/            # gRPC 权威契约与生成代码（禁手改）
 ```
 
@@ -46,7 +46,7 @@ licence/
 - `apis` / `config` 为叶子包，不 import 根包与 `runtime`。apis 面向自声明的 `Doer` 窄接口编程，
   由 `runtime/apis.go` 的 `apisDoer` 适配器注入 `doRequest`（withSign=true）调用能力，
   未激活闸门返回 `apis.ErrNotActivated`；
-  **API 商城三路径已双协议落地（阶段 4）**：typed 方法 `Client.Apis.{Invoke,IPLocate,Usage}`
+  **API 商城四路径已双协议落地（阶段 4；MailSend 为阶段 5 T23）**：typed 方法 `Client.Apis.{Invoke,IPLocate,MailSend,Usage}`
   （`apis/` 只处理 JSON 与业务码，信封解析是唯一错误归一入口），gRPC 侧绑定在
   `runtime-transport-grpc.go` 的 `RoundTrip` switch（proto 响应 → 与 HTTP 同形信封；
   gRPC 错误经 `errdetails.ErrorInfo.Reason` 合成失败信封，取不到 Reason 时按 status 反查业务码）；
@@ -58,7 +58,9 @@ licence/
   另有配置定义反推 `ConfigPushbackRuntimeService/PushDefinitions`（仅项目级，403 开关闸门 /
   400 errors 明细）与配置校验引擎 `config` 子包（全系统唯一实现，licen-hub backend import
   复用；`runtime` 包仅留 `Client` 方法薄壳））。**API 商城运行面 `ApisRuntimeService`（Invoke /
-  IPLocate / Usage）已双协议落地（T17 契约 / T18 服务端 / T19 SDK 传输绑定）**。
+  IPLocate / MailSend / Usage）已双协议落地（T17 契约 / T18 服务端 / T19 SDK 传输绑定；
+  `MailSend` 邮件代发的契约 → licen-hub 服务端 → SDK typed 与双协议用例全链路随 T23 补齐——
+  服务端固定能力 mail-send / 动作 send，计量数 = 去重后收件人数，正文原样投递不做模板替换）**。
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`（许可证运行面/管理面）与
   `proto/apis/v1/`（API 商城运行面，生成走 `proto/generate.ps1`，WKT 导入经 `proto/wkt.go` 导出描述符集）；

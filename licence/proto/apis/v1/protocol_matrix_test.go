@@ -31,7 +31,7 @@ const (
 	routePrefix = "/api/v1/apis/"
 	// routeTable - licen-hub 运行面路由表标识（GenRoute 返回的 table 字面量）。
 	routeTable = `"v1/apis"`
-	// clientTransportPath - SDK 侧 gRPC 运行面传输层（T19 落地物：apis 三路径 switch 与 typed stub）。
+	// clientTransportPath - SDK 侧 gRPC 运行面传输层（T19 落地物、T23 追加 MailSend：apis 四路径 switch 与 typed stub）。
 	clientTransportPath = "../../../runtime/runtime-transport-grpc.go"
 	// designDocPath - licen-hub 04 设计文档（兄弟仓库；未检出时相关断言跳过）。
 	designDocPath = "../../../../../licen-hub/docs/plan/apis/04-HTTP与gRPC双协议设计.md"

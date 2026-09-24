@@ -4,8 +4,9 @@
 // HTTP/gRPC 协议选择、连接管理、校时与失败退避全部由宿主（runtime 包 Client）
 // 经适配器注入（依赖方向 runtime → apis，编译期保证无环）。
 //
-// 已落地能力（阶段 4）：Invoke（通用兜底）/ IPLocate（typed 便捷）/ Usage（只读对账）。
-// 三者的 HTTP 路径、gRPC full method 与业务码集合以同一目录外的权威契约为准——
+// 已落地能力（阶段 4 / 阶段 5 T23）：Invoke（通用兜底）/ IPLocate（typed 便捷）/
+// MailSend（typed 便捷，邮件代发）/ Usage（只读对账）。
+// 四者的 HTTP 路径、gRPC full method 与业务码集合以同一目录外的权威契约为准——
 // proto 见 `licence/proto/apis/v1/runtime.proto`，映射清单见同目录 protocol-matrix.yaml，
 // 服务端映射表见 licen-hub docs/plan/apis/04 §2.4；本包只处理 JSON，不 import proto 与传输实现。
 //
