@@ -141,7 +141,7 @@ message UsageRecord {
 // MailSendRequest - 邮件代发请求（typed 便捷方法；能力与动作由服务端固定，凭证族与
 // 调用级幂等键走 metadata）。业务参数默认不入应用日志（05 §脱敏红线）。
 message MailSendRequest {
-  repeated string to = 1;    // 收件人裸地址（1..20 个；服务端逐个解析并去重，含非法地址整单拒绝）
+  repeated string to = 1;    // 收件人裸地址（1..20 个；上送条数按剔除空白/空串后、去重前计并据此判定上限，服务端逐个解析并去重，含非法地址整单拒绝）
   string subject = 2;        // 主题（去首尾空白后 1..200 字符）
   string content = 3;        // 正文原文（1 字符..128 KiB；原样投递，不做任何模板替换）
   bool html = 4;             // 正文类型：false = text/plain; charset=UTF-8，true = text/html; charset=UTF-8
@@ -149,7 +149,7 @@ message MailSendRequest {
 
 // MailSendResult - 邮件代发结果（能力出参，与 HTTP data.result 字段一致）。
 message MailSendResult {
-  int32 sent = 1;                  // 实际投递成功的收件人数（全部成功才返回 = 去重后的收件人数）
+  int32 sent = 1;                  // 实际投递人数（全部成功才返回 = 去重后投递人数，也是实际计量数）
   repeated string recipients = 2;  // 归一化收件人裸地址（去重、保持上送顺序）
   string subject = 3;              // 主题（服务端去空白后的实际投递值）
 }

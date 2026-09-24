@@ -845,7 +845,12 @@ fmt.Println(page.Count, page.Page, len(page.Records))
 - **幂等键**：`Invoke` / `IPLocate` / `MailSend` 缺省自动生成 `req_` + 32 位无横线 UUID，随 `X-Request-Id`（HTTP）或
   metadata `x-request-id`（gRPC）下发，不进签名 canonical；`Receipt.RequestId` 回显本次实际用键。
   调用方自填时不得使用系统保留前缀 `renew:` / `sys:`；重试必须复用同一值（SDK 不做跨协议回退）。
-  **邮件代发是写操作**：`MailSend` 失败后自动重试必须复用同一 `requestId`（否则会重复发信）。
+  **邮件代发是写操作**：失败重试必须复用同一 `requestId`——同一 `requestId` 保证**已成功调用**不重复
+  执行/扣费（幂等回放回执），但**不能**避免「部分失败后重试」的整批重投：已投递的收件人会再收到一封
+  （投递不可回滚，属既定取舍，故重试前应先确认失败范围）。
+- **邮件代发计量口径**：`MailSend` 的计量数由服务端算——**声明量** = 剔除空白/空串后的上送条数
+  （去重前，上限 20；HTTP 与 gRPC 同一归一规则）、**实际计量** = 去重后实际投递人数（每封计 1）；
+  部分失败整体返回 `UPSTREAM_ERROR`（预扣全额释放、不收费），重试会整批重投（见上条重试语义）。
 - **错误归一**：双协议统一为 `*apis.Error{Code, Message, Detail, HTTPStatus}`（`errors.As` 断言），
   业务码与平台 `ServiceError.Code` 逐字一致（`apis.ErrorCodeQuotaExceeded` /
   `apis.ErrorCodeInsufficientBalance` / `apis.ErrorCodeIPNotFound` / `apis.ErrorCodeNotFound` … 17 码常量）。

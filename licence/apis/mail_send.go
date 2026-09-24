@@ -12,9 +12,10 @@ import (
 // 收件人数确定（每封计 1），客户端只上送收件人/主题/正文/正文类型。
 const mailSendPath = "/api/v1/apis/mail-send/send"
 
-// MailSendInput - 邮件代发入参（能力契约：1..20 个收件人、主题 1..200 字符、正文 1..128 KiB）。
+// MailSendInput - 邮件代发入参（能力契约：上送条数 1..20（剔除空白后、去重前，服务端据此声明计量数）、
+// 主题 1..200 字符、正文 1..128 KiB）。计量数由服务端算：声明量 = 上送条数、实际计量 = 去重后投递人数。
 type MailSendInput struct {
-	// To - 收件人邮箱地址（1..20 个；显示名会被服务端剥离，仅取裸地址并去重）
+	// To - 收件人邮箱地址（上送条数 1..20，按剔除空白/空串后、去重前计；显示名会被服务端剥离，仅取裸地址并去重）
 	To []string
 	// Subject - 邮件主题（服务端去首尾空白后须为 1..200 字符）
 	Subject string
@@ -27,7 +28,7 @@ type MailSendInput struct {
 // MailSendResult - 邮件代发结果：字段与 proto apis.v1.MailSendResult 及 licen-hub mailsend
 // Provider 出参逐字对齐（HTTP data.result / gRPC MailSendResponse.result 同形）。
 type MailSendResult struct {
-	// Sent - 实际投递成功的收件人数（全部成功才返回，等于去重后的收件人数）
+	// Sent - 实际投递人数（全部成功才返回，等于去重后的收件人数，也是本次的实际计量数）
 	Sent int `json:"sent"`
 	// Recipients - 归一化收件人裸地址（去重、保持上送顺序）
 	Recipients []string `json:"recipients"`

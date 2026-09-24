@@ -36,7 +36,9 @@ runtime:
   # app/api/control/apis-runtime.go 的 Get: {Key: "usage"} + grpc/apis/v1 的 ApisRuntimeService.Usage）。
   # 服务端只读（幂等列 read-only）：不占闸门、不计量不收费，归属强制由凭证推导，客户端不可指定。
   - [Client.Apis.Usage, GET, /api/v1/apis/usage, licenhub.apis.v1.ApisRuntimeService/Usage, activation-sign-v1, "", apis, read, normal, read-only, "UNAUTHORIZED NOT_FOUND INVALID_ARGUMENT INTERNAL_ERROR", landed]
-  # MailSend（阶段 5 T23）：能力/动作由服务端固定（mail-send/send），计量数 = 去重后收件人数（每封计 1，
-  # 单次上限 20）；正文原样投递（不做模板替换、不自动追加验证码），全部收件人投递成功才算交付，
-  # 任一失败即 UPSTREAM_ERROR（预扣全额释放、不收费）。INVALID_ARGUMENT 覆盖非法收件人/超长主题正文。
+  # MailSend（阶段 5 T23）：能力/动作由服务端固定（mail-send/send）。声明计量数 = 剔除空白/空串后的
+  # **上送条数（去重前）**，上限 20（HTTP decodeRecipients ↔ gRPC cleanRecipients 同规则）；实际计量数 =
+  # 去重后实际投递人数（每封计 1），Provider 侧 fail-closed 拒绝「声明量 < 实际投递人数」（通用 Invoke 少报
+  # 即 INVALID_ARGUMENT）。正文原样投递（不做模板替换、不自动追加验证码），全部收件人投递成功才算交付，
+  # 任一失败即 UPSTREAM_ERROR（预扣全额释放、不收费）。INVALID_ARGUMENT 覆盖非法收件人/超长主题正文/上送超限。
   - [Client.Apis.MailSend, POST, /api/v1/apis/mail-send/send, licenhub.apis.v1.ApisRuntimeService/MailSend, activation-sign-v1, "", apis, write, normal, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN NO_ENTITLEMENT QUOTA_EXCEEDED INSUFFICIENT_BALANCE SPEND_LIMIT_EXCEEDED ACCOUNT_FROZEN CONCURRENCY_LIMITED RATE_LIMITED UPSTREAM_ERROR INTERNAL_ERROR", landed]

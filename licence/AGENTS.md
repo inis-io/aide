@@ -60,7 +60,8 @@ licence/
   复用；`runtime` 包仅留 `Client` 方法薄壳））。**API 商城运行面 `ApisRuntimeService`（Invoke /
   IPLocate / MailSend / Usage）已双协议落地（T17 契约 / T18 服务端 / T19 SDK 传输绑定；
   `MailSend` 邮件代发的契约 → licen-hub 服务端 → SDK typed 与双协议用例全链路随 T23 补齐——
-  服务端固定能力 mail-send / 动作 send，计量数 = 去重后收件人数，正文原样投递不做模板替换）**。
+  服务端固定能力 mail-send / 动作 send；声明计量数 = 剔除空白后的上送条数（去重前，上限 20）、
+  实际计量数 = 去重后实际投递人数，正文原样投递不做模板替换）**。
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`（许可证运行面/管理面）与
   `proto/apis/v1/`（API 商城运行面，生成走 `proto/generate.ps1`，WKT 导入经 `proto/wkt.go` 导出描述符集）；

@@ -801,7 +801,7 @@ func (x *UsageRecord) GetCreateAt() int64 {
 // 调用级幂等键走 metadata）。业务参数默认不入应用日志（05 §脱敏红线）。
 type MailSendRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	To            []string               `protobuf:"bytes,1,rep,name=to,proto3" json:"to,omitempty"`           // 收件人裸地址（1..20 个；服务端逐个解析并去重，含非法地址整单拒绝）
+	To            []string               `protobuf:"bytes,1,rep,name=to,proto3" json:"to,omitempty"`           // 收件人裸地址（1..20 个；上送条数按剔除空白/空串后、去重前计并据此判定上限，服务端逐个解析并去重，含非法地址整单拒绝）
 	Subject       string                 `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"` // 主题（去首尾空白后 1..200 字符）
 	Content       string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"` // 正文原文（1 字符..128 KiB；原样投递，不做任何模板替换）
 	Html          bool                   `protobuf:"varint,4,opt,name=html,proto3" json:"html,omitempty"`      // 正文类型：false = text/plain; charset=UTF-8，true = text/html; charset=UTF-8
@@ -870,7 +870,7 @@ func (x *MailSendRequest) GetHtml() bool {
 // MailSendResult - 邮件代发结果（能力出参，与 HTTP data.result 字段一致）。
 type MailSendResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sent          int32                  `protobuf:"varint,1,opt,name=sent,proto3" json:"sent,omitempty"`            // 实际投递成功的收件人数（全部成功才返回 = 去重后的收件人数）
+	Sent          int32                  `protobuf:"varint,1,opt,name=sent,proto3" json:"sent,omitempty"`            // 实际投递人数（全部成功才返回 = 去重后投递人数，也是实际计量数）
 	Recipients    []string               `protobuf:"bytes,2,rep,name=recipients,proto3" json:"recipients,omitempty"` // 归一化收件人裸地址（去重、保持上送顺序）
 	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`       // 主题（服务端去空白后的实际投递值）
 	unknownFields protoimpl.UnknownFields
