@@ -17,7 +17,7 @@ option go_package = "github.com/inis-io/aide/licence/proto/apis/v1;apisv1";
 //	GRPC\n{fullMethod}\n{timestamp}\n{nonce}\n{sha256(deterministic protobuf request)}
 //
 // 其中 {fullMethod} 取生成代码的 *_FullMethodName 常量原值（含前导 /，如
-// /lichenhub.apis.v1.ApisRuntimeService/Invoke）；协议矩阵第 3 列书写的真名不含前导 /，
+// /licenhub.apis.v1.ApisRuntimeService/Invoke）；协议矩阵第 3 列书写的真名不含前导 /，
 // 二者仅差首字符——拼 canonical 时一律照抄常量，禁止自行拼接。
 //
 // 错误映射（实现属服务端适配层，两协议语义等价）：业务码以 licen-hub
