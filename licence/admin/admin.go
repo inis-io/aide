@@ -95,6 +95,9 @@ type AdminClient struct {
 	SaasTenants *SaasTenantsResource
 	// SaasReview - SaaS 租户申请审批（/api/saas-review/*）
 	SaasReview *SaasReviewResource
+	// Apis - API 商城（/api/apis-market|apis-products|apis-plans|apis-orders|apis-subscriptions|
+	// apis-recharges|apis-balances|apis-bills|apis-usage|apis-monitor/*，53 条受控路由）
+	Apis *ApisResource
 }
 
 // New - 创建管理面客户端（归一化配置，不发起网络请求）
@@ -135,6 +138,7 @@ func NewAdmin(options AdminOptions) (*AdminClient, error) {
 	client.SaasPlans = &SaasPlansResource{client: client}
 	client.SaasTenants = &SaasTenantsResource{client: client}
 	client.SaasReview = &SaasReviewResource{client: client}
+	client.Apis = &ApisResource{client: client}
 	return client, nil
 }
 

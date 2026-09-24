@@ -27,7 +27,7 @@ licence/
 ├── doc.go + facade.go # 根包 licence：纯门面别名（客户项目接入的唯一必引包）
 ├── runtime/          # 运行面 Client、传输（HTTP/gRPC）、指纹、存储、SaaS、更新、发放、回推
 ├── protocol/         # 平台契约镜像层（信封/签名/状态码/版本范围；licen-hub backend 直接 import）
-├── admin/            # 管理面 AdminClient（admin.go + admin-transport*.go + 14 个资源文件）
+├── admin/            # 管理面 AdminClient（admin.go + admin-types.go/apis-types.go + admin-transport*.go + 15 个资源文件）
 ├── updater/          # 在线更新执行器（自更新 swap/unpack/restart/state）
 ├── callback/         # 回调接收端 CallbackHandler + 事件订阅器 EventSubscriber
 ├── config/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
@@ -62,6 +62,10 @@ licence/
   `MailSend` 邮件代发的契约 → licen-hub 服务端 → SDK typed 与双协议用例全链路随 T23 补齐——
   服务端固定能力 mail-send / 动作 send；声明计量数 = 剔除空白后的上送条数（去重前，上限 20）、
   实际计量数 = 去重后实际投递人数，正文原样投递不做模板替换）**。
+  **API 商城管理面 53 条受控路由（7 个 proto-less `Apis*AdminService`）同步双协议落地，SDK 侧入口为
+  `admin.AdminClient.Apis`（`admin/apis.go` + `admin/apis-types.go`）：方法名与平台 `ApisSpecs.Method`
+  逐字一致，gRPC 走 full method 常量 + `conn.Invoke`（无生成 stub），三向对账（SDK 方法 ↔ 传输层 case ↔
+  平台登记表）由 `admin/apis_reconcile_test.go` 强制守护，穷尽 53 条路由的 HTTP 假平台与 gRPC bufconn 用例。**
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
 - canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`（许可证运行面/管理面）与
   `proto/apis/v1/`（API 商城运行面，生成走 `proto/generate.ps1`，WKT 导入经 `proto/wkt.go` 导出描述符集）；

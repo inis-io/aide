@@ -394,9 +394,16 @@ projects, _ := adm.Projects.Find(ctx, &admin.ProjectFindParams{Page: 1})
 artifact, _ := adm.Artifacts.Upload(ctx, admin.ArtifactUploadInput{VersionId: 12}, "app.tar.gz", file)
 pub, _ := adm.SigningKeys.Public(ctx, "license", "", projectId)   // 按项目导出验签公钥（license 用途必填 projectId）
 verify, _ := adm.Artifacts.VerifyWithFile(ctx, 3, "app.tar.gz", file) // 服务端代验
+
+// API 商城管理面（53 条受控路由：目录 / 订单 / 订阅 / 余额充值 / 账单 / 用量 / 监控）
+offer, _ := adm.Apis.FindMarketProducts(ctx, &admin.ApisProductQuery{Page: 1, Status: "on_sale"})
+order, _ := adm.Apis.CreateOrder(ctx, admin.ApisOrderInput{
+	PlanId: 3, PayChannel: "balance", RequestId: "req-20260817-1", // requestId 由调用方生成（幂等键）
+})
+fileName, content, _ := adm.Apis.ExportBills(ctx, &admin.ApisBillQuery{UserId: 7}) // xlsx 原始字节（信封 base64 已解码）
 ```
 
-资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录/机器席位）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）、`UpgradeRecords`（升级执行记录，只读）、`Modules`（项目功能模块）、`SaasMenus`（菜单清单草稿/发布/归档）、`SaasFeatures`（功能字典登记/禁用/删除）、`SaasPlans`（套餐定义/状态流转）、`SaasTenants`（租户开通/变更/状态机/重签/批量续期/用量/留痕）、`SaasReview`（租户申请单审批）。
+资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录/机器席位）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）、`UpgradeRecords`（升级执行记录，只读）、`Modules`（项目功能模块）、`SaasMenus`（菜单清单草稿/发布/归档）、`SaasFeatures`（功能字典登记/禁用/删除）、`SaasPlans`（套餐定义/状态流转）、`SaasTenants`（租户开通/变更/状态机/重签/批量续期/用量/留痕）、`SaasReview`（租户申请单审批）、`Apis`（API 商城目录/订单/订阅/余额充值/账单/用量/监控，共 53 条受控路由）。
 
 注意：管理面账密通过所选传输上送，生产环境无论 HTTP 还是 gRPC 都**必须使用 TLS**。
 
@@ -1135,7 +1142,7 @@ type AdminOptions struct {
 func NewAdmin(options AdminOptions) (*AdminClient, error)
 ```
 
-创建后挂载 14 个资源组字段：
+创建后挂载 15 个资源组字段：
 
 ```go
 adm, _ := admin.NewAdmin(admin.AdminOptions{
@@ -1143,7 +1150,7 @@ adm, _ := admin.NewAdmin(admin.AdminOptions{
 })
 // adm.Qualification / adm.Projects / adm.Instances / adm.Licenses /
 // adm.SigningKeys / adm.Artifacts / adm.Versions / adm.UpgradeRecords / adm.Modules /
-// adm.SaasMenus / adm.SaasFeatures / adm.SaasPlans / adm.SaasTenants / adm.SaasReview
+// adm.SaasMenus / adm.SaasFeatures / adm.SaasPlans / adm.SaasTenants / adm.SaasReview / adm.Apis
 ```
 
 ### 20.2 登录态
@@ -1199,7 +1206,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 ### 20.5 资源组接口明细
 
-所有方法第一个参数均为 `ctx context.Context`。`input` / `params` 参数类型见 §20.6（DTO 均在 `admin/admin-types.go` 定义，json tag 与平台逐一对齐，camelCase）。
+所有方法第一个参数均为 `ctx context.Context`。`input` / `params` 参数类型见 §20.6（DTO 在 `admin/admin-types.go` 定义，**API 商城（Apis）域 DTO 独立在 `admin/apis-types.go`**，避免单文件继续膨胀；json tag 与平台逐一对齐，camelCase）。
 
 #### Qualification - 资格审核（`/api/qualification/*`）
 
@@ -1372,7 +1379,121 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Take` | 审批申请详情 | `GET /api/saas-review/take?id=N` | `id int` → `*SaasTenantApplication` |
 | `Review` | 审批（approve 单事务生效并签发；reject 需填审批意见） | `POST /api/saas-review/review` | `SaasReviewInput` → `*SaasReviewResult` |
 
-### 20.6 主要 DTO 说明（`admin/admin-types.go`）
+#### Apis - API 商城（管理面 53 条受控路由，7 个 gRPC 服务）
+
+> 覆盖「目录维护（产品/套餐）→ 下单/支付/退款 → 订阅 → 余额与充值 → 账单/用量/监控」全链路。
+> member 侧路由由平台强制本人，platform 侧按 apis 域数据范围放行；稳定权限码与风险级别与平台 `GenRoute` 逐字一致。
+> gRPC 侧是 **proto-less 服务**（`ApisMarketAdminService`/`ApisCatalogAdminService`/`ApisOrderAdminService`/
+> `ApisSubscriptionAdminService`/`ApisBalanceAdminService`/`ApisUsageAdminService`/`ApisMonitorAdminService`，
+> 由平台登记表装配 ServiceDesc，复用既有 `AdminRequest`/`AdminResponse` 信封）——SDK 经 full method 常量 +
+> `conn.Invoke` 调用，对调用方完全透明：两种协议返回同一批 typed 结构，HTTP 仍是默认传输。
+> 幂等键（`requestId`）一律由调用方生成并显式传入，SDK 不代为生成，失败后也不跨协议自动重试。
+> 三向对账（SDK 方法 ↔ 传输层 case ↔ 平台 `ApisSpecs` 登记表）由 `admin/apis_reconcile_test.go` 强制守护。
+
+**ApisMarketAdminService（商品浏览，2）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindMarketProducts` | 在售商品分页（仅 `on_sale` 产品及其在售套餐） | `GET /api/apis-market/find` | `*ApisProductQuery` → `*Page[ApisOfferProduct]` |
+| `GetMarketProduct` | 在售商品详情（含在售套餐；未上架返回 404） | `GET /api/apis-market/take?id=N` | `id int` → `*ApisProductOffer` |
+
+**ApisCatalogAdminService（目录维护，10）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindProducts` | 产品分页（平台视图，含 draft） | `GET /api/apis-products/find` | `*ApisProductQuery` → `*Page[ApisProduct]` |
+| `GetProduct` | 产品详情 | `GET /api/apis-products/take?id=N` | `id int` → `*ApisProduct` |
+| `CreateProduct` | 新建产品（status 缺省 draft；能力 + 名称同能力内唯一） | `POST /api/apis-products/create` | `ApisProductInput` → `*ApisProduct` |
+| `UpdateProduct` | 修改产品（**全量替换**；version 冲突 409） | `PUT /api/apis-products/update` | `ApisProductInput` → `*ApisProduct` |
+| `RemoveProduct` | 删除产品（软删；上架须先下架，风险 high） | `DELETE /api/apis-products/remove` | `id int` → `*IdResult` |
+| `FindPlans` | 套餐分页（平台视图） | `GET /api/apis-plans/find` | `*ApisPlanQuery` → `*Page[ApisPlan]` |
+| `GetPlan` | 套餐详情 | `GET /api/apis-plans/take?id=N` | `id int` → `*ApisPlan` |
+| `CreatePlan` | 新建套餐（status 缺省 off_sale；上架按量套餐校验唯一性） | `POST /api/apis-plans/create` | `ApisPlanInput` → `*ApisPlan` |
+| `UpdatePlan` | 修改套餐（**全量替换**；version 冲突 409） | `PUT /api/apis-plans/update` | `ApisPlanInput` → `*ApisPlan` |
+| `RemovePlan` | 删除套餐（软删；上架须先下架，风险 high） | `DELETE /api/apis-plans/remove` | `id int` → `*IdResult` |
+
+**ApisOrderAdminService（订单与退款，11）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindOrders` | 我的订单分页（member 强制本人） | `GET /api/apis-orders/find` | `*ApisOrderQuery` → `*Page[ApisOrder]` |
+| `GetOrder` | 我的订单详情（id 与单号二选一） | `GET /api/apis-orders/take` | `id int, orderNo string` → `*ApisOrder` |
+| `CreateOrder` | 商城下单（`requestId` 幂等；余额通道同事务扣款并交付订阅） | `POST /api/apis-orders/create` | `ApisOrderInput` → `*ApisOrder` |
+| `PayOrder` | 余额支付订单（仅余额通道待支付订单） | `POST /api/apis-orders/pay` | `ApisOrderTarget` → `*ApisOrder` |
+| `CancelOrder` | 取消订单（仅待支付） | `POST /api/apis-orders/cancel` | `ApisOrderCancelInput` → `*ApisOrder` |
+| `FindManageOrders` | 订单运营分页（平台全量） | `GET /api/apis-orders/manage/find` | `*ApisOrderQuery` → `*Page[ApisOrder]` |
+| `GetManageOrder` | 订单运营详情 | `GET /api/apis-orders/manage/take` | `id int, orderNo string` → `*ApisOrder` |
+| `ConfirmOrder` | 确认线下收款（同事务交付订阅，风险 high） | `POST /api/apis-orders/manage/confirm` | `ApisOrderConfirmInput` → `*ApisOrder` |
+| `CloseOrder` | 关闭订单（平台侧；仅待支付订阅类订单） | `POST /api/apis-orders/manage/close` | `ApisOrderCancelInput` → `*ApisOrder` |
+| `ApplyRefund` | 申请退款（首版全额；`requestId` 幂等） | `POST /api/apis-orders/refund-apply` | `ApisRefundApplyInput` → `*ApisOrder` |
+| `ReviewRefund` | 退款审批（通过即退款并终止订阅，风险 high） | `POST /api/apis-orders/manage/refund-review` | `ApisRefundReviewInput` → `*ApisOrder` |
+
+**ApisSubscriptionAdminService（订阅，4）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindSubscriptions` | 我的订阅分页（member 强制本人） | `GET /api/apis-subscriptions/find` | `*ApisSubscriptionQuery` → `*Page[ApisSubscription]` |
+| `GetSubscription` | 订阅详情 | `GET /api/apis-subscriptions/take?id=N` | `id int` → `*ApisSubscription` |
+| `CancelSubscription` | 退订（仅生效中订阅；已付费用不退，退款走 `ApplyRefund`） | `POST /api/apis-subscriptions/cancel` | `id int, reason string` → `*ApisSubscription` |
+| `SetSubscriptionAutoRenew` | 调整自动续费偏好（显式 `false` 同样上送） | `POST /api/apis-subscriptions/auto-renew` | `id int, autoRenew bool` → `*ApisSubscription` |
+
+**ApisBalanceAdminService（余额与充值，13）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindRecharges` | 充值单分页 | `GET /api/apis-recharges/find` | `*ApisRechargeQuery` → `*Page[ApisRecharge]` |
+| `GetRecharge` | 充值单详情 | `GET /api/apis-recharges/take?id=N` | `id int` → `*ApisRecharge` |
+| `CreateRecharge` | 提交线下充值申请（`requestId` 幂等） | `POST /api/apis-recharges/create` | `ApisRechargeInput` → `*ApisRechargeResult` |
+| `CancelRecharge` | 取消充值单（仅待支付） | `POST /api/apis-recharges/cancel` | `id int, reason string` → `*ApisRecharge` |
+| `ConfirmRecharge` | 确认充值入账（重复确认幂等返回 `replayed=true`，风险 high） | `POST /api/apis-recharges/confirm` | `ApisRechargeConfirmInput` → `*ApisRechargeResult` |
+| `GetBalance` | 我的余额账户（惰性建户，归属取登录态） | `GET /api/apis-balances/take` | 无 → `*ApisBalanceAccount` |
+| `GetBalanceSpent` | 本月已消费（分；权威口径为余额流水） | `GET /api/apis-balances/spent` | 无 → `*ApisBalanceSpentResult` |
+| `FindBalanceLogs` | 余额流水分页 | `GET /api/apis-balances/logs` | `*ApisBalanceLogQuery` → `*Page[ApisBalanceLog]` |
+| `SetBalanceLimit` | 设置月度消费限制（0=关闭；负数由平台拒绝） | `POST /api/apis-balances/limit` | `userId int, limit int64` → `*ApisBalanceAccount` |
+| `AdjustBalance` | 平台调整余额（正数赠送/负数扣减，说明必填，风险 high） | `POST /api/apis-balances/adjust` | `ApisBalanceAdjustInput` → `*ApisBalanceState` |
+| `SetBalanceStatus` | 账户风控状态流转（normal/frozen，风险 high） | `POST /api/apis-balances/status` | `userId int, status string, reason string` → `*ApisBalanceAccount` |
+| `FindManageBalances` | 账户运营分页（平台侧） | `GET /api/apis-balances/manage/find` | `*ApisAccountQuery` → `*Page[ApisBalanceAccount]` |
+| `GetManageBalance` | 账户运营详情（按 userId；不存在则惰性建户） | `GET /api/apis-balances/manage/take?userId=N` | `userId int` → `*ApisBalanceAccount` |
+
+**ApisUsageAdminService（我的账务与用量，6）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindBills` | 我的账单分页（member 强制本人） | `GET /api/apis-bills/find` | `*ApisBillQuery` → `*Page[ApisBill]` |
+| `GetBill` | 账单详情 | `GET /api/apis-bills/take?id=N` | `id int` → `*ApisBill` |
+| `ExportBills` | 导出我的账单（xlsx 双 sheet；筛选同 find、忽略分页） | `GET /api/apis-bills/export` | `*ApisBillQuery` → `(fileName string, content []byte, err error)` |
+| `FindUsageRecords` | 我的用量流水分页 | `GET /api/apis-usage/find` | `*ApisUsageRecordQuery` → `*Page[ApisUsageRecord]` |
+| `FindUsageDaily` | 我的用量日聚合分页（账单与看板数据源） | `GET /api/apis-usage/daily` | `*ApisUsageDailyQuery` → `*Page[ApisUsageDaily]` |
+| `GetUsageDailySummary` | 我的用量看板汇总（含今日实时镜像条带） | `GET /api/apis-usage/daily/summary` | `*ApisUsageDailySummaryQuery` → `*ApisUsageDailySummary` |
+
+**ApisMonitorAdminService（平台监控，7）**
+
+| 方法 | 说明 | 路由 | 参数 → 返回 |
+|---|---|---|---|
+| `FindMonitorBills` | 账单监控分页（平台全量） | `GET /api/apis-monitor/bills/find` | `*ApisBillQuery` → `*Page[ApisBill]` |
+| `GetMonitorBill` | 账单监控详情 | `GET /api/apis-monitor/bills/take?id=N` | `id int` → `*ApisBill` |
+| `ExportMonitorBills` | 账单监控导出（xlsx；平台全量或按用户筛选） | `GET /api/apis-monitor/bills/export` | `*ApisBillQuery` → `(fileName string, content []byte, err error)` |
+| `FindMonitorBalanceLogs` | 余额流水监控分页（平台全量） | `GET /api/apis-monitor/logs/find` | `*ApisBalanceLogQuery` → `*Page[ApisBalanceLog]` |
+| `FindMonitorUsageRecords` | 用量监控流水（平台全量） | `GET /api/apis-monitor/usage/find` | `*ApisUsageRecordQuery` → `*Page[ApisUsageRecord]` |
+| `FindMonitorUsageDaily` | 用量监控日聚合（平台全量） | `GET /api/apis-monitor/usage/daily` | `*ApisUsageDailyQuery` → `*Page[ApisUsageDaily]` |
+| `GetMonitorUsageSummary` | 用量看板汇总（平台全量视图 `TodayRealtime` 为 null） | `GET /api/apis-monitor/usage/summary` | `*ApisUsageDailySummaryQuery` → `*ApisUsageDailySummary` |
+
+```go
+// API 商城管理面示例（HTTP / gRPC 同一套调用）
+product, _ := adm.Apis.GetProduct(ctx, 3)                     // 目录详情
+autoRenew := true
+order, _ := adm.Apis.CreateOrder(ctx, admin.ApisOrderInput{   // 下单（requestId 为调用方生成的幂等键）
+	PlanId: 8, PayChannel: "balance", RequestId: "req-20260817-1", AutoRenew: &autoRenew,
+})
+_, _ = adm.Apis.ConfirmOrder(ctx, admin.ApisOrderConfirmInput{Id: order.Id, ReviewNote: "线下转账已到账"})
+fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{BillType: "metered"}) // xlsx 原始字节
+```
+
+> `ApisProductInput` / `ApisPlanInput` 对应平台**全量替换**语义（未赋值字段按零值落库），SDK 侧不使用 `omitempty`；
+> 其余写路径采用 `omitempty`，但 `ApisRefundReviewInput.Approve`、`SetSubscriptionAutoRenew` 的 `autoRenew`
+> 与 `AdjustBalance` 的负数金额始终显式上送——平台按「是否提交」判定语义时不允许折叠。
+
+### 20.6 主要 DTO 说明（`admin/admin-types.go` + `admin/apis-types.go`）
 
 **输入结构**（json tag 与平台请求结构体逐一对齐）：
 
@@ -1397,6 +1518,13 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `SaasTenantBatchRenewInput` | `Ids` 必填、`ValidUntil`（必填且须晚于当前时间）、`Reason` |
 | `SaasReviewInput` | `Id` / `Action`（approve/reject）必填、`ReviewNote`（reject 必填） |
 | `ProjectModuleInput` | `ProjectId` / `ModuleCode` / `ModuleName` 必填、`ParentCode`（父模块编码） |
+| `ApisProductInput` / `ApisPlanInput` | 产品 / 套餐写路径入参，对应平台**全量替换**（未赋值数字按 0 落库，故 SDK 侧不使用 `omitempty`；`Version` > 0 时校验乐观锁，冲突 409） |
+| `ApisOrderInput` | 下单：`PlanId` / `RequestId`（幂等键）必填、`PayChannel`（balance/offline）、`Remark`、`AutoRenew *bool`（nil=不设置偏好） |
+| `ApisOrderTarget` / `ApisOrderCancelInput` | 订单目标（id 与单号二选一）/ 取消或关闭（附 `Reason`） |
+| `ApisOrderConfirmInput` | 线下收款确认：`ReviewNote` 必填、`PayTxNo` 可选 |
+| `ApisRefundApplyInput` / `ApisRefundReviewInput` | 退款申请（`RequestId` 幂等、`Reason` 必填）/ 退款审批（`Approve` **显式上送**、`ReviewNote` 必填） |
+| `ApisRechargeInput` / `ApisRechargeConfirmInput` | 充值申请（`RequestId` 必填、金额下限平台配置）/ 确认入账（`ReviewNote` 必填、`PayTxNo` 可选） |
+| `ApisBalanceAdjustInput` | 平台调整余额：`Amount` 可正可负（调用方保真传输，负数不被折叠）、`Reason` 必填、`RequestId` 幂等 |
 
 **查询参数**（find/rows 类共用；数组字段（如 `Status []string`、`ProjectId []int`）序列化为 `key[]=v` 重复键；`Page` 默认 1，`Limit` 默认 10）：
 
@@ -1413,6 +1541,13 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `SaasTenantApplicationFindParams` | `ProjectId`、`UserId`（审批视角）、`BizType`（subscribe/change）、`Status` |
 | `SaasTenantUsageFindParams` | `TenantId` / `ProjectId` / `LimitKey`、`StartTime` / `EndTime`（毫秒） |
 | `QualificationFindParams` / `SaasMenuFindParams` / `SaasFeatureFindParams` / `SaasPlanFindParams` | `Status` 等常规筛选 |
+| `ApisProductQuery` / `ApisPlanQuery` | 产品（`Capability` / `Status` / `Keyword` 模糊）/ 套餐（`ProductId` / `BillingMode` / `Status`） |
+| `ApisOrderQuery` / `ApisSubscriptionQuery` / `ApisRechargeQuery` | 订单（`OrderType` / `PayChannel` / `PlanId` / `No`）/ 订阅（`SubNo` / `ProductId` / `PlanId`）/ 充值单（`PayChannel` / `No`），均含 `Page` / `Limit` / `Order` / `CreateAt` 毫秒区间 |
+| `ApisBillQuery` | 账单（`BillType` / `Status` / `No` / `CreateAt` 区间；两条导出接口按同口径筛选并忽略分页） |
+| `ApisBalanceLogQuery` | 余额流水（`TxType` **多值 IN**、`RefNo`、`CreateAt` 区间） |
+| `ApisAccountQuery` | 账户运营（`UserId` / `Status`） |
+| `ApisUsageRecordQuery` / `ApisUsageDailyQuery` | 用量（`Capability` / `ChargeMode` / `Result` / `CacheHit` 三态 / `ActivationNo` / `RequestId` + `CreateAt` 区间；日聚合按 `StatDate` 区间） |
+| `ApisUsageDailySummaryQuery` | 看板汇总（`UserId` / `Capability` / `StatDate` 区间；缺省最近 30 天，跨度上限 92 天） |
 
 **输出结构**（对齐平台 models/basic 各模型 json tag；时间戳除注明外均为毫秒）：
 
@@ -1433,6 +1568,14 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `SaasTenantSubscribeResult` / `SaasTenantChangeResult` | 开通/变更结果，三种形态：member 待审（`Id`=申请单 ID）/ 自动过单（`AutoApproved=true`）/ platform 直通 |
 | `SaasTenantUsageRow` / `SaasTenantUsageSummary` / `SaasTenantHistoryExport` | 用量历史行（`HourBucket` 整点水位）/ 用量水位（`Limit`/`Value` 为指针，nil 表示未定义/未上报）/ 留痕 CSV 导出 |
 | `ProjectModule` | 项目功能模块（`ModuleCode` 项目内唯一、`ParentCode` 父模块编码） |
+| `ApisOfferProduct` / `ApisOfferPlan` / `ApisProductOffer` | 商品浏览白名单视图（剥离 `UpstreamConfig` / `Uid` 等内部字段；`ApisProductOffer` = 产品 + 在售套餐） |
+| `ApisProduct` / `ApisPlan` | 产品（draft/on_sale/off_sale/archived）/ 套餐（subscription 订阅制、metered 付费制按量；`Price` 单位随计费模式为「分」或「万分/次」） |
+| `ApisOrder` / `ApisSubscription` | 订单（pending→paid→refunded / cancelled / closed；退款单 `OrderType=refund` + `RefundOrderNo`）/ 订阅（active ↔ expired/cancelled，含周期与自动续费偏好） |
+| `ApisBalanceAccount` / `ApisBalanceLog` / `ApisRecharge` | 余额账户（`Balance` / `Frozen` / `MonthlySpendLimit` / `Status`）/ 流水（只追加，`TxType` 为 recharge/consume/hold/release/refund/subscribe/adjust）/ 充值单（pending→paid/cancelled/closed） |
+| `ApisBalanceState` / `ApisRechargeResult` / `ApisBalanceSpentResult` | 调整结果（含 `Available` / `Replayed`）/ 充值结果（`Recharge` + `Balance` + `LogNo` + `Replayed`）/ 本月已消费 `{monthSpent}`（分） |
+| `ApisBill` | 账单（subscription 周期账单 / metered 按量账单；`Detail` 为明细快照 JSON，生成后不可变） |
+| `ApisUsageRecord` / `ApisUsageDaily` | 调用流水（`ChargeMode` / `Result` / `CacheHit` / `UpstreamMs`）/ 日聚合（账单与看板只读本表，不扫流水） |
+| `ApisUsageDailySummary`（含 `ApisUsageDailySummaryTotals` / `Day` / `Group`） | 看板汇总（服务端 GROUP BY + 单用户视角今日实时条带；`Totals` 恒等于 `Days` 求和） |
 
 ## 21. 接口契约与兼容性约定
 
@@ -1466,6 +1609,6 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
-| `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 14 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`） |
+| `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `apis-types.go`（API 商城 DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 15 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`/`apis.go`；`apis.go` 53 条商城受控路由 + 53 个 proto-less full method 常量，与平台 `ApisSpecs` 登记表三向对账见 `apis_reconcile_test.go`） |
 | `apis/` | API 商城 typed 方法包：`Client{doer}` + `New` + `Invoke`/`IPLocate`/`MailSend`/`Usage`（typed + 通用兜底 + 只读对账）+ `Receipt` + `Error`（业务码常量与 `HTTPStatusByCode`）+ `ErrNotActivated`（叶子包，只认 JSON，不 import runtime/proto） |
 | `proto/licence/v1/` / `proto/apis/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改；apis 契约含 `ApisRuntimeService{Invoke,IPLocate,MailSend,Usage}`，SDK 传输绑定自检见 `protocol_matrix_test.go`） |

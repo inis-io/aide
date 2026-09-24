@@ -406,6 +406,122 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.saasReview.GetSaasReview(callCtx, request)
 	case http.MethodPost + " /api/saas-review/review":
 		response, err = this.saasReview.ReviewSaasTenantApplication(callCtx, request)
+
+	// ---------- API 商城（proto-less 服务，SDK 侧 conn.Invoke） ----------
+	// 平台侧由 backend/grpc/admin/v1/apis.go 的 ApisSpecs 登记表装配 ServiceDesc（无生成 stub），
+	// 因此统一走 invokeApis；full method 常量集中在 apis.go，禁止在此写字符串字面量。
+	case http.MethodGet + " /api/apis-market/find":
+		response, err = this.invokeApis(callCtx, apisFindMarketProductsFullMethod, request)
+	case http.MethodGet + " /api/apis-market/take":
+		response, err = this.invokeApis(callCtx, apisGetMarketProductFullMethod, request)
+
+	case http.MethodGet + " /api/apis-products/find":
+		response, err = this.invokeApis(callCtx, apisFindProductsFullMethod, request)
+	case http.MethodGet + " /api/apis-products/take":
+		response, err = this.invokeApis(callCtx, apisGetProductFullMethod, request)
+	case http.MethodPost + " /api/apis-products/create":
+		response, err = this.invokeApis(callCtx, apisCreateProductFullMethod, request)
+	case http.MethodPut + " /api/apis-products/update":
+		response, err = this.invokeApis(callCtx, apisUpdateProductFullMethod, request)
+	case http.MethodDelete + " /api/apis-products/remove":
+		response, err = this.invokeApis(callCtx, apisRemoveProductFullMethod, request)
+	case http.MethodGet + " /api/apis-plans/find":
+		response, err = this.invokeApis(callCtx, apisFindPlansFullMethod, request)
+	case http.MethodGet + " /api/apis-plans/take":
+		response, err = this.invokeApis(callCtx, apisGetPlanFullMethod, request)
+	case http.MethodPost + " /api/apis-plans/create":
+		response, err = this.invokeApis(callCtx, apisCreatePlanFullMethod, request)
+	case http.MethodPut + " /api/apis-plans/update":
+		response, err = this.invokeApis(callCtx, apisUpdatePlanFullMethod, request)
+	case http.MethodDelete + " /api/apis-plans/remove":
+		response, err = this.invokeApis(callCtx, apisRemovePlanFullMethod, request)
+
+	case http.MethodGet + " /api/apis-orders/find":
+		response, err = this.invokeApis(callCtx, apisFindOrdersFullMethod, request)
+	case http.MethodGet + " /api/apis-orders/take":
+		response, err = this.invokeApis(callCtx, apisGetOrderFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/create":
+		response, err = this.invokeApis(callCtx, apisCreateOrderFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/pay":
+		response, err = this.invokeApis(callCtx, apisPayOrderFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/cancel":
+		response, err = this.invokeApis(callCtx, apisCancelOrderFullMethod, request)
+	case http.MethodGet + " /api/apis-orders/manage/find":
+		response, err = this.invokeApis(callCtx, apisFindManageOrdersFullMethod, request)
+	case http.MethodGet + " /api/apis-orders/manage/take":
+		response, err = this.invokeApis(callCtx, apisGetManageOrderFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/manage/confirm":
+		response, err = this.invokeApis(callCtx, apisConfirmOrderFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/manage/close":
+		response, err = this.invokeApis(callCtx, apisCloseOrderFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/refund-apply":
+		response, err = this.invokeApis(callCtx, apisApplyRefundFullMethod, request)
+	case http.MethodPost + " /api/apis-orders/manage/refund-review":
+		response, err = this.invokeApis(callCtx, apisReviewRefundFullMethod, request)
+
+	case http.MethodGet + " /api/apis-subscriptions/find":
+		response, err = this.invokeApis(callCtx, apisFindSubscriptionsFullMethod, request)
+	case http.MethodGet + " /api/apis-subscriptions/take":
+		response, err = this.invokeApis(callCtx, apisGetSubscriptionFullMethod, request)
+	case http.MethodPost + " /api/apis-subscriptions/cancel":
+		response, err = this.invokeApis(callCtx, apisCancelSubscriptionFullMethod, request)
+	case http.MethodPost + " /api/apis-subscriptions/auto-renew":
+		response, err = this.invokeApis(callCtx, apisSetSubscriptionAutoRenewFullMethod, request)
+
+	case http.MethodGet + " /api/apis-recharges/find":
+		response, err = this.invokeApis(callCtx, apisFindRechargesFullMethod, request)
+	case http.MethodGet + " /api/apis-recharges/take":
+		response, err = this.invokeApis(callCtx, apisGetRechargeFullMethod, request)
+	case http.MethodPost + " /api/apis-recharges/create":
+		response, err = this.invokeApis(callCtx, apisCreateRechargeFullMethod, request)
+	case http.MethodPost + " /api/apis-recharges/cancel":
+		response, err = this.invokeApis(callCtx, apisCancelRechargeFullMethod, request)
+	case http.MethodPost + " /api/apis-recharges/confirm":
+		response, err = this.invokeApis(callCtx, apisConfirmRechargeFullMethod, request)
+	case http.MethodGet + " /api/apis-balances/take":
+		response, err = this.invokeApis(callCtx, apisGetBalanceFullMethod, request)
+	case http.MethodGet + " /api/apis-balances/spent":
+		response, err = this.invokeApis(callCtx, apisGetBalanceSpentFullMethod, request)
+	case http.MethodGet + " /api/apis-balances/logs":
+		response, err = this.invokeApis(callCtx, apisFindBalanceLogsFullMethod, request)
+	case http.MethodPost + " /api/apis-balances/limit":
+		response, err = this.invokeApis(callCtx, apisSetBalanceLimitFullMethod, request)
+	case http.MethodPost + " /api/apis-balances/adjust":
+		response, err = this.invokeApis(callCtx, apisAdjustBalanceFullMethod, request)
+	case http.MethodPost + " /api/apis-balances/status":
+		response, err = this.invokeApis(callCtx, apisSetBalanceStatusFullMethod, request)
+	case http.MethodGet + " /api/apis-balances/manage/find":
+		response, err = this.invokeApis(callCtx, apisFindManageBalancesFullMethod, request)
+	case http.MethodGet + " /api/apis-balances/manage/take":
+		response, err = this.invokeApis(callCtx, apisGetManageBalanceFullMethod, request)
+
+	case http.MethodGet + " /api/apis-bills/find":
+		response, err = this.invokeApis(callCtx, apisFindBillsFullMethod, request)
+	case http.MethodGet + " /api/apis-bills/take":
+		response, err = this.invokeApis(callCtx, apisGetBillFullMethod, request)
+	case http.MethodGet + " /api/apis-bills/export":
+		response, err = this.invokeApis(callCtx, apisExportBillsFullMethod, request)
+	case http.MethodGet + " /api/apis-usage/find":
+		response, err = this.invokeApis(callCtx, apisFindUsageRecordsFullMethod, request)
+	case http.MethodGet + " /api/apis-usage/daily":
+		response, err = this.invokeApis(callCtx, apisFindUsageDailyFullMethod, request)
+	case http.MethodGet + " /api/apis-usage/daily/summary":
+		response, err = this.invokeApis(callCtx, apisGetUsageDailySummaryFullMethod, request)
+
+	case http.MethodGet + " /api/apis-monitor/bills/find":
+		response, err = this.invokeApis(callCtx, apisFindMonitorBillsFullMethod, request)
+	case http.MethodGet + " /api/apis-monitor/bills/take":
+		response, err = this.invokeApis(callCtx, apisGetMonitorBillFullMethod, request)
+	case http.MethodGet + " /api/apis-monitor/bills/export":
+		response, err = this.invokeApis(callCtx, apisExportMonitorBillsFullMethod, request)
+	case http.MethodGet + " /api/apis-monitor/logs/find":
+		response, err = this.invokeApis(callCtx, apisFindMonitorBalanceLogsFullMethod, request)
+	case http.MethodGet + " /api/apis-monitor/usage/find":
+		response, err = this.invokeApis(callCtx, apisFindMonitorUsageRecordsFullMethod, request)
+	case http.MethodGet + " /api/apis-monitor/usage/daily":
+		response, err = this.invokeApis(callCtx, apisFindMonitorUsageDailyFullMethod, request)
+	case http.MethodGet + " /api/apis-monitor/usage/summary":
+		response, err = this.invokeApis(callCtx, apisGetMonitorUsageSummaryFullMethod, request)
 	default:
 		return nil, errors.New("licence: gRPC 管理面未声明该操作：" + call.Method + " " + call.Path)
 	}
@@ -413,6 +529,19 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		return nil, adminGRPCError(err)
 	}
 	return adminData(response)
+}
+
+// invokeApis - API 商城管理面（proto-less 服务）的统一调用出口：
+// 平台侧 7 个 ApisXxxAdminService 由 ApisSpecs 登记表装配 ServiceDesc，SDK 无生成 stub，
+// 因此直接用 conn.Invoke(fullMethod) 调用并复用既有 licencev1.AdminRequest/AdminResponse 信封
+// （业务错误仍是 code != 200 的成功响应，由 adminData 还原为 *APIError；传输层失败由 adminGRPCError 映射）。
+func (this *grpcAdminTransport) invokeApis(ctx context.Context, fullMethod string, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {
+
+	response := new(licencev1.AdminResponse)
+	if err := this.conn.Invoke(ctx, fullMethod, request, response); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 type adminFileStream interface {
