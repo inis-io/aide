@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package licenhub.apis.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/inis-io/aide/licence/proto/apis/v1;apisv1";
+
+// ApisRuntimeService - API 商城运行面（许可证凭证认证，非 IAM 登录态）。
+//
+// 凭证不进消息：activation token / 时间戳 / nonce / 签名 / 签名版本全部走 gRPC metadata
+// （x-license-token / x-license-timestamp / x-license-nonce / x-license-sign /
+// x-license-sign-version，与 HTTP 头族一一对应）；调用级幂等键走 metadata x-request-id
+// （等价 HTTP X-Request-Id，04 §2.2），故三个请求消息都不含凭证与 request_id 字段。
+// 签名 canonical 沿用运行面既有口径（licence/protocol.GRPCContent）：
+//
+//	GRPC\n{fullMethod}\n{timestamp}\n{nonce}\n{sha256(deterministic protobuf request)}
+//
+// 其中 {fullMethod} 取生成代码的 *_FullMethodName 常量原值（含前导 /，如
+// /lichenhub.apis.v1.ApisRuntimeService/Invoke）；协议矩阵第 3 列书写的真名不含前导 /，
+// 二者仅差首字符——拼 canonical 时一律照抄常量，禁止自行拼接。
+//
+// 错误映射（实现属服务端适配层，两协议语义等价）：业务码以 licen-hub
+// app/service/apis 的 ServiceError.Code 为唯一事实源，gRPC 侧经 status.Status + 结构化 detail
+// 返回（04 §1 注：status 映射只对运行面 proto 适用，管理面继续走 JSON 信封）。业务码集合：
+//
+//	INVALID_ARGUMENT / UNAUTHORIZED / FORBIDDEN / NO_ENTITLEMENT / QUOTA_EXCEEDED /
+//	INSUFFICIENT_BALANCE / SPEND_LIMIT_EXCEEDED / ACCOUNT_FROZEN / CONCURRENCY_LIMITED /
+//	RATE_LIMITED / UPSTREAM_ERROR / IP_NOT_FOUND / CAPABILITY_NOT_FOUND / NOT_FOUND /
+//	CONFLICT / INVALID_STATE / INTERNAL_ERROR
+//
+// detail 携带闸门上下文（retryAfterMs / scope / resetAt / limit / monthSpent 等），与 HTTP
+// 运行面失败信封的 detail 字段一致；gRPC 状态码映射（InvalidArgument / Unauthenticated /
+// PermissionDenied / FailedPrecondition / ResourceExhausted / NotFound / Internal …）由适配层
+// 从业务码推导，客户端以业务码为准。
+service ApisRuntimeService {
+  // Invoke - 通用能力调用（所有能力的完备兜底：capability + action + params）。
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+  // IPLocate - IP 归属地查询（typed 便捷方法，内部收敛为同一调用管线，不做额外逻辑）。
+  rpc IPLocate(IPLocateRequest) returns (IPLocateResponse);
+  // Usage - 调用流水自助查询（只读；身份由凭证推导，只能查自己）。
+  // MailSend typed RPC 属阶段 5 范围，落地时按只追加纪律在本服务追加 rpc 与消息字段号。
+  rpc Usage(UsageRequest) returns (UsageResponse);
+}
+
+// InvokeRequest - 通用调用入参（镜像运行面 InvokeParams，凭证族 Proof 与 requestId 走 metadata）。
+message InvokeRequest {
+  string capability = 1;                // 能力编码（如 ip-locate；须已注册且有在售产品）
+  string action = 2;                    // 动作（单动作能力可为空）
+  google.protobuf.Struct params = 3;    // 业务参数（能力自定义，与 HTTP 请求体同构）
+  int64 product_id = 4;                 // 显式产品选择（同一能力多产品；0 = 服务端按订阅/排序解析）
+  int64 quantity = 5;                   // 调用方声明的最大计量数（默认 1，受能力上限收紧）
+}
+
+// InvokeResponse - 通用调用响应（对应 HTTP 运行面信封 data.{result,receipt}，04 §2.3）。
+message InvokeResponse {
+  google.protobuf.Struct result = 1;    // 能力出参（结构由能力定义）
+  Receipt receipt = 2;                  // 计量回执（跨协议字段一致）
+}
+
+// IPLocateRequest - IP 归属地查询请求（typed 便捷方法；能力与动作由服务端固定）。
+message IPLocateRequest {
+  string ip = 1;    // 待查询 IP（IPv4 公网地址）
+}
+
+// IPLocateResult - IP 归属地归一化结果（能力出参，与 HTTP data.result 字段一致，07 §6）。
+message IPLocateResult {
+  string ip = 1;           // 查询的 IP
+  string nation = 2;       // 国家（高德源固定「中国」，离线源取如「美国」）
+  string province = 3;     // 省份/州
+  string city = 4;         // 城市
+  string adcode = 5;       // 城市行政编码（仅高德源有，可空）
+  string rectangle = 6;    // 城市矩形范围（仅高德源有，可空）
+  string isp = 7;          // 运营商（仅离线源有，可空）
+  string source = 8;       // 数据来源：amap / ip2region
+  bool cache_hit = 9;      // 是否命中 12h 平台缓存（计费折扣依据，与 receipt.cache_hit 一致）
+  bool stale = 10;         // 是否为回源失败降级返回的过期库数据（正常缺省 false）
+}
+
+// IPLocateResponse - IP 归属地查询响应（07 §9 的 typed 契约）。
+message IPLocateResponse {
+  IPLocateResult result = 1;
+  Receipt receipt = 2;
+}
+
+// Receipt - 计量回执：计费的客户侧凭证，跨协议字段一致（04 §2.3 与 03 §4）。
+message Receipt {
+  string request_id = 1;        // 调用级幂等键原样回显（HTTP X-Request-Id / metadata x-request-id）
+  string charge_mode = 2;       // 主计费模式：free_quota / trial / subscription_quota / metered_balance
+  bool cache_hit = 3;           // 是否命中平台缓存（折扣由本字段 + amount 实收体现）
+  int64 quantity = 4;           // 本次实际计量数
+  int64 amount = 5;             // 本次实收金额（分；免费、体验与订阅额度内为 0）
+  int64 quota_remaining = 6;    // 主计费模式对应的剩余额度（按量与不限量时为 0）
+  int64 balance_after = 7;      // 余额账户可用余额（分；未开户为 0）
+  int64 server_time = 8;        // 服务端时间（毫秒，供客户校时）
+}
+
+// UsageRequest - 调用流水自助查询请求：UsageRecordQuery 的客户端可用子集。
+// 不含 user_id / sub_id / activation_no——运行面身份由许可证凭证决定（只能查自己），
+// user_id 由服务端从凭证推导，客户端不可指定。
+message UsageRequest {
+  int32 page = 1;                   // 页码（从 1 起；0 = 服务端默认 1）
+  int32 limit = 2;                  // 每页条数（0 = 服务端默认 10；上限 1000，超出按 1000 处理）
+  string order = 3;                 // 排序：空 = id desc；服务端按白名单裁决
+  string capability = 4;            // 能力编码筛选（空 = 不限）
+  int64 product_id = 5;             // 产品筛选（0 = 不限）
+  string charge_mode = 6;           // 计费模式筛选（空 = 不限）
+  string result = 7;                // 调用结果筛选：success / provider_error / rejected / settle_error
+  string cache_hit = 8;             // 缓存命中三态筛选："" 不限 / "true" 仅命中 / "false" 仅未命中
+  string request_id = 9;            // 流水筛选：完整行 request_id 精确匹配（空 = 不限；拆分计量与拒绝/失败行带 :a/:b/:rej/:err 派生后缀，按调用级 id 查不全；与本次调用的 metadata x-request-id 幂等键无关）
+  repeated int64 create_at = 10;    // 调用时间区间 [起, 止]（毫秒戳；0 或省略 = 不限，最多 2 个元素）
+}
+
+// UsageResponse - 调用流水查询响应（对应 HTTP 分页信封 data.{records,count,page}）。
+message UsageResponse {
+  repeated UsageRecord records = 1;
+  int64 count = 2;    // 满足条件的总条数
+  int32 page = 3;     // 当前页码（服务端归一后的实际值）
+}
+
+// UsageRecord - 调用流水行（只追加；字段与 licen-hub ApisUsageRecord 的 JSON 一一对应）。
+message UsageRecord {
+  int64 id = 1;
+  string request_id = 2;       // 调用级幂等键（拆分计量派生 :a/:b 后缀）
+  int64 user_id = 3;           // 归属用户（运行面恒为凭证推导的本人）
+  string capability = 4;
+  int64 product_id = 5;
+  string activation_no = 6;    // 激活记录编号（排障定位与分实例统计；空 = 未关联激活）
+  int64 sub_id = 7;            // 命中的订阅 ID（纯按量调用为 0）
+  int64 quantity = 8;
+  string charge_mode = 9;
+  bool cache_hit = 10;
+  int64 amount = 11;           // 本次扣费（分；免费、体验与订阅额度内为 0）
+  string result = 12;          // 调用结果：success / provider_error / rejected / settle_error
+  int64 upstream_ms = 13;      // 上游耗时（毫秒，监控用）
+  int64 create_at = 14;        // 创建时间（毫秒戳）
+}

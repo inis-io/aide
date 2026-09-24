@@ -50,8 +50,9 @@ licence/
   400 errors 明细）与配置校验引擎 `config` 子包（全系统唯一实现，licen-hub backend import
   复用；`runtime` 包仅留 `Client` 方法薄壳））。
   HTTP 保持默认值；gRPC 必须通过 `TransportGRPC` 显式选择，且不做跨协议自动回退。
-- canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`；服务端共同消费该契约，
-  禁止在 Licen Hub 仓库复制第二份 proto。
+- canonical proto、生成代码和机器可读协议矩阵位于 `proto/licence/v1/`（许可证运行面/管理面）与
+  `proto/apis/v1/`（API 商城运行面，生成走 `proto/generate.ps1`，WKT 导入经 `proto/wkt.go` 导出描述符集）；
+  服务端共同消费这些契约，禁止在 Licen Hub 仓库复制第二份 proto。
 - 跨项目落地方案见
   [`../../licen-hub/docs/md/Licence-SDK-HTTP与gRPC双协议跨项目落地方案.md`](../../licen-hub/docs/md/Licence-SDK-HTTP与gRPC双协议跨项目落地方案.md)。
 
