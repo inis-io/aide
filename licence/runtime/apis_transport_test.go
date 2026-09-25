@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/inis-io/aide/licence/apis"
+	"github.com/inis-io/aide/licence/apis/email"
 	"github.com/inis-io/aide/licence/apis/iplocate"
-	"github.com/inis-io/aide/licence/apis/mailsend"
 	apisv1 "github.com/inis-io/aide/licence/proto/apis/v1"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 	"github.com/spf13/cast"
@@ -167,9 +167,9 @@ func apisExpectedReceipt(requestId string) apis.Receipt {
 	}
 }
 
-// apisExpectedMailSend - 客户端应解析出的代发结果（mailsend 能力子包类型）
-func apisExpectedMailSend(canned apisCannedMailSend) mailsend.Result {
-	return mailsend.Result{Sent: int(canned.Sent), Recipients: canned.Recipients, Subject: canned.Subject}
+// apisExpectedMailSend - 客户端应解析出的代发结果（email 能力子包类型）
+func apisExpectedMailSend(canned apisCannedMailSend) email.Result {
+	return email.Result{Sent: int(canned.Sent), Recipients: canned.Recipients, Subject: canned.Subject}
 }
 
 // apisExpectedUsageRow - 客户端应解析出的流水行
@@ -767,7 +767,7 @@ func TestApisDualMailSend(t *testing.T) {
 		to := []string{"a@example.com", "b@example.com"}
 		// 正文刻意含 pushx 内置占位符：SDK 与传输层都不得做任何模板替换（服务端才是唯一投递方）
 		content := "验证码 ${code}（收件人 ${target}）"
-		result, receipt, err := client.Apis.MailSend.Send(t.Context(), mailsend.Input{
+		result, receipt, err := client.Apis.Email.Send(t.Context(), email.Input{
 			To: to, Subject: "  对账单  ", Content: content, HTML: true,
 		}, "req_mail_dual")
 		if err != nil {
@@ -813,7 +813,7 @@ func TestApisDualMailSendBusinessError(t *testing.T) {
 			t.Run(item.name, func(t *testing.T) {
 				message := "代发拒绝：" + item.code
 				fake.setFailure(item.code, message, nil)
-				_, _, err := client.Apis.MailSend.Send(t.Context(), mailsend.Input{
+				_, _, err := client.Apis.Email.Send(t.Context(), email.Input{
 					To: []string{"user@example.com"}, Subject: "对账单", Content: "正文",
 				})
 				var apiErr *apis.Error

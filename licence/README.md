@@ -474,9 +474,9 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | 回调接收与事件订阅 | `licence/callback` | `callback.NewCallbackHandler(CallbackOptions)`、`callback.NewEventSubscriber(client, CallbackOptions)` | 客户项目接收 webhook / 主动订阅平台事件 |
 | 配置定义校验引擎 | `licence/config` | `config.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
 | 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
-| API 商城 | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（`Invoke`/`Usage` 在根包，`IPLocate`/`MailSend` 按能力子包挂载 `lic.Apis.IPLocate.Query` / `lic.Apis.MailSend.Send`，见 §17.5；面向 `core.Doer` 窄接口、不 import runtime，HTTP/gRPC 双协议随根 Client） |
+| API 商城 | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（`Invoke`/`Usage` 在根包，`IPLocate`/`Email` 按能力子包挂载 `lic.Apis.IPLocate.Query` / `lic.Apis.Email.Send`，见 §17.5；面向 `core.Doer` 窄接口、不 import runtime，HTTP/gRPC 双协议随根 Client） |
 
-依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol` / `config` / `apis/core` 为叶子包。`apis` 根包 → `apis/core` + 各能力子包（`apis/iplocate` / `apis/mailsend`），能力子包 → `apis/core`，互不反向依赖。
+依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol` / `config` / `apis/core` 为叶子包。`apis` 根包 → `apis/core` + 各能力子包（`apis/iplocate` / `apis/email`），能力子包 → `apis/core`，互不反向依赖。
 
 两类客户端的协议完全不同，互不通用：
 
@@ -784,10 +784,10 @@ type ProvisionError struct { // 业务拒绝，errors.As 断言
 API 商城（IP 定位等付费能力）挂在**已激活的同一个 `Client`** 上：`Client.Apis` 是 `*apis.Client`，
 零额外凭证、零额外客户端（`licence/apis` 面向 `core.Doer` 窄接口编程，宿主由根 `Client` 注入）。
 **按能力子包分类**：每个能力一个子包，根 `Client` 把能力资源挂载为 `lic.Apis` 的同名字段——
-IP 定位在 `lic.Apis.IPLocate.Query`，邮件代发在 `lic.Apis.MailSend.Send`；跨能力语义
+IP 定位在 `lic.Apis.IPLocate.Query`，邮件代发在 `lic.Apis.Email.Send`；跨能力语义
 （`Invoke` 通用兜底 / `Usage` 只读对账）留在 `apis` 根包。共享核心件（`apis.Error` /
 `apis.Receipt` / `apis.ErrNotActivated` / 业务码常量）由 `apis` 根包以类型别名 re-export
-（`apis/core` 为唯一实现），能力专属类型（`iplocate.Result` / `mailsend.Input` / `mailsend.Result`）
+（`apis/core` 为唯一实现），能力专属类型（`iplocate.Result` / `email.Input` / `email.Result`）
 须 import 对应能力子包。typed 方法走与运行面完全相同的双协议传输与请求签名，切换 `Options.Transport` 不改业务调用。
 
 ```go
@@ -797,7 +797,7 @@ import (
 
     "github.com/inis-io/aide/licence/apis"
     "github.com/inis-io/aide/licence/apis/iplocate"
-    "github.com/inis-io/aide/licence/apis/mailsend"
+    "github.com/inis-io/aide/licence/apis/email"
 )
 
 // lic 已完成 New + Start（见 §3），商城调用不需要第二个客户端
@@ -813,8 +813,8 @@ if err != nil {
 }
 fmt.Println(loc.Province, loc.City, loc.Source, receipt.CacheHit, receipt.QuotaRemaining)
 
-// 2) 邮件代发（mailsend 能力子包）：按实际收件人数计量（每封计 1），正文原样投递
-sent, receipt, err := lic.Apis.MailSend.Send(ctx, mailsend.Input{
+// 2) 邮件代发（email 能力子包）：按实际收件人数计量（每封计 1），正文原样投递
+sent, receipt, err := lic.Apis.Email.Send(ctx, email.Input{
     To:      []string{"user@example.com"},
     Subject: "对账单",
     Content: "<p>正文</p>",
@@ -851,18 +851,18 @@ fmt.Println(page.Count, page.Page, len(page.Records))
 |---|---|---|---|
 | 通用调用 | `lic.Apis.Invoke(ctx, apis.InvokeInput{…})` | `POST /api/v1/apis/invoke` | `ApisRuntimeService.Invoke` |
 | IP 定位 | `lic.Apis.IPLocate.Query(ctx, ip, requestId…)` | `POST /api/v1/apis/ip-locate/query` | `ApisRuntimeService.IPLocate` |
-| 邮件代发 | `lic.Apis.MailSend.Send(ctx, mailsend.Input{…}, requestId…)` | `POST /api/v1/apis/mail-send/send` | `ApisRuntimeService.MailSend` |
+| 邮件代发 | `lic.Apis.Email.Send(ctx, email.Input{…}, requestId…)` | `POST /api/v1/apis/mail-send/send` | `ApisRuntimeService.MailSend` |
 | 流水查询 | `lic.Apis.Usage(ctx, apis.UsageQuery{…})` | `GET /api/v1/apis/usage` | `ApisRuntimeService.Usage` |
 
 要点：
 
-- **幂等键**：`Invoke` / `IPLocate.Query` / `MailSend.Send` 缺省自动生成 `req_` + 32 位无横线 UUID，随 `X-Request-Id`（HTTP）或
+- **幂等键**：`Invoke` / `IPLocate.Query` / `Email.Send` 缺省自动生成 `req_` + 32 位无横线 UUID，随 `X-Request-Id`（HTTP）或
   metadata `x-request-id`（gRPC）下发，不进签名 canonical；`Receipt.RequestId` 回显本次实际用键。
   调用方自填时不得使用系统保留前缀 `renew:` / `sys:`；重试必须复用同一值（SDK 不做跨协议回退）。
   **邮件代发是写操作**：失败重试必须复用同一 `requestId`——同一 `requestId` 保证**已成功调用**不重复
   执行/扣费（幂等回放回执），但**不能**避免「部分失败后重试」的整批重投：已投递的收件人会再收到一封
   （投递不可回滚，属既定取舍，故重试前应先确认失败范围）。
-- **邮件代发计量口径**：`MailSend.Send` 的计量数由服务端算——**声明量** = 剔除空白/空串后的上送条数
+- **邮件代发计量口径**：`Email.Send` 的计量数由服务端算——**声明量** = 剔除空白/空串后的上送条数
   （去重前，上限 20；HTTP 与 gRPC 同一归一规则）、**实际计量** = 去重后实际投递人数（每封计 1）；
   部分失败整体返回 `UPSTREAM_ERROR`（预扣全额释放、不收费），重试会整批重投（见上条重试语义）。
 - **错误归一**：双协议统一为 `*apis.Error{Code, Message, Detail, HTTPStatus}`（`errors.As` 断言），
@@ -1619,5 +1619,5 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |
 | `admin/` | 管理面 AdminClient：`admin.go`（登录态、请求出口）/ `admin-response.go`（错误分层）/ `admin-types.go`（DTO）/ `apis-types.go`（API 商城 DTO）/ `admin-transport*.go`（HTTP/gRPC 传输）+ 15 个资源文件（`qualification.go`/`projects.go`/`instances.go`/`licenses.go`/`signingkeys.go`/`artifacts.go`/`versions.go`/`upgrade-records.go`/`projectmodules.go`/`saasmenus.go`/`saasfeatures.go`/`saasplans.go`/`saastenants.go`/`saasreview.go`/`apis.go`；`apis.go` 53 条商城受控路由 + 53 个 proto-less full method 常量，与平台 `ApisSpecs` 登记表三向对账见 `apis_reconcile_test.go`） |
-| `apis/` | API 商城 typed 方法包（按能力子包分类）：根包 `Client{doer, IPLocate, MailSend}` + `New`（组装子资源）+ 跨能力方法 `Invoke`（通用兜底）/ `Usage`（只读对账）+ 共享件 re-export（`Receipt`/`Error`/业务码常量/`HTTPStatusByCode`/`ErrNotActivated`，别名自 `apis/core`）；`apis/core/` = 共享核心件唯一实现（`Doer`/`Error`+17 业务码/`Receipt`/`ParseEnvelope` 唯一解析点/`ResolveRequestID` 幂等键助手，叶子包只依赖标准库）；`apis/iplocate/` = IP 定位能力（`Resource.Query` + `Result`）；`apis/mailsend/` = 邮件代发能力（`Resource.Send` + `Input`/`Result`）；根包与各能力子包只认 JSON，不 import runtime/proto |
+| `apis/` | API 商城 typed 方法包（按能力子包分类）：根包 `Client{doer, IPLocate, Email}` + `New`（组装子资源）+ 跨能力方法 `Invoke`（通用兜底）/ `Usage`（只读对账）+ 共享件 re-export（`Receipt`/`Error`/业务码常量/`HTTPStatusByCode`/`ErrNotActivated`，别名自 `apis/core`）；`apis/core/` = 共享核心件唯一实现（`Doer`/`Error`+17 业务码/`Receipt`/`ParseEnvelope` 唯一解析点/`ResolveRequestID` 幂等键助手，叶子包只依赖标准库）；`apis/iplocate/` = IP 定位能力（`Resource.Query` + `Result`）；`apis/email/` = 邮件代发能力（`Resource.Send` + `Input`/`Result`）；根包与各能力子包只认 JSON，不 import runtime/proto |
 | `proto/licence/v1/` / `proto/apis/v1/` | gRPC 权威契约与生成代码 + 协议矩阵（禁手改；apis 契约含 `ApisRuntimeService{Invoke,IPLocate,MailSend,Usage}`，SDK 传输绑定自检见 `protocol_matrix_test.go`） |

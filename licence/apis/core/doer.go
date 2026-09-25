@@ -1,6 +1,6 @@
 // Package core - API 商城 typed 方法包的共享核心件。
 //
-// 本包承载 apis 根包与各能力子包（iplocate/mailsend……）共同依赖的共享件：
+// 本包承载 apis 根包与各能力子包（iplocate/email……）共同依赖的共享件：
 // Doer 窄接口、Error + 业务码常量 + ErrNotActivated、Receipt、
 // ParseEnvelope（唯一信封解析点）与 ResolveRequestID（调用级幂等键助手）。
 //

@@ -49,8 +49,8 @@ func TestNewAssemblesDoer(t *testing.T) {
 	if client.IPLocate == nil {
 		t.Fatalf("New 应挂载 IPLocate 能力子资源")
 	}
-	if client.MailSend == nil {
-		t.Fatalf("New 应挂载 MailSend 能力子资源")
+	if client.Email == nil {
+		t.Fatalf("New 应挂载 Email 能力子资源")
 	}
 	if doer.calls != 0 {
 		t.Fatalf("New 不得发起调用，实际 %d 次", doer.calls)

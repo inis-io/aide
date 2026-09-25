@@ -1,4 +1,4 @@
-package mailsend
+package email
 
 import (
 	"context"

@@ -1,10 +1,10 @@
-// Package mailsend - API 商城「邮件代发」能力子包。
+// Package email - API 商城「邮件代发」能力子包（线网能力编码为 mail-send/send，包名取更简短的 email）。
 //
 // 能力子包约定：每个能力一个子包，包内暴露 Resource（挂载在 apis.Client 的
-// 同名字段上）与能力专属类型（本包为 Input/Result）；共享件（Doer/Error/Receipt/
+// Email 字段上）与能力专属类型（本包为 Input/Result）；共享件（Doer/Error/Receipt/
 // 信封解析/幂等键）一律来自 apis/core，不 import apis 根包（根包反向 import
 // 子包做挂载，import 即成环）。新增能力的落点见 licen-hub docs/plan/apis/08 能力接入指南。
-package mailsend
+package email
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func New(doer core.Doer) *Resource {
  * @return core.Receipt - 计量回执（Quantity = 实际收件人数）
  * @return error - 业务拒绝为 *apis.Error（如 ErrorCodeInvalidArgument / ErrorCodeUpstreamError）
  * @example：
- * 	sent, receipt, err := lic.Apis.MailSend.Send(ctx, mailsend.Input{
+ * 	sent, receipt, err := lic.Apis.Email.Send(ctx, email.Input{
  * 		To: []string{"user@example.com"}, Subject: "对账单", Content: "<p>正文</p>", HTML: true,
  * 	})
  * 	if err == nil {

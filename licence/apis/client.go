@@ -5,11 +5,11 @@
 // 经适配器注入（依赖方向 runtime → apis，编译期保证无环）。
 //
 // 能力子包分类约定：API 商城未来会有很多类型的 API，每个能力按文件夹分类为一个
-// 能力子包（当前已落地 iplocate / mailsend），包内暴露 Resource + 能力专属类型；
+// 能力子包（当前已落地 iplocate / email），包内暴露 Resource + 能力专属类型；
 // 根 Client 把各能力 Resource 挂载为同名字段（与 admin 资源组同风格）：
 //
 //	lic.Apis.IPLocate.Query(ctx, "203.0.113.10")   // iplocate.Resource
-//	lic.Apis.MailSend.Send(ctx, mailsend.Input{…}) // mailsend.Resource
+//	lic.Apis.Email.Send(ctx, email.Input{…}) // email.Resource
 //
 // 跨能力语义留在根包：Invoke（通用兜底）/ Usage（只读对账）；共享核心件
 // （Doer/Error/Receipt/业务码/ErrNotActivated/信封解析/幂等键）下沉在 apis/core，
@@ -35,8 +35,8 @@ import (
 	"encoding/json"
 
 	"github.com/inis-io/aide/licence/apis/core"
+	"github.com/inis-io/aide/licence/apis/email"
 	"github.com/inis-io/aide/licence/apis/iplocate"
-	"github.com/inis-io/aide/licence/apis/mailsend"
 )
 
 // ============================= 共享核心件 re-export（既有引用零改动） =============================
@@ -44,7 +44,7 @@ import (
 // 能力子包不 import 本包，共享件统一下沉 apis/core 打破依赖环；
 // 这里以类型别名 / 常量镜像原样 re-export（运行时与下游的 apis.Error、
 // apis.Receipt、apis.Doer、业务码常量、apis.ErrNotActivated、apis.HTTPStatusByCode
-// 引用零改动）。能力专属类型（iplocate.Result / mailsend.Input / mailsend.Result）
+// 引用零改动）。能力专属类型（iplocate.Result / email.Input / email.Result）
 // 不 re-export，引用方必须 import 对应能力子包（分类的意义）。
 
 // Error - 运行面业务错误（= core.Error，双协议同一形态）
@@ -104,14 +104,14 @@ const (
 
 // Client - API 商城 typed 方法挂载点（由 licence.New 构造，生命周期跟随根 Client）。
 // 跨能力方法（Invoke/Usage）挂在 Client 自身，单能力方法挂在同名能力子资源上
-// （lic.Apis.IPLocate.Query / lic.Apis.MailSend.Send）。
+// （lic.Apis.IPLocate.Query / lic.Apis.Email.Send）。
 type Client struct {
 	// doer - 宿主注入的已认证调用能力（跨能力方法 Invoke/Usage 直接使用）
 	doer core.Doer
 	// IPLocate - IP 定位能力（iplocate 子包；lic.Apis.IPLocate.Query(ctx, ip)）
 	IPLocate *iplocate.Resource
-	// MailSend - 邮件代发能力（mailsend 子包；lic.Apis.MailSend.Send(ctx, input)）
-	MailSend *mailsend.Resource
+	// Email - 邮件代发能力（email 子包；lic.Apis.Email.Send(ctx, input)）
+	Email *email.Resource
 }
 
 // New - 创建商城客户端（仅装配宿主调用能力与各能力子资源，不发起网络请求）
@@ -119,7 +119,7 @@ func New(doer Doer) *Client {
 	return &Client{
 		doer:     doer,
 		IPLocate: iplocate.New(doer),
-		MailSend: mailsend.New(doer),
+		Email:    email.New(doer),
 	}
 }
 

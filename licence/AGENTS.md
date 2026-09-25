@@ -12,7 +12,7 @@
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
   RuleSet 校验引擎；`apis/` = API 商城 typed 方法包（按能力子包分类：`Invoke`/`Usage` 跨能力
-  方法在根包，`IPLocate`/`MailSend` 按能力子包挂载，见下）。
+  方法在根包，`IPLocate`/`Email` 按能力子包挂载，见下）。
 - 下游 `import licence "github.com/inis-io/aide/licence"` 零改动：门面别名对调用方透明
   （类型别名同一性、常量/函数签名全部保留）。模块内子包（admin/callback/updater）不经
   门面，直连 `runtime` 与 `protocol`。
@@ -32,7 +32,7 @@ licence/
 ├── updater/          # 在线更新执行器（自更新 swap/unpack/restart/state）
 ├── callback/         # 回调接收端 CallbackHandler + 事件订阅器 EventSubscriber
 ├── config/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
-├── apis/             # API 商城 typed 方法包（按能力子包分类：core 共享件 + iplocate/mailsend 能力子包；
+├── apis/             # API 商城 typed 方法包（按能力子包分类：core 共享件 + iplocate/email 能力子包；
 │                     #   根包 Client 挂载能力子资源并 re-export 共享件，Invoke/Usage 跨能力方法留根包）
 └── proto/            # gRPC 权威契约与生成代码（禁手改）
 ```
@@ -50,15 +50,15 @@ licence/
   （withSign=true）调用能力，未激活闸门返回 `apis.ErrNotActivated`；
   **apis 按能力子包分类**：共享核心件（`core.Doer`/`Error` + 17 业务码常量 + `ErrNotActivated`/
   `Receipt`/`ParseEnvelope` 唯一解析点/`ResolveRequestID` 幂等键助手）下沉 `apis/core`（只依赖
-  标准库，打破根包 ↔ 子包依赖环）；每个能力一个子包（`apis/iplocate`/`apis/mailsend`……，包内
+  标准库，打破根包 ↔ 子包依赖环）；每个能力一个子包（`apis/iplocate`/`apis/email`……，包内
   `Resource` + 能力专属类型，共享件一律用 `apis/core`），根 `Client` 把能力 Resource 挂载为
-  `lic.Apis` 同名字段（`lic.Apis.IPLocate.Query(ctx, ip)` / `lic.Apis.MailSend.Send(ctx, input)`），
+  `lic.Apis` 同名字段（`lic.Apis.IPLocate.Query(ctx, ip)` / `lic.Apis.Email.Send(ctx, input)`），
   共享件由根包以 type alias re-export（既有 `apis.Error`/`apis.Receipt`/`apis.Doer`/业务码/
   `ErrNotActivated`/`HTTPStatusByCode` 引用零改动），能力专属类型不 re-export；
   跨能力语义（`Invoke` 通用兜底 / `Usage` 只读对账）留根包；新增能力的落点与子包施工步骤见
   licen-hub `docs/plan/apis/08` 能力接入指南；
   **API 商城四路径已双协议落地（阶段 4；MailSend 为阶段 5 T23）**：typed 方法
-  `Client.Apis.{Invoke, IPLocate.Query, MailSend.Send, Usage}`
+  `Client.Apis.{Invoke, IPLocate.Query, Email.Send, Usage}`
   （`apis/` 只处理 JSON 与业务码，信封解析是唯一错误归一入口），gRPC 侧绑定在
   `runtime-transport-grpc.go` 的 `RoundTrip` switch（proto 响应 → 与 HTTP 同形信封；
   gRPC 错误经 `errdetails.ErrorInfo.Reason` 合成失败信封，取不到 Reason 时按 status 反查业务码）；
