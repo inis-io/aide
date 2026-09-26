@@ -87,7 +87,7 @@ func apisProductOfferRow() map[string]any {
 			"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
 			"summary": "查 IP 归属地", "description": "详情", "status": "on_sale",
 			"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50,
-			"cachePrice": 0, "cacheQuotaRatio": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000,
+			"cacheDiscount": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000,
 		},
 		"plans": []any{map[string]any{
 			"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "包月-基础版",
@@ -191,7 +191,7 @@ func apisRouteCases() []apisRouteCase {
 			data: map[string]any{"id": 11, "productNo": "APD-2026-000011", "name": "邮件代发", "capability": "mail-send", "status": "draft", "version": 1},
 			invoke: func(t *testing.T, client *AdminClient) {
 				row, err := client.Apis.CreateProduct(context.Background(), ApisProductInput{
-					Capability: "mail-send", Name: "邮件代发", Status: "draft", FreeDailyQuota: 100, CacheQuotaRatio: 100,
+					Capability: "mail-send", Name: "邮件代发", Status: "draft", FreeDailyQuota: 100, CacheDiscount: 100,
 				})
 				if err != nil {
 					t.Fatalf("新建产品失败: %v", err)
@@ -200,7 +200,7 @@ func apisRouteCases() []apisRouteCase {
 					t.Fatalf("新建产品解析不符: %+v", row)
 				}
 			},
-			wantBody: []string{`"capability":"mail-send"`, `"name":"邮件代发"`, `"freeDailyQuota":100`, `"cacheQuotaRatio":100`},
+			wantBody: []string{`"capability":"mail-send"`, `"name":"邮件代发"`, `"freeDailyQuota":100`, `"cacheDiscount":100`},
 		},
 		{
 			name: "UpdateProduct", service: "ApisCatalogAdminService",
@@ -218,7 +218,7 @@ func apisRouteCases() []apisRouteCase {
 				}
 			},
 			// 全量替换：未赋值的数字字段仍须上送（平台按入参重建整行）
-			wantBody: []string{`"id":11`, `"version":2`, `"status":"on_sale"`, `"cacheQuotaRatio":0`},
+			wantBody: []string{`"id":11`, `"version":2`, `"status":"on_sale"`, `"cacheDiscount":0`},
 		},
 		{
 			name: "RemoveProduct", service: "ApisCatalogAdminService",
@@ -1119,7 +1119,7 @@ func TestApisFindMarketProductsPlatformShape(t *testing.T) {
 						"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
 						"summary": "查 IP 归属地", "description": "详情", "status": "on_sale",
 						"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50,
-						"cachePrice": 0, "cacheQuotaRatio": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000
+						"cacheDiscount": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000
 					},
 					"plans": [
 						{

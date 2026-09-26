@@ -35,10 +35,8 @@ type ApisProduct struct {
 	FreeMonthlyQuota int64 `json:"freeMonthlyQuota"`
 	// TrialQuota - 一次性体验额度（0=无体验），用完即止不重置
 	TrialQuota int64 `json:"trialQuota"`
-	// CachePrice - 缓存命中按量单价（万分/次，0=与正价相同）
-	CachePrice int64 `json:"cachePrice"`
-	// CacheQuotaRatio - 订阅内缓存命中计额比例（百分比，0=订阅内命中缓存免费不占额度）
-	CacheQuotaRatio int `json:"cacheQuotaRatio"`
+	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费：订阅内累积折算额度，按量按折扣价结算）
+	CacheDiscount int `json:"cacheDiscount"`
 	// Sort - 商城展示排序
 	Sort int `json:"sort"`
 	// Tags - 商城展示标签
@@ -121,10 +119,8 @@ type ApisOfferProduct struct {
 	FreeMonthlyQuota int64 `json:"freeMonthlyQuota"`
 	// TrialQuota - 一次性体验额度（0=无体验）
 	TrialQuota int64 `json:"trialQuota"`
-	// CachePrice - 缓存命中按量单价（万分/次，0=与正价相同）
-	CachePrice int64 `json:"cachePrice"`
-	// CacheQuotaRatio - 订阅内缓存命中计额比例（百分比）
-	CacheQuotaRatio int `json:"cacheQuotaRatio"`
+	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
+	CacheDiscount int `json:"cacheDiscount"`
 	// Sort - 商城展示排序
 	Sort int `json:"sort"`
 	// Tags - 商城展示标签
@@ -175,7 +171,7 @@ type ApisProductOffer struct {
 
 // ApisProductInput - 产品写路径入参（平台 service/apis.ProductParams）
 // 平台 Update 为**全量替换**（服务层按入参重建整行），因此本结构不使用 omitempty：
-// 未显式赋值的数字字段会按 0 落库（如 cacheQuotaRatio=0 表示订阅内命中缓存免费）。
+// 未显式赋值的数字字段会按 0 落库（如 cacheDiscount=0 表示缓存命中免费）。
 type ApisProductInput struct {
 	// Id - 0=新增，>0=修改（修改必填）
 	Id int `json:"id"`
@@ -197,10 +193,8 @@ type ApisProductInput struct {
 	FreeMonthlyQuota int64 `json:"freeMonthlyQuota"`
 	// TrialQuota - 一次性体验额度（0=无体验）
 	TrialQuota int64 `json:"trialQuota"`
-	// CachePrice - 缓存命中按量单价（万分/次，0=与正价相同）
-	CachePrice int64 `json:"cachePrice"`
-	// CacheQuotaRatio - 订阅内缓存命中计额比例（百分比 0~100）
-	CacheQuotaRatio int `json:"cacheQuotaRatio"`
+	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
+	CacheDiscount int `json:"cacheDiscount"`
 	// Sort - 商城展示排序
 	Sort int `json:"sort"`
 	// Tags - 商城展示标签
@@ -774,7 +768,7 @@ type ApisUsageRecord struct {
 	Quantity int64 `json:"quantity"`
 	// ChargeMode - 计费模式（free_quota/trial/subscription_quota/metered_balance）
 	ChargeMode string `json:"chargeMode"`
-	// CacheHit - 是否命中平台缓存（命中按 cachePrice/cacheQuotaRatio 折扣计费）
+	// CacheHit - 是否命中平台缓存（命中按 cacheDiscount 折扣计费）
 	CacheHit bool `json:"cacheHit"`
 	// Amount - 本次扣费（分；免费、体验与订阅额度内为 0）
 	Amount int64 `json:"amount"`

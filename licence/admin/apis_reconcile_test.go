@@ -77,7 +77,7 @@ var (
 	// apisFullMethodConstantPattern - apis.go 的 full method 常量（"/" + <服务前缀常量> + "/<方法>"）
 	apisFullMethodConstantPattern = regexp.MustCompile(`(?m)^\s*(\w+)\s*=\s*"/"\s*\+\s*(\w+)\s*\+\s*"/(\w+)"\s*$`)
 	// apisServerPackagePattern - 平台登记表的包名常量（proto-less 服务与既有 proto 服务同包）
-	apisServerPackagePattern = regexp.MustCompile(`(?m)^const apisAdminPackage = "([^"]+)"$`)
+	apisServerPackagePattern = regexp.MustCompile(`(?m)^const apisAdminPackage = "([^"]+)"\r?$`)
 	// apisServerSpecPattern - 平台登记表条目（Risk 为空时字段省略；handler 供形态对账定位处理器体）
 	apisServerSpecPattern = regexp.MustCompile(`\{Service: "(\w+)", Method: "(\w+)", HTTPMethod: "(\w+)", HTTPPath: "([^"]+)", Permission: "([^"]+)"(?:, Risk: "(\w+)")?, handler: (\w+)\}`)
 	// apisServerServiceMethodPattern - 平台业务层方法定义（逐函数截取签名；用 (?s) 直接匹配整个签名会被
