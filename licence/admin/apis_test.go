@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -39,8 +40,12 @@ type apisRouteCase struct {
 	wantQuery map[string]string
 	// wantMultiQuery - 期望的重复键 query 参数（数组序列化 key[]=v）
 	wantMultiQuery map[string][]string
-	// wantBody - 期望出现在请求体中的子串（子集断言）
+	// wantBody - 期望出现在请求体中的子串（子集断言；multipart 用例仅 gRPC 侧断言 JSON 原文）
 	wantBody []string
+	// wantForm - 期望的 multipart 表单文本字段（仅 HTTP 侧断言；非 multipart 用例为 nil）
+	wantForm map[string]string
+	// wantFile - 期望的文件域内容（仅 HTTP 侧 multipart 用例；空串表示不断言）
+	wantFile string
 }
 
 // apisPageData - 分页 data（{data,count,page}）
@@ -78,27 +83,49 @@ func apisBillExportData(fileName string) map[string]any {
 	}
 }
 
-// apisProductOfferRow - 商品视图行（平台 service/apis.buildOffers 的组装形状：{product, plans}，
-// 产品与套餐均为白名单投影，无 upstreamConfig/uid/version 等内部字段）。
-// 商品浏览的两条路由（find 的页元素、take 的整体）共用该形状。
-func apisProductOfferRow() map[string]any {
+// apisOfferPlanItemRow - 套餐中心明细行（平台 service/apis.OfferPlanItem 的白名单投影：
+// 产品摘要 + 该产品在套餐内的额度/单价/限额，无 upstreamConfig/uid/version 等内部字段）
+func apisOfferPlanItemRow() map[string]any {
 	return map[string]any{
-		"product": map[string]any{
-			"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
-			"summary": "查 IP 归属地", "description": "详情", "status": "on_sale",
-			"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50,
-			"cacheDiscount": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000,
-		},
-		"plans": []any{map[string]any{
-			"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "包月-基础版",
-			"billingMode": "subscription", "price": 9900, "period": "monthly", "quota": 10000,
-			"quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
-			"concurrencyLimit": 10, "qpsLimit": 20, "status": "on_sale",
-		}},
+		"productId": 3, "productNo": "APD-2026-000003", "capability": "ip-locate",
+		"productName": "IP 定位", "summary": "查 IP 归属地",
+		"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50, "cacheDiscount": 100,
+		"price": 0, "quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+		"concurrencyLimit": 10, "qpsLimit": 20,
 	}
 }
 
-// apisRouteCases - 53 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
+// apisOfferPlanRow - 套餐中心浏览行（平台 service/apis.OfferPlan 的白名单投影：套餐字段 + 产品明细）。
+// 商城浏览的两条路由（find 的页元素、take 的整体）共用该形状。
+func apisOfferPlanRow() map[string]any {
+	return map[string]any{
+		"id": 8, "planNo": "PLN-2026-000008", "name": "包月-基础版",
+		"billingMode": "subscription", "price": 9900, "period": "monthly", "status": "on_sale",
+		"items": []any{apisOfferPlanItemRow()},
+	}
+}
+
+// apisPlanItemRow - 套餐明细行（ApisPlanItem 全量 json tag，PlanView.Items 的元素）
+func apisPlanItemRow() map[string]any {
+	return map[string]any{
+		"id": 81, "planId": 8, "productId": 3, "price": 120,
+		"quota": 0, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+		"concurrencyLimit": 10, "qpsLimit": 20,
+		"createAt": 1780000000000, "updateAt": 1780000000000, "deleteAt": 0,
+	}
+}
+
+// apisPlanViewRow - 平台管理视图套餐行（平台 service/apis.PlanView：套餐主表字段 + items 明细）
+func apisPlanViewRow() map[string]any {
+	return map[string]any{
+		"id": 8, "planNo": "PLN-2026-000008", "name": "按量-标准价",
+		"billingMode": "metered", "price": 0, "period": "", "status": "off_sale", "version": 1,
+		"createAt": 1780000000000, "updateAt": 1780000000000, "deleteAt": 0,
+		"items": []any{apisPlanItemRow()},
+	}
+}
+
+// apisRouteCases - 60 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
 func apisRouteCases() []apisRouteCase {
 	autoRenew := false
 	return []apisRouteCase{
@@ -106,48 +133,48 @@ func apisRouteCases() []apisRouteCase {
 		{
 			name: "FindMarketProducts", service: "ApisMarketAdminService",
 			method: http.MethodGet, path: "/api/apis-market/find",
-			// 页元素是嵌套商品视图（product + plans），与平台 service/apis.buildOffers 组装形状一致
-			data: apisPageData([]any{apisProductOfferRow()}, 1, 2),
+			// 页元素是套餐浏览视图（套餐字段 + 产品明细），与平台 service/apis.BrowsePlans 组装形状一致
+			data: apisPageData([]any{apisOfferPlanRow()}, 1, 2),
 			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindMarketProducts(context.Background(), &ApisProductQuery{
-					Page: 2, Limit: 10, Capability: "ip-locate", Status: "on_sale", Keyword: "IP",
+				page, err := client.Apis.FindMarketProducts(context.Background(), &ApisPlanQuery{
+					Page: 2, Limit: 10, ProductId: 3, BillingMode: "subscription", Status: "on_sale",
 				})
 				if err != nil {
-					t.Fatalf("在售商品分页失败: %v", err)
+					t.Fatalf("在售套餐分页失败: %v", err)
 				}
 				if page.Count != 1 || page.Page != 2 || len(page.Data) != 1 {
 					t.Fatalf("分页结构解析不符: %+v", page)
 				}
 				offer := page.Data[0]
-				if offer.Product.Capability != "ip-locate" || offer.Product.ProductNo != "APD-2026-000003" {
-					t.Fatalf("商品视图 product 解析不符: %+v", offer.Product)
+				if offer.PlanNo != "PLN-2026-000008" || offer.BillingMode != "subscription" || offer.Price != 9900 {
+					t.Fatalf("套餐视图解析不符: %+v", offer)
 				}
-				if len(offer.Plans) != 1 || offer.Plans[0].Price != 9900 {
-					t.Fatalf("商品视图 plans 解析不符: %+v", offer.Plans)
+				if len(offer.Items) != 1 || offer.Items[0].ProductId != 3 || offer.Items[0].Quota != 10000 {
+					t.Fatalf("套餐明细解析不符: %+v", offer.Items)
 				}
 			},
-			wantQuery: map[string]string{"page": "2", "limit": "10", "capability": "ip-locate", "status": "on_sale", "keyword": "IP"},
+			wantQuery: map[string]string{"page": "2", "limit": "10", "productId": "3", "billingMode": "subscription", "status": "on_sale"},
 		},
 		{
 			name: "GetMarketProduct", service: "ApisMarketAdminService",
 			method: http.MethodGet, path: "/api/apis-market/take",
-			data: apisProductOfferRow(),
+			data: apisOfferPlanRow(),
 			invoke: func(t *testing.T, client *AdminClient) {
 				offer, err := client.Apis.GetMarketProduct(context.Background(), 3)
 				if err != nil {
-					t.Fatalf("在售商品详情失败: %v", err)
+					t.Fatalf("在售套餐详情失败: %v", err)
 				}
-				if offer.Product.ProductNo != "APD-2026-000003" || len(offer.Plans) != 1 {
-					t.Fatalf("商品视图解析不符: %+v", offer)
+				if offer.PlanNo != "PLN-2026-000008" || offer.Price != 9900 {
+					t.Fatalf("套餐视图解析不符: %+v", offer)
 				}
-				if offer.Plans[0].Price != 9900 || offer.Plans[0].BillingMode != "subscription" {
-					t.Fatalf("在售套餐解析不符: %+v", offer.Plans[0])
+				if len(offer.Items) != 1 || offer.Items[0].Capability != "ip-locate" || offer.Items[0].QpsLimit != 20 {
+					t.Fatalf("套餐明细解析不符: %+v", offer.Items)
 				}
 			},
 			wantQuery: map[string]string{"id": "3"},
 		},
 
-		// ---------- ApisCatalogAdminService（10） ----------
+		// ---------- ApisCatalogAdminService（17） ----------
 		{
 			name: "FindProducts", service: "ApisCatalogAdminService",
 			method: http.MethodGet, path: "/api/apis-products/find",
@@ -186,23 +213,6 @@ func apisRouteCases() []apisRouteCase {
 			wantQuery: map[string]string{"id": "3"},
 		},
 		{
-			name: "CreateProduct", service: "ApisCatalogAdminService",
-			method: http.MethodPost, path: "/api/apis-products/create",
-			data: map[string]any{"id": 11, "productNo": "APD-2026-000011", "name": "邮件代发", "capability": "mail-send", "status": "draft", "version": 1},
-			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.CreateProduct(context.Background(), ApisProductInput{
-					Capability: "mail-send", Name: "邮件代发", Status: "draft", FreeDailyQuota: 100, CacheDiscount: 100,
-				})
-				if err != nil {
-					t.Fatalf("新建产品失败: %v", err)
-				}
-				if row.Id != 11 || row.Status != "draft" {
-					t.Fatalf("新建产品解析不符: %+v", row)
-				}
-			},
-			wantBody: []string{`"capability":"mail-send"`, `"name":"邮件代发"`, `"freeDailyQuota":100`, `"cacheDiscount":100`},
-		},
-		{
 			name: "UpdateProduct", service: "ApisCatalogAdminService",
 			method: http.MethodPut, path: "/api/apis-products/update",
 			data: map[string]any{"id": 11, "productNo": "APD-2026-000011", "status": "on_sale", "version": 3},
@@ -220,36 +230,166 @@ func apisRouteCases() []apisRouteCase {
 			// 全量替换：未赋值的数字字段仍须上送（平台按入参重建整行）
 			wantBody: []string{`"id":11`, `"version":2`, `"status":"on_sale"`, `"cacheDiscount":0`},
 		},
+
+		// ---------- 能力上游管理（apis-products/upstream*，9） ----------
 		{
-			name: "RemoveProduct", service: "ApisCatalogAdminService",
-			method: http.MethodDelete, path: "/api/apis-products/remove",
-			data: map[string]any{"id": 11},
+			name: "GetCapabilityUpstream", service: "ApisCatalogAdminService",
+			method: http.MethodGet, path: "/api/apis-products/upstream",
+			// 上游状态视图：密钥只出掩码；data/cache 按能力有无对应概念可空
+			data: map[string]any{
+				"capability": "ip-locate",
+				"key":        map[string]any{"name": "IP_LOCATE_KEY", "configured": true, "hint": "abcd****"},
+				"data":       map[string]any{"source": "external", "path": "/data/ip2region_v4.xdb", "size": 4096, "modTime": 1780000000000, "available": true},
+				"cache":      map[string]any{"cacheTtl": "12h", "cacheHours": 12, "dbRefreshDays": 7},
+				"extra":      map[string]any{"endpoint": "https://upstream.example.com"},
+			},
 			invoke: func(t *testing.T, client *AdminClient) {
-				result, err := client.Apis.RemoveProduct(context.Background(), 11)
+				status, err := client.Apis.GetCapabilityUpstream(context.Background(), "ip-locate")
 				if err != nil {
-					t.Fatalf("删除产品失败: %v", err)
+					t.Fatalf("能力上游状态失败: %v", err)
 				}
-				if result.Id != 11 {
-					t.Fatalf("删除结果解析不符: %+v", result)
+				if status.Capability != "ip-locate" || !status.Key.Configured || status.Key.Hint != "abcd****" {
+					t.Fatalf("上游密钥状态解析不符: %+v", status.Key)
+				}
+				if status.Data == nil || status.Data.Source != "external" || status.Data.Size != 4096 {
+					t.Fatalf("上游数据状态解析不符: %+v", status.Data)
+				}
+				if status.Cache == nil || status.Cache.CacheHours != 12 || status.Cache.DbRefreshDays != 7 {
+					t.Fatalf("上游缓存状态解析不符: %+v", status.Cache)
 				}
 			},
-			wantBody: []string{`"id":11`},
+			wantQuery: map[string]string{"capability": "ip-locate"},
+		},
+		{
+			name: "SetUpstreamKey", service: "ApisCatalogAdminService",
+			method: http.MethodPut, path: "/api/apis-products/upstream-key",
+			data: nil, // 平台 apisOK(nil,...) 空数据
+			invoke: func(t *testing.T, client *AdminClient) {
+				if err := client.Apis.SetUpstreamKey(context.Background(), ApisUpstreamKeyInput{Capability: "ip-locate", Value: "ak-123456"}); err != nil {
+					t.Fatalf("设置上游密钥失败: %v", err)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`, `"value":"ak-123456"`},
+		},
+		{
+			name: "VerifyUpstream", service: "ApisCatalogAdminService",
+			method: http.MethodPost, path: "/api/apis-products/upstream-verify",
+			data: nil, // 平台 apisOK(nil,...) 空数据
+			invoke: func(t *testing.T, client *AdminClient) {
+				if err := client.Apis.VerifyUpstream(context.Background(), ApisUpstreamVerifyInput{
+					Capability: "ip-locate", Scene: "key", Value: "ak-123456",
+				}); err != nil {
+					t.Fatalf("验证上游配置失败: %v", err)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`, `"scene":"key"`, `"value":"ak-123456"`},
+		},
+		{
+			name: "ClearUpstreamKey", service: "ApisCatalogAdminService",
+			method: http.MethodDelete, path: "/api/apis-products/upstream-key",
+			data: nil, // 平台 apisOK(nil,...) 空数据
+			invoke: func(t *testing.T, client *AdminClient) {
+				if err := client.Apis.ClearUpstreamKey(context.Background(), "ip-locate"); err != nil {
+					t.Fatalf("清除上游密钥失败: %v", err)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`},
+		},
+		{
+			name: "UploadUpstreamData", service: "ApisCatalogAdminService",
+			method: http.MethodPost, path: "/api/apis-products/upstream-data",
+			data: map[string]any{"source": "external", "path": "/data/ip2region_v4.xdb", "size": 9, "modTime": 1780000000000, "available": true},
+			invoke: func(t *testing.T, client *AdminClient) {
+				status, err := client.Apis.UploadUpstreamData(context.Background(), "ip-locate", "ip2region_v4.xdb", strings.NewReader("xdb-bytes"))
+				if err != nil {
+					t.Fatalf("上传上游数据失败: %v", err)
+				}
+				if status.Source != "external" || status.Size != 9 || !status.Available {
+					t.Fatalf("上游数据状态解析不符: %+v", status)
+				}
+			},
+			// gRPC 侧走 Upload() early branch：uploadApis 的 JSON base64 请求体；
+			// HTTP 侧为 multipart 表单，经 wantForm/wantFile 断言（wantBody 子串不落 multipart 原文）
+			wantBody: []string{`"capability":"ip-locate"`, `"filename":"ip2region_v4.xdb"`, `"content":"eGRiLWJ5dGVz"`},
+			wantForm: map[string]string{"capability": "ip-locate"},
+			wantFile: "xdb-bytes",
+		},
+		{
+			name: "ResetUpstreamData", service: "ApisCatalogAdminService",
+			method: http.MethodPut, path: "/api/apis-products/upstream-data-reset",
+			data: map[string]any{"source": "embedded", "path": "", "size": 0, "modTime": 0, "available": true},
+			invoke: func(t *testing.T, client *AdminClient) {
+				status, err := client.Apis.ResetUpstreamData(context.Background(), "ip-locate")
+				if err != nil {
+					t.Fatalf("恢复内嵌默认数据失败: %v", err)
+				}
+				if status.Source != "embedded" || !status.Available {
+					t.Fatalf("恢复结果解析不符: %+v", status)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`},
+		},
+		{
+			name: "SetUpstreamCache", service: "ApisCatalogAdminService",
+			method: http.MethodPut, path: "/api/apis-products/upstream-cache",
+			data: map[string]any{"cacheTtl": "12h", "cacheHours": 12, "dbRefreshDays": 7},
+			invoke: func(t *testing.T, client *AdminClient) {
+				cache, err := client.Apis.SetUpstreamCache(context.Background(), ApisUpstreamCacheInput{
+					Capability: "ip-locate", CacheHours: 12, DbRefreshDays: 7,
+				})
+				if err != nil {
+					t.Fatalf("保存缓存策略失败: %v", err)
+				}
+				if cache.CacheHours != 12 || cache.DbRefreshDays != 7 {
+					t.Fatalf("缓存策略解析不符: %+v", cache)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`, `"cacheHours":12`, `"dbRefreshDays":7`},
+		},
+		{
+			name: "ClearUpstreamCache", service: "ApisCatalogAdminService",
+			method: http.MethodDelete, path: "/api/apis-products/upstream-cache",
+			data: nil, // 平台 apisOK(nil,...) 空数据
+			invoke: func(t *testing.T, client *AdminClient) {
+				if err := client.Apis.ClearUpstreamCache(context.Background(), "ip-locate"); err != nil {
+					t.Fatalf("清空上游缓存失败: %v", err)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`},
+		},
+		{
+			name: "SetUpstreamOptions", service: "ApisCatalogAdminService",
+			method: http.MethodPut, path: "/api/apis-products/upstream-options",
+			data: map[string]any{"endpoint": "https://upstream.example.com", "timeoutMs": 3000},
+			invoke: func(t *testing.T, client *AdminClient) {
+				options, err := client.Apis.SetUpstreamOptions(context.Background(), ApisUpstreamOptionsInput{
+					Capability: "ip-locate",
+					Options:    map[string]any{"endpoint": "https://upstream.example.com", "timeoutMs": 3000},
+				})
+				if err != nil {
+					t.Fatalf("保存上游高级参数失败: %v", err)
+				}
+				if len(options) != 2 || options["endpoint"] != "https://upstream.example.com" {
+					t.Fatalf("高级参数快照解析不符: %+v", options)
+				}
+			},
+			wantBody: []string{`"capability":"ip-locate"`, `"options":{"endpoint":"https://upstream.example.com","timeoutMs":3000}`},
 		},
 		{
 			name: "FindPlans", service: "ApisCatalogAdminService",
 			method: http.MethodGet, path: "/api/apis-plans/find",
-			data: apisPageData([]any{map[string]any{
-				"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "按量-标准价",
-				"billingMode": "metered", "price": 120, "period": "", "concurrencyLimit": 10, "qpsLimit": 20,
-				"status": "off_sale", "version": 1,
-			}}, 1, 1),
+			// 页元素是平台管理视图 PlanView（套餐主表 + items 明细）
+			data: apisPageData([]any{apisPlanViewRow()}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
 				page, err := client.Apis.FindPlans(context.Background(), &ApisPlanQuery{Page: 1, ProductId: 3, BillingMode: "metered"})
 				if err != nil {
 					t.Fatalf("套餐分页失败: %v", err)
 				}
-				if len(page.Data) != 1 || page.Data[0].BillingMode != "metered" || page.Data[0].Price != 120 {
+				if len(page.Data) != 1 || page.Data[0].BillingMode != "metered" || page.Data[0].Status != "off_sale" {
 					t.Fatalf("套餐解析不符: %+v", page.Data)
+				}
+				if len(page.Data[0].Items) != 1 || page.Data[0].Items[0].ProductId != 3 || page.Data[0].Items[0].Price != 120 {
+					t.Fatalf("套餐明细解析不符: %+v", page.Data[0].Items)
 				}
 			},
 			wantQuery: map[string]string{"page": "1", "productId": "3", "billingMode": "metered"},
@@ -257,13 +397,13 @@ func apisRouteCases() []apisRouteCase {
 		{
 			name: "GetPlan", service: "ApisCatalogAdminService",
 			method: http.MethodGet, path: "/api/apis-plans/take",
-			data: map[string]any{"id": 8, "planNo": "PLN-2026-000008", "status": "off_sale", "quotaMonthly": 30000},
+			data: apisPlanViewRow(),
 			invoke: func(t *testing.T, client *AdminClient) {
 				row, err := client.Apis.GetPlan(context.Background(), 8)
 				if err != nil {
 					t.Fatalf("套餐详情失败: %v", err)
 				}
-				if row.PlanNo != "PLN-2026-000008" || row.QuotaMonthly != 30000 {
+				if row.PlanNo != "PLN-2026-000008" || len(row.Items) != 1 || row.Items[0].Price != 120 {
 					t.Fatalf("套餐详情解析不符: %+v", row)
 				}
 			},
@@ -272,10 +412,11 @@ func apisRouteCases() []apisRouteCase {
 		{
 			name: "CreatePlan", service: "ApisCatalogAdminService",
 			method: http.MethodPost, path: "/api/apis-plans/create",
-			data: map[string]any{"id": 12, "planNo": "PLN-2026-000012", "productId": 3, "status": "off_sale"},
+			data: map[string]any{"id": 12, "planNo": "PLN-2026-000012", "name": "包年-专业版", "status": "off_sale"},
 			invoke: func(t *testing.T, client *AdminClient) {
 				row, err := client.Apis.CreatePlan(context.Background(), ApisPlanInput{
-					ProductId: 3, Name: "包年-专业版", BillingMode: "subscription", Price: 99000, Period: "yearly", Quota: 200000,
+					Name: "包年-专业版", BillingMode: "subscription", Price: 99000, Period: "yearly",
+					Items: []ApisPlanItemInput{{ProductId: 3, Quota: 200000}},
 				})
 				if err != nil {
 					t.Fatalf("新建套餐失败: %v", err)
@@ -284,7 +425,11 @@ func apisRouteCases() []apisRouteCase {
 					t.Fatalf("新建套餐解析不符: %+v", row)
 				}
 			},
-			wantBody: []string{`"productId":3`, `"billingMode":"subscription"`, `"period":"yearly"`, `"quota":200000`},
+			// 明细随套餐整体提交：未赋值的数字字段仍须上送（平台按入参全量替换）
+			wantBody: []string{
+				`"name":"包年-专业版"`, `"billingMode":"subscription"`, `"period":"yearly"`,
+				`"items":[{"productId":3,"price":0,"quota":200000,"quotaDaily":0,"quotaWeekly":0,"quotaMonthly":0,"concurrencyLimit":0,"qpsLimit":0}]`,
+			},
 		},
 		{
 			name: "UpdatePlan", service: "ApisCatalogAdminService",
@@ -292,7 +437,8 @@ func apisRouteCases() []apisRouteCase {
 			data: map[string]any{"id": 12, "planNo": "PLN-2026-000012", "status": "on_sale", "version": 2},
 			invoke: func(t *testing.T, client *AdminClient) {
 				row, err := client.Apis.UpdatePlan(context.Background(), ApisPlanInput{
-					Id: 12, ProductId: 3, Name: "包年-专业版", BillingMode: "subscription", Status: "on_sale", Version: 1,
+					Id: 12, Name: "包年-专业版", BillingMode: "subscription", Status: "on_sale", Version: 1,
+					Items: []ApisPlanItemInput{{ProductId: 3, Quota: 200000}},
 				})
 				if err != nil {
 					t.Fatalf("修改套餐失败: %v", err)
@@ -301,7 +447,10 @@ func apisRouteCases() []apisRouteCase {
 					t.Fatalf("修改套餐解析不符: %+v", row)
 				}
 			},
-			wantBody: []string{`"id":12`, `"version":1`, `"status":"on_sale"`},
+			wantBody: []string{
+				`"id":12`, `"version":1`, `"status":"on_sale"`,
+				`"items":[{"productId":3,"price":0,"quota":200000,"quotaDaily":0,"quotaWeekly":0,"quotaMonthly":0,"concurrencyLimit":0,"qpsLimit":0}]`,
+			},
 		},
 		{
 			name: "RemovePlan", service: "ApisCatalogAdminService",
@@ -509,9 +658,9 @@ func apisRouteCases() []apisRouteCase {
 			name: "FindSubscriptions", service: "ApisSubscriptionAdminService",
 			method: http.MethodGet, path: "/api/apis-subscriptions/find",
 			data: apisPageData([]any{map[string]any{
-				"id": 3, "subNo": "SUB-2026-000003", "userId": 7, "planId": 8, "productId": 3,
+				"id": 3, "subNo": "SUB-2026-000003", "userId": 7, "planId": 8,
 				"orderNo": "APO-2026-000009", "status": "active", "currentPeriodStart": 1780000000000,
-				"currentPeriodEnd": 1782600000000, "autoRenew": true, "periodUsed": 12, "version": 1,
+				"currentPeriodEnd": 1782600000000, "autoRenew": true, "version": 1,
 			}}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
 				page, err := client.Apis.FindSubscriptions(context.Background(), &ApisSubscriptionQuery{Page: 1, Status: "active", ProductId: 3})
@@ -527,13 +676,13 @@ func apisRouteCases() []apisRouteCase {
 		{
 			name: "GetSubscription", service: "ApisSubscriptionAdminService",
 			method: http.MethodGet, path: "/api/apis-subscriptions/take",
-			data: map[string]any{"id": 3, "subNo": "SUB-2026-000003", "status": "active", "periodUsed": 12},
+			data: map[string]any{"id": 3, "subNo": "SUB-2026-000003", "status": "active", "planId": 8},
 			invoke: func(t *testing.T, client *AdminClient) {
 				row, err := client.Apis.GetSubscription(context.Background(), 3)
 				if err != nil {
 					t.Fatalf("订阅详情失败: %v", err)
 				}
-				if row.SubNo != "SUB-2026-000003" || row.PeriodUsed != 12 {
+				if row.SubNo != "SUB-2026-000003" || row.PlanId != 8 {
 					t.Fatalf("订阅详情解析不符: %+v", row)
 				}
 			},
@@ -1060,16 +1209,17 @@ func apisRouteCases() []apisRouteCase {
 	}
 }
 
-// TestApisRoutesHTTP - 53 条商城路由逐条经 HTTP 假平台校验：
+// TestApisRoutesHTTP - 60 条商城路由逐条经 HTTP 假平台校验：
 // ① 请求打到登记表登记的「动词 + 路径」（未登记即 404，用例直接失败）；
 // ② query 按平台约定序列化（标量直写、数组 key[]=v 重复）；
 // ③ 写路径请求体字段与平台入参结构逐字对齐（含显式 false / 负数等不可省略的取值）；
-// ④ typed 返回值解析（分页、白名单视图、base64 导出解码等）。
+// ④ typed 返回值解析（分页、白名单视图、base64 导出解码等）；
+// ⑤ multipart 上传（UploadUpstreamData）按表单字段与文件域断言。
 func TestApisRoutesHTTP(t *testing.T) {
 
 	cases := apisRouteCases()
-	if len(cases) != 53 {
-		t.Fatalf("商城路由用例应为 53 条，实际 %d 条", len(cases))
+	if len(cases) != 60 {
+		t.Fatalf("商城路由用例应为 60 条，实际 %d 条", len(cases))
 	}
 
 	for _, one := range cases {
@@ -1093,6 +1243,31 @@ func TestApisRoutesHTTP(t *testing.T) {
 					t.Errorf("query %s = %v，期望 %v（%s）", key, got, want, hub.lastQuery.Encode())
 				}
 			}
+			if len(one.wantForm) > 0 || one.wantFile != "" {
+				// multipart 用例：JSON 子串不落原文，解析表单后断言（与 artifacts 上传用例同口径）
+				if err := hub.lastRequest.ParseMultipartForm(32 << 20); err != nil {
+					t.Fatalf("multipart 解析失败: %v", err)
+				}
+				for key, want := range one.wantForm {
+					if got := hub.lastRequest.PostFormValue(key); got != want {
+						t.Errorf("表单字段 %s = %q，期望 %q", key, got, want)
+					}
+				}
+				if one.wantFile != "" {
+					file, _, err := hub.lastRequest.FormFile("file")
+					if err != nil {
+						t.Fatalf("文件域缺失: %v", err)
+					}
+					content, err := io.ReadAll(file)
+					if err != nil {
+						t.Fatalf("文件域读取失败: %v", err)
+					}
+					if string(content) != one.wantFile {
+						t.Errorf("文件域内容 = %q，期望 %q", string(content), one.wantFile)
+					}
+				}
+				return
+			}
 			for _, needle := range one.wantBody {
 				if !strings.Contains(string(hub.lastBody), needle) {
 					t.Errorf("请求体缺少 %q：%s", needle, string(hub.lastBody))
@@ -1102,12 +1277,12 @@ func TestApisRoutesHTTP(t *testing.T) {
 	}
 }
 
-// TestApisFindMarketProductsPlatformShape - 商品分页的页元素是平台真实形状（嵌套商品视图 `{product, plans}`）：
-// 用平台 `buildOffers` 投影结果的 JSON 原文（含 plans 为空数组的行）走完整信封链路反序列化，
-// 断言 product 与 plans 真的被解析。
+// TestApisFindMarketProductsPlatformShape - 商城分页的页元素是平台真实形状（套餐视图 OfferPlan，含产品明细 items）：
+// 用平台 `BrowsePlans` 投影结果的 JSON 原文（含 items 为空数组的行）走完整信封链路反序列化，
+// 断言套餐字段与 items 真的被解析。
 //
-// 回归 B1：页元素若被声明成扁平类型（曾用 `Page[ApisOfferProduct]`），反序列化**不报错**，
-// 但整行是零值空壳（静默数据丢失）；本用例的 plans 空数组分支同时钉住平台「plans 恒为数组、不为 null」的契约。
+// 回归 B1：页元素若被声明成错误类型（曾用嵌套商品视图 `{product, plans}`），反序列化**不报错**，
+// 但整行是零值空壳（静默数据丢失）；本用例的 items 空数组分支同时钉住平台「items 恒为数组、不为 null」的契约。
 func TestApisFindMarketProductsPlatformShape(t *testing.T) {
 
 	hub := newFakeHub(t)
@@ -1115,24 +1290,22 @@ func TestApisFindMarketProductsPlatformShape(t *testing.T) {
 		hub.writeEnvelope(writer, 200, "数据请求成功！", json.RawMessage(`{
 			"data": [
 				{
-					"product": {
-						"id": 3, "productNo": "APD-2026-000003", "capability": "ip-locate", "name": "IP 定位",
-						"summary": "查 IP 归属地", "description": "详情", "status": "on_sale",
-						"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50,
-						"cacheDiscount": 100, "sort": 1, "tags": "网络", "updateAt": 1780000000000
-					},
-					"plans": [
+					"id": 8, "planNo": "PLN-2026-000008", "name": "包月-基础版",
+					"billingMode": "subscription", "price": 9900, "period": "monthly", "status": "on_sale",
+					"items": [
 						{
-							"id": 8, "planNo": "PLN-2026-000008", "productId": 3, "name": "包月-基础版",
-							"billingMode": "subscription", "price": 9900, "period": "monthly", "quota": 10000,
-							"quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
-							"concurrencyLimit": 10, "qpsLimit": 20, "status": "on_sale"
+							"productId": 3, "productNo": "APD-2026-000003", "capability": "ip-locate",
+							"productName": "IP 定位", "summary": "查 IP 归属地",
+							"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50, "cacheDiscount": 100,
+							"price": 0, "quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+							"concurrencyLimit": 10, "qpsLimit": 20
 						}
 					]
 				},
 				{
-					"product": {"id": 4, "productNo": "APD-2026-000004", "capability": "mail-send", "status": "on_sale"},
-					"plans": []
+					"id": 9, "planNo": "PLN-2026-000009", "name": "按量-标准价",
+					"billingMode": "metered", "price": 0, "period": "", "status": "on_sale",
+					"items": []
 				}
 			],
 			"count": 2,
@@ -1141,25 +1314,25 @@ func TestApisFindMarketProductsPlatformShape(t *testing.T) {
 	}
 	client := hub.newClient(t)
 
-	page, err := client.Apis.FindMarketProducts(context.Background(), &ApisProductQuery{Page: 1})
+	page, err := client.Apis.FindMarketProducts(context.Background(), &ApisPlanQuery{Page: 1})
 	if err != nil {
-		t.Fatalf("在售商品分页失败: %v", err)
+		t.Fatalf("在售套餐分页失败: %v", err)
 	}
 	if page.Count != 2 || page.Page != 1 || len(page.Data) != 2 {
 		t.Fatalf("分页结构解析不符: %+v", page)
 	}
 
 	first := page.Data[0]
-	if first.Product.Id != 3 || first.Product.Capability != "ip-locate" || first.Product.FreeMonthlyQuota != 5000 {
-		t.Fatalf("product 未按平台形状解析（疑似退回扁平类型）: %+v", first.Product)
+	if first.Id != 8 || first.PlanNo != "PLN-2026-000008" || first.BillingMode != "subscription" || first.Price != 9900 {
+		t.Fatalf("套餐未按平台形状解析（疑似退回旧商品视图）: %+v", first)
 	}
-	if len(first.Plans) != 1 || first.Plans[0].PlanNo != "PLN-2026-000008" || first.Plans[0].Price != 9900 {
-		t.Fatalf("plans 未按平台形状解析: %+v", first.Plans)
+	if len(first.Items) != 1 || first.Items[0].ProductId != 3 || first.Items[0].Capability != "ip-locate" || first.Items[0].Quota != 10000 {
+		t.Fatalf("items 未按平台形状解析: %+v", first.Items)
 	}
 
-	// 平台对无在售套餐的产品输出空数组（buildOffers 用 []OfferPlan{} 兜底），不是 null
-	if page.Data[1].Plans == nil || len(page.Data[1].Plans) != 0 {
-		t.Fatalf("空套餐应为非 nil 空切片: %#v", page.Data[1].Plans)
+	// 平台对无明细的套餐输出空数组（BrowsePlans 用 []OfferPlanItem{} 兜底），不是 null
+	if page.Data[1].Items == nil || len(page.Data[1].Items) != 0 {
+		t.Fatalf("空明细应为非 nil 空切片: %#v", page.Data[1].Items)
 	}
 }
 

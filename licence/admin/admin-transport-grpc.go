@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -419,12 +420,24 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.invokeApis(callCtx, apisFindProductsFullMethod, request)
 	case http.MethodGet + " /api/apis-products/take":
 		response, err = this.invokeApis(callCtx, apisGetProductFullMethod, request)
-	case http.MethodPost + " /api/apis-products/create":
-		response, err = this.invokeApis(callCtx, apisCreateProductFullMethod, request)
 	case http.MethodPut + " /api/apis-products/update":
 		response, err = this.invokeApis(callCtx, apisUpdateProductFullMethod, request)
-	case http.MethodDelete + " /api/apis-products/remove":
-		response, err = this.invokeApis(callCtx, apisRemoveProductFullMethod, request)
+	case http.MethodGet + " /api/apis-products/upstream":
+		response, err = this.invokeApis(callCtx, apisGetCapabilityUpstreamFullMethod, request)
+	case http.MethodPut + " /api/apis-products/upstream-key":
+		response, err = this.invokeApis(callCtx, apisSetUpstreamKeyFullMethod, request)
+	case http.MethodPost + " /api/apis-products/upstream-verify":
+		response, err = this.invokeApis(callCtx, apisVerifyUpstreamFullMethod, request)
+	case http.MethodDelete + " /api/apis-products/upstream-key":
+		response, err = this.invokeApis(callCtx, apisClearUpstreamKeyFullMethod, request)
+	case http.MethodPut + " /api/apis-products/upstream-data-reset":
+		response, err = this.invokeApis(callCtx, apisResetUpstreamDataFullMethod, request)
+	case http.MethodPut + " /api/apis-products/upstream-cache":
+		response, err = this.invokeApis(callCtx, apisSetUpstreamCacheFullMethod, request)
+	case http.MethodDelete + " /api/apis-products/upstream-cache":
+		response, err = this.invokeApis(callCtx, apisClearUpstreamCacheFullMethod, request)
+	case http.MethodPut + " /api/apis-products/upstream-options":
+		response, err = this.invokeApis(callCtx, apisSetUpstreamOptionsFullMethod, request)
 	case http.MethodGet + " /api/apis-plans/find":
 		response, err = this.invokeApis(callCtx, apisFindPlansFullMethod, request)
 	case http.MethodGet + " /api/apis-plans/take":
@@ -550,12 +563,23 @@ type adminFileStream interface {
 }
 
 func (this *grpcAdminTransport) Upload(ctx context.Context, upload adminUpload) (json.RawMessage, error) {
+	callCtx, cancel := this.callContext(ctx, upload.Token)
+	defer cancel()
+
+	// API 商城的 proto-less 上传（平台 gRPC 无 multipart，约定 JSON 承载 base64 内容，
+	// 与 HTTP 的 multipart 表单互为协议适配）
+	if upload.Path == "/api/apis-products/upstream-data" {
+		response, err := this.uploadApis(callCtx, apisUploadUpstreamDataFullMethod, upload)
+		if err != nil {
+			return nil, adminGRPCError(err)
+		}
+		return adminData(response)
+	}
+
 	fields, err := json.Marshal(upload.Fields)
 	if err != nil {
 		return nil, err
 	}
-	callCtx, cancel := this.callContext(ctx, upload.Token)
-	defer cancel()
 
 	var stream adminFileStream
 	switch upload.Path {
@@ -597,6 +621,25 @@ func (this *grpcAdminTransport) Upload(ctx context.Context, upload adminUpload) 
 		return nil, adminGRPCError(err)
 	}
 	return adminData(response)
+}
+
+// uploadApis - API 商城 proto-less 上传的 gRPC 形态：读全量内容 → base64 → JSON 请求体
+// （64MB 上限由平台入口把关；能力编码取表单文本字段，文件名只留痕不参与落盘路径）
+func (this *grpcAdminTransport) uploadApis(ctx context.Context, fullMethod string, upload adminUpload) (*licencev1.AdminResponse, error) {
+
+	content, err := io.ReadAll(upload.Content)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"capability": upload.Fields["capability"],
+		"filename":   filepath.Base(upload.FileName),
+		"content":    base64.StdEncoding.EncodeToString(content),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return this.invokeApis(ctx, fullMethod, &licencev1.AdminRequest{Json: payload})
 }
 
 func (this *grpcAdminTransport) Close() error {

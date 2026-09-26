@@ -294,31 +294,35 @@ func TestProtocolMatrixHTTPMatchesDesignAndServer(t *testing.T) {
 
 // loadRuntimeRouteSource - 汇总 licen-hub 运行面 HTTP 适配层源码：landed/pending 门禁以
 // 「声明 routeTable（"v1/apis"）的路由表 + 其登记文件」整体为证据源，而不是绑定单个文件——
-// T18 把 /api/v1/apis/usage 落到新文件或并入现有文件都能被覆盖；只扫声明该表的文件，
-// 避免误采其它域的同名 Key（如管理面 apis-usage 表的 rows / find）。
+// T18 把 /api/v1/apis/usage 落到新文件或并入现有文件都能被覆盖；
+// 平台 backend 已按业务域子包分类（apis/{core,runtime,catalog,trade,stats}），故递归扫描整棵
+// control 目录树；只采声明该表的文件，避免误采其它域的同名 Key（如管理面 apis-usage 表的 rows / find）。
 func loadRuntimeRouteSource(t *testing.T) string {
 	t.Helper()
-	entries, err := os.ReadDir(serverRouteDir)
-	if err != nil {
-		t.Fatalf("licen-hub 已检出但运行面路由目录不可读（%s）：%v", serverRouteDir, err)
-	}
 	var builder strings.Builder
 	files := 0
-	for _, entry := range entries {
+	err := filepath.WalkDir(serverRouteDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
+			return nil
 		}
-		raw, err := os.ReadFile(filepath.Join(serverRouteDir, name))
+		raw, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("读取路由文件 %s 失败：%v", name, err)
+			return err
 		}
 		if !strings.Contains(string(raw), routeTable) {
-			continue
+			return nil
 		}
 		builder.Write(raw)
 		builder.WriteString("\n")
 		files++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("licen-hub 已检出但运行面路由目录不可读（%s）：%v", serverRouteDir, err)
 	}
 	if files == 0 {
 		t.Fatalf("运行面路由目录 %s 下没有声明 %s 表的文件（运行面 HTTP 适配层缺失或已迁移）", serverRouteDir, routeTable)

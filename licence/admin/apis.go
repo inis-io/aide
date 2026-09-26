@@ -4,23 +4,29 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/url"
 
 	"github.com/spf13/cast"
 )
 
-// ApisResource - API 商城资源（`/api/apis-market/*`、`/api/apis-products/*`、`/api/apis-plans/*`、
-// `/api/apis-orders/*`、`/api/apis-subscriptions/*`、`/api/apis-recharges/*`、`/api/apis-balances/*`、
-// `/api/apis-bills/*`、`/api/apis-usage/*`、`/api/apis-monitor/*`）。
+// ApisResource - API 商城资源（`/api/apis-market/*`、`/api/apis-products/*`（含能力上游管理
+// upstream*）、`/api/apis-plans/*`、`/api/apis-orders/*`、`/api/apis-subscriptions/*`、
+// `/api/apis-recharges/*`、`/api/apis-balances/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、
+// `/api/apis-monitor/*`）。
 //
-// 覆盖范围：licen-hub 商城管理面 **53 条受控路由**（7 个 gRPC 服务），方法名与平台登记表
+// 覆盖范围：licen-hub 商城管理面 **60 条受控路由**（7 个 gRPC 服务），方法名与平台登记表
 // `backend/grpc/admin/v1/apis.go` 的 `ApisSpecs().Method` 逐字一致，便于协议矩阵式对账；
 // 三向一致性（SDK 方法 ↔ 传输层 case ↔ 平台登记表）由 `apis_reconcile_test.go` 强制守护。
 //
 // 纪律要点：
 //   - 归属与数据范围一律由平台服务层裁决（member 强制本人、platform 按 apis 域范围），SDK 只做 typed 传参；
 //   - 幂等键（requestId）由调用方生成并显式传入，SDK 不代为生成，失败后不得跨协议自动重试；
-//   - 金额单位为「分」，metered 套餐单价为「万分/次」；
+//   - 金额单位为「分」，metered 套餐的按量单价为「万分/次」且落在套餐明细行（ApisPlanItem.Price）；
+//   - 套餐多产品化：额度/单价/限额逐产品配置（ApisPlanInput.Items 全量替换），
+//     商城浏览以套餐为中心（ApisOfferPlan.Items 携带全部产品明细）；
+//   - 能力上游管理（upstream* 9 条）：密钥只进不出（响应只给掩码），数据文件上传 HTTP 走 multipart、
+//     gRPC 走 JSON base64（由传输层各自适配，方法签名一致）；
 //   - `Export*` 两条导出方法返回 (fileName, xlsx 原始字节, error)，base64 在方法内解码（与平台 HTTP/gRPC
 //     两协议同形的 `{fileName, content}` 信封一一对应，消费方无需关心编码）。
 type ApisResource struct {
@@ -64,14 +70,23 @@ const (
 	// ---------- ApisCatalogAdminService ----------
 	apisFindProductsFullMethod  = "/" + apisCatalogService + "/FindProducts"
 	apisGetProductFullMethod    = "/" + apisCatalogService + "/GetProduct"
-	apisCreateProductFullMethod = "/" + apisCatalogService + "/CreateProduct"
 	apisUpdateProductFullMethod = "/" + apisCatalogService + "/UpdateProduct"
-	apisRemoveProductFullMethod = "/" + apisCatalogService + "/RemoveProduct"
-	apisFindPlansFullMethod     = "/" + apisCatalogService + "/FindPlans"
-	apisGetPlanFullMethod       = "/" + apisCatalogService + "/GetPlan"
-	apisCreatePlanFullMethod    = "/" + apisCatalogService + "/CreatePlan"
-	apisUpdatePlanFullMethod    = "/" + apisCatalogService + "/UpdatePlan"
-	apisRemovePlanFullMethod    = "/" + apisCatalogService + "/RemovePlan"
+
+	apisGetCapabilityUpstreamFullMethod = "/" + apisCatalogService + "/GetCapabilityUpstream"
+	apisSetUpstreamKeyFullMethod        = "/" + apisCatalogService + "/SetUpstreamKey"
+	apisVerifyUpstreamFullMethod        = "/" + apisCatalogService + "/VerifyUpstream"
+	apisClearUpstreamKeyFullMethod      = "/" + apisCatalogService + "/ClearUpstreamKey"
+	apisUploadUpstreamDataFullMethod    = "/" + apisCatalogService + "/UploadUpstreamData"
+	apisResetUpstreamDataFullMethod     = "/" + apisCatalogService + "/ResetUpstreamData"
+	apisSetUpstreamCacheFullMethod      = "/" + apisCatalogService + "/SetUpstreamCache"
+	apisClearUpstreamCacheFullMethod    = "/" + apisCatalogService + "/ClearUpstreamCache"
+	apisSetUpstreamOptionsFullMethod    = "/" + apisCatalogService + "/SetUpstreamOptions"
+
+	apisFindPlansFullMethod  = "/" + apisCatalogService + "/FindPlans"
+	apisGetPlanFullMethod    = "/" + apisCatalogService + "/GetPlan"
+	apisCreatePlanFullMethod = "/" + apisCatalogService + "/CreatePlan"
+	apisUpdatePlanFullMethod = "/" + apisCatalogService + "/UpdatePlan"
+	apisRemovePlanFullMethod = "/" + apisCatalogService + "/RemovePlan"
 
 	// ---------- ApisOrderAdminService ----------
 	apisFindOrdersFullMethod       = "/" + apisOrderService + "/FindOrders"
@@ -127,30 +142,31 @@ const (
 
 // ============================= 商品浏览（apis-market，2） =============================
 
-// FindMarketProducts - 在售商品分页（仅 on_sale 产品及其在售套餐）：GET /api/apis-market/find
-// 权限码 apis.market.read；页元素是**商品视图**（产品 + 在售套餐，双协议同形）——
-// 产品与套餐均经白名单投影（剥离 upstreamConfig/uid 等内部字段），见 ApisProductOffer。
-func (this *ApisResource) FindMarketProducts(ctx context.Context, params *ApisProductQuery) (*Page[ApisProductOffer], error) {
+// FindMarketProducts - 在售套餐分页（商城以套餐为中心：on_sale 套餐及其产品明细）：
+// GET /api/apis-market/find
+// 权限码 apis.market.read；页元素是**套餐浏览视图**（ApisOfferPlan，Items 携带逐产品
+// 额度/单价/限额与产品摘要），经白名单投影（剥离 upstreamConfig/uid 等内部字段）。
+func (this *ApisResource) FindMarketProducts(ctx context.Context, params *ApisPlanQuery) (*Page[ApisOfferPlan], error) {
 
-	var result Page[ApisProductOffer]
+	var result Page[ApisOfferPlan]
 	if err := this.client.get(ctx, "/api/apis-market/find", params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetMarketProduct - 在售商品详情（含在售套餐；产品未上架返回 404）：GET /api/apis-market/take?id=N
+// GetMarketProduct - 在售套餐详情（含产品明细；套餐未上架返回 404）：GET /api/apis-market/take?id=N
 // 权限码 apis.market.read。
-func (this *ApisResource) GetMarketProduct(ctx context.Context, id int) (*ApisProductOffer, error) {
+func (this *ApisResource) GetMarketProduct(ctx context.Context, id int) (*ApisOfferPlan, error) {
 
-	var result ApisProductOffer
+	var result ApisOfferPlan
 	if err := this.client.getWithQuery(ctx, "/api/apis-market/take", idQuery(id), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// ============================= 目录维护（apis-products / apis-plans，10） =============================
+// ============================= 目录维护（apis-products / apis-plans，17） =============================
 
 // FindProducts - 产品分页（平台管理视图，含 draft）：GET /api/apis-products/find
 // 权限码 apis.catalog.read。
@@ -174,19 +190,9 @@ func (this *ApisResource) GetProduct(ctx context.Context, id int) (*ApisProduct,
 	return &result, nil
 }
 
-// CreateProduct - 新建产品（status 缺省 draft）：POST /api/apis-products/create
-// 权限码 apis.catalog.create；能力编码 + 名称同能力内唯一（冲突返回 409）。
-func (this *ApisResource) CreateProduct(ctx context.Context, input ApisProductInput) (*ApisProduct, error) {
-
-	var result ApisProduct
-	if err := this.client.post(ctx, "/api/apis-products/create", input, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
 // UpdateProduct - 修改产品（全量替换；version 冲突返回 409）：PUT /api/apis-products/update
-// 权限码 apis.catalog.update；能力编码不可变更，上架状态流转按平台白名单。
+// 权限码 apis.catalog.update；能力是代码定制的固定目录（平台不提供新建/删除路由），
+// 能力编码不可变更，上架状态流转按平台白名单。
 func (this *ApisResource) UpdateProduct(ctx context.Context, input ApisProductInput) (*ApisProduct, error) {
 
 	var result ApisProduct
@@ -196,41 +202,31 @@ func (this *ApisResource) UpdateProduct(ctx context.Context, input ApisProductIn
 	return &result, nil
 }
 
-// RemoveProduct - 删除产品（软删；上架中的产品须先下架）：DELETE /api/apis-products/remove
-// 权限码 apis.catalog.delete（风险级别 high，平台写审计）。
-func (this *ApisResource) RemoveProduct(ctx context.Context, id int) (*IdResult, error) {
+// FindPlans - 套餐分页（平台管理视图，含产品明细）：GET /api/apis-plans/find
+// 权限码 apis.catalog.read；productId 筛选按「套餐明细包含该产品」匹配。
+func (this *ApisResource) FindPlans(ctx context.Context, params *ApisPlanQuery) (*Page[ApisPlanView], error) {
 
-	var result IdResult
-	if err := this.client.del(ctx, "/api/apis-products/remove", map[string]any{"id": id}, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// FindPlans - 套餐分页（平台管理视图）：GET /api/apis-plans/find
-// 权限码 apis.catalog.read。
-func (this *ApisResource) FindPlans(ctx context.Context, params *ApisPlanQuery) (*Page[ApisPlan], error) {
-
-	var result Page[ApisPlan]
+	var result Page[ApisPlanView]
 	if err := this.client.get(ctx, "/api/apis-plans/find", params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetPlan - 套餐详情：GET /api/apis-plans/take?id=N
+// GetPlan - 套餐详情（含产品明细）：GET /api/apis-plans/take?id=N
 // 权限码 apis.catalog.read。
-func (this *ApisResource) GetPlan(ctx context.Context, id int) (*ApisPlan, error) {
+func (this *ApisResource) GetPlan(ctx context.Context, id int) (*ApisPlanView, error) {
 
-	var result ApisPlan
+	var result ApisPlanView
 	if err := this.client.getWithQuery(ctx, "/api/apis-plans/take", idQuery(id), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// CreatePlan - 新建套餐（status 缺省 off_sale）：POST /api/apis-plans/create
-// 权限码 apis.catalog.create；上架 metered 套餐唯一性与额度归零由平台校验。
+// CreatePlan - 新建套餐（status 缺省 off_sale；明细随套餐同事务写入）：POST /api/apis-plans/create
+// 权限码 apis.catalog.create；明细至少一条且同产品不重复，上架时 metered 明细单价必须大于 0、
+// 同产品全局只允许出现在一条在售 metered 套餐明细中（平台校验，冲突返回 409）。
 func (this *ApisResource) CreatePlan(ctx context.Context, input ApisPlanInput) (*ApisPlan, error) {
 
 	var result ApisPlan
@@ -240,8 +236,8 @@ func (this *ApisResource) CreatePlan(ctx context.Context, input ApisPlanInput) (
 	return &result, nil
 }
 
-// UpdatePlan - 修改套餐（全量替换；version 冲突返回 409）：PUT /api/apis-plans/update
-// 权限码 apis.catalog.update；所属产品不可变更。
+// UpdatePlan - 修改套餐（主表整行 + 明细全量替换；version 冲突返回 409）：PUT /api/apis-plans/update
+// 权限码 apis.catalog.update；明细校验口径与新建一致。
 func (this *ApisResource) UpdatePlan(ctx context.Context, input ApisPlanInput) (*ApisPlan, error) {
 
 	var result ApisPlan
@@ -251,7 +247,7 @@ func (this *ApisResource) UpdatePlan(ctx context.Context, input ApisPlanInput) (
 	return &result, nil
 }
 
-// RemovePlan - 删除套餐（软删；上架中的套餐须先下架）：DELETE /api/apis-plans/remove
+// RemovePlan - 删除套餐（软删，同事务软删全部明细；上架中的套餐须先下架）：DELETE /api/apis-plans/remove
 // 权限码 apis.catalog.delete（风险级别 high，平台写审计）。
 func (this *ApisResource) RemovePlan(ctx context.Context, id int) (*IdResult, error) {
 
@@ -260,6 +256,110 @@ func (this *ApisResource) RemovePlan(ctx context.Context, id int) (*IdResult, er
 		return nil, err
 	}
 	return &result, nil
+}
+
+// ---------- 能力上游管理（apis-products/upstream*，9） ----------
+//
+// 上游是「能力级平台共享单例」：同一能力可挂多个产品，密钥与数据文件全平台只有一份，
+// 改动对同能力所有产品即时生效；密钥只进不出（状态接口只回掩码），数据文件上传
+// HTTP 走 multipart、 gRPC 走 JSON base64（传输层各自适配，本组方法签名一致）。
+
+// GetCapabilityUpstream - 能力上游状态（密钥只出掩码；无数据/缓存概念的能力对应字段为 nil）：
+// GET /api/apis-products/upstream?capability=xx
+// 权限码 apis.catalog.read。
+func (this *ApisResource) GetCapabilityUpstream(ctx context.Context, capability string) (*ApisUpstreamStatus, error) {
+
+	var result ApisUpstreamStatus
+	if err := this.client.get(ctx, "/api/apis-products/upstream", map[string]any{"capability": capability}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SetUpstreamKey - 设置能力上游密钥（机器绑定加密入库，即时生效；明文只存在于本次请求调用栈）：
+// PUT /api/apis-products/upstream-key
+// 权限码 apis.catalog.update。
+func (this *ApisResource) SetUpstreamKey(ctx context.Context, input ApisUpstreamKeyInput) error {
+
+	return this.client.put(ctx, "/api/apis-products/upstream-key", input, nil)
+}
+
+// VerifyUpstream - 验证候选上游配置有效性（scene = key 密钥 / endpoint 接口地址；
+// 真实探测上游，不持久化；「变更先验证，有效才允许保存」）：POST /api/apis-products/upstream-verify
+// 权限码 apis.catalog.update。
+func (this *ApisResource) VerifyUpstream(ctx context.Context, input ApisUpstreamVerifyInput) error {
+
+	return this.client.post(ctx, "/api/apis-products/upstream-verify", input, nil)
+}
+
+// ClearUpstreamKey - 清除能力上游密钥：DELETE /api/apis-products/upstream-key
+// 权限码 apis.catalog.update。
+func (this *ApisResource) ClearUpstreamKey(ctx context.Context, capability string) error {
+
+	return this.client.del(ctx, "/api/apis-products/upstream-key", map[string]any{"capability": capability}, nil)
+}
+
+// UploadUpstreamData - 上传能力上游数据文件（能力包校验后落盘热切换，64MB 上限）：
+// POST /api/apis-products/upstream-data
+// 权限码 apis.catalog.update；HTTP 走 multipart（文件字段 file），gRPC 由传输层转 JSON base64。
+/**
+ * @param capability string - 能力编码（如 ip-locate）
+ * @param fileName string - 原始文件名（仅作留痕，不参与落盘路径）
+ * @param content io.Reader - 数据文件内容
+ * @example：
+ * 	status, err := client.Apis.UploadUpstreamData(ctx, "ip-locate", "ip2region_v4.xdb", file)
+ */
+func (this *ApisResource) UploadUpstreamData(ctx context.Context, capability string, fileName string, content io.Reader) (*ApisUpstreamDataStatus, error) {
+
+	var result ApisUpstreamDataStatus
+	fields := map[string]string{"capability": capability}
+	if err := this.client.postMultipart(ctx, "/api/apis-products/upstream-data", fields, "file", fileName, content, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ResetUpstreamData - 恢复能力上游数据为内嵌默认：PUT /api/apis-products/upstream-data-reset
+// 权限码 apis.catalog.update。
+func (this *ApisResource) ResetUpstreamData(ctx context.Context, capability string) (*ApisUpstreamDataStatus, error) {
+
+	var result ApisUpstreamDataStatus
+	if err := this.client.put(ctx, "/api/apis-products/upstream-data-reset", map[string]any{"capability": capability}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SetUpstreamCache - 保存能力缓存策略（缓存时间 + 库刷新天数，持久化并即时生效）：
+// PUT /api/apis-products/upstream-cache
+// 权限码 apis.catalog.update。
+func (this *ApisResource) SetUpstreamCache(ctx context.Context, input ApisUpstreamCacheInput) (*ApisUpstreamCacheStatus, error) {
+
+	var result ApisUpstreamCacheStatus
+	if err := this.client.put(ctx, "/api/apis-products/upstream-cache", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ClearUpstreamCache - 清空能力平台缓存（只清缓存不动库，下次查询回库/回源后重建）：
+// DELETE /api/apis-products/upstream-cache
+// 权限码 apis.catalog.update。
+func (this *ApisResource) ClearUpstreamCache(ctx context.Context, capability string) error {
+
+	return this.client.del(ctx, "/api/apis-products/upstream-cache", map[string]any{"capability": capability}, nil)
+}
+
+// SetUpstreamOptions - 保存能力上游高级参数（能力包逐项校验 + 持久化 + 热生效），返回最新快照：
+// PUT /api/apis-products/upstream-options
+// 权限码 apis.catalog.update。
+func (this *ApisResource) SetUpstreamOptions(ctx context.Context, input ApisUpstreamOptionsInput) (map[string]any, error) {
+
+	var result map[string]any
+	if err := this.client.put(ctx, "/api/apis-products/upstream-options", input, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // ============================= 订单（apis-orders，11） =============================

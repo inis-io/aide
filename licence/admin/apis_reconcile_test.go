@@ -47,21 +47,22 @@ const (
 	// apisServerPackage - 平台 proto-less 服务的权威包名（曾出现 lichenhub 笔误，此处回归守护）
 	apisServerPackage = "licenhub.licence.v1"
 	// apisRouteCount - 商城管理面受控路由条数（与平台登记表条数互为断言）
-	apisRouteCount = 53
+	apisRouteCount = 60
 )
 
 var (
 	// apisSDKMethodPattern - SDK 资源层方法签名（只取导出方法；unexported 助手 exportBills 不参与对账）
 	apisSDKMethodPattern = regexp.MustCompile(`(?m)^func \(this \*ApisResource\) ([A-Z]\w*)\(`)
-	// apisSDKRoutePattern - 方法体内的路由声明：client.get/getWithQuery/post/put/del(ctx, "路径")
+	// apisSDKRoutePattern - 方法体内的路由声明：client.get/getWithQuery/postMultipart/post/put/del(ctx, "路径")
 	// 或共用助手 this.exportBills(ctx, "路径")（助手内部固定走 GET）
-	apisSDKRoutePattern = regexp.MustCompile(`this\.client\.(getWithQuery|get|post|put|del)\(ctx, "([^"]+)"|this\.exportBills\(ctx, "([^"]+)"`)
-	// apisSDKResultPattern - SDK 方法签名的返回列表（跨行签名由 (?s) 与非贪婪参数段覆盖）
-	apisSDKResultPattern = regexp.MustCompile(`(?s)^func \(this \*ApisResource\) (\w+)\(.*?\) \(([^)]*), error\) \{`)
+	apisSDKRoutePattern = regexp.MustCompile(`this\.client\.(getWithQuery|get|postMultipart|post|put|del)\(ctx, "([^"]+)"|this\.exportBills\(ctx, "([^"]+)"`)
+	// apisSDKResultPattern - SDK 方法签名的返回列表（跨行签名由 (?s) 与非贪婪参数段覆盖）；
+	// 两种形态：带括号的 `(*T, error)` 落在捕获组 2，上游 void 方法的裸 `error` 落在捕获组 3
+	apisSDKResultPattern = regexp.MustCompile(`(?s)^func \(this \*ApisResource\) (\w+)\(.*?\) (?:\(([^)]*)\)|(\w+)) \{`)
 	// apisSDKVerbByCall - 方法名 → HTTP 动词
 	apisSDKVerbByCall = map[string]string{
-		"getWithQuery": http.MethodGet, "get": http.MethodGet, "post": http.MethodPost,
-		"put": http.MethodPut, "del": http.MethodDelete, "exportBills": http.MethodGet,
+		"getWithQuery": http.MethodGet, "get": http.MethodGet, "postMultipart": http.MethodPost,
+		"post": http.MethodPost, "put": http.MethodPut, "del": http.MethodDelete, "exportBills": http.MethodGet,
 	}
 	// apisTransportVerbBySource - 传输层 case 键里的 http.MethodX 写法 → HTTP 动词字面量
 	apisTransportVerbBySource = map[string]string{
@@ -72,6 +73,10 @@ var (
 	apisTransportCasePattern = regexp.MustCompile(`^case (http\.Method\w+) \+ " ([^"]+)":$`)
 	// apisTransportInvokePattern - case 体内的 proto-less 调用（full method 常量必须出自常量块）
 	apisTransportInvokePattern = regexp.MustCompile(`^response, err = this\.invokeApis\(callCtx, (\w+), request\)$`)
+	// apisTransportUploadPathPattern / apisTransportUploadInvokePattern - Upload() 里商城 proto-less 上传的
+	// early branch（`if upload.Path == "<路径>" {` 的下一行必须是 uploadApis 调用；upstream-data 不经 RoundTrip）
+	apisTransportUploadPathPattern   = regexp.MustCompile(`^if upload\.Path == "(/api/apis-[^"]+)" \{$`)
+	apisTransportUploadInvokePattern = regexp.MustCompile(`^response, err := this\.uploadApis\(callCtx, (\w+), upload\)$`)
 	// apisServiceConstantPattern - apis.go 的 gRPC 服务前缀常量
 	apisServiceConstantPattern = regexp.MustCompile(`(?m)^\s*(\w+)\s*=\s*"(licenhub\.licence\.v1\.\w+)"\s*$`)
 	// apisFullMethodConstantPattern - apis.go 的 full method 常量（"/" + <服务前缀常量> + "/<方法>"）
@@ -99,11 +104,20 @@ var (
 	// apisPlatformTypeAliases - 平台类型名 → SDK 类型名（形态对账的显式映射，命名差异都是有意的）；
 	// `soft_delete.DeletedAt ↔ int64` 是唯一的类型等价例外（平台软删列在 SDK 侧按毫秒整数暴露）。
 	apisPlatformTypeAliases = map[string]string{
-		"OfferProduct": "ApisOfferProduct", "OfferPlan": "ApisOfferPlan", "ProductOffer": "ApisProductOffer",
+		"OfferPlan": "ApisOfferPlan", "OfferPlanItem": "ApisOfferPlanItem", "PlanView": "ApisPlanView",
 		"BalanceState": "ApisBalanceState", "RechargeResult": "ApisRechargeResult",
 		"UsageDailySummary":      "ApisUsageDailySummary",
 		"UsageDailySummaryDay":   "ApisUsageDailySummaryDay",
 		"UsageDailySummaryGroup": "ApisUsageDailySummaryGroup",
+		"PlanItemParams":         "ApisPlanItemInput",
+		"UpstreamStatus":         "ApisUpstreamStatus",
+		"UpstreamKeyStatus":      "ApisUpstreamKeyStatus",
+		"UpstreamDataStatus":     "ApisUpstreamDataStatus",
+		"UpstreamCacheStatus":    "ApisUpstreamCacheStatus",
+		"UpstreamKeyParams":      "ApisUpstreamKeyInput",
+		"UpstreamVerifyParams":   "ApisUpstreamVerifyInput",
+		"UpstreamCacheParams":    "ApisUpstreamCacheInput",
+		"UpstreamOptionsParams":  "ApisUpstreamOptionsInput",
 		"apisIdEnvelope":         "IdResult", "apisSpentEnvelope": "ApisBalanceSpentResult",
 		"soft_delete.DeletedAt": "int64",
 	}
@@ -208,7 +222,8 @@ func loadApisFullMethodConstants(t *testing.T) map[string]string {
 	return constants
 }
 
-// loadApisTransportCases - 解析传输层商城 case（"动词 路径" → full method 常量解析值）
+// loadApisTransportCases - 解析传输层商城 case（"动词 路径" → full method 常量解析值）：
+// RoundTrip 的 `case 动词 + " 路径":` 与 Upload() 的商城 early branch（uploadApis 调用）两路并入同一表
 func loadApisTransportCases(t *testing.T) map[string]string {
 
 	t.Helper()
@@ -217,31 +232,53 @@ func loadApisTransportCases(t *testing.T) map[string]string {
 
 	lines := strings.Split(source, "\n")
 	cases := map[string]string{}
-	for index, line := range lines {
-		matched := apisTransportCasePattern.FindStringSubmatch(strings.TrimSpace(line))
-		if matched == nil || !strings.HasPrefix(matched[2], "/api/apis-") {
-			continue
-		}
-		if index+1 >= len(lines) {
-			t.Fatalf("传输层 case %s 后缺少调用行", matched[2])
-		}
-		invoke := apisTransportInvokePattern.FindStringSubmatch(strings.TrimSpace(lines[index+1]))
-		if invoke == nil {
-			t.Fatalf("传输层 case %s 的下一行不是 invokeApis 调用：%s", matched[2], strings.TrimSpace(lines[index+1]))
-		}
-		value, exists := constants[invoke[1]]
-		if !exists {
-			t.Fatalf("传输层 case %s 引用了未定义的 full method 常量 %s", matched[2], invoke[1])
-		}
-		verb, exists := apisTransportVerbBySource[matched[1]]
-		if !exists {
-			t.Fatalf("传输层 case %s 使用了未登记的 HTTP 动词写法 %s（新增动词需同步对账表）", matched[2], matched[1])
-		}
-		key := verb + " " + matched[2]
+	// register - 登记一条商城 case（RoundTrip 与 Upload early branch 共用去重口径）
+	register := func(key, constantValue string) {
 		if _, duplicated := cases[key]; duplicated {
 			t.Fatalf("传输层出现重复的商城 case：%s", key)
 		}
-		cases[key] = value
+		cases[key] = constantValue
+	}
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// ① RoundTrip 的商城 case（"动词 路径" → invokeApis）
+		if matched := apisTransportCasePattern.FindStringSubmatch(trimmed); matched != nil && strings.HasPrefix(matched[2], "/api/apis-") {
+			if index+1 >= len(lines) {
+				t.Fatalf("传输层 case %s 后缺少调用行", matched[2])
+			}
+			invoke := apisTransportInvokePattern.FindStringSubmatch(strings.TrimSpace(lines[index+1]))
+			if invoke == nil {
+				t.Fatalf("传输层 case %s 的下一行不是 invokeApis 调用：%s", matched[2], strings.TrimSpace(lines[index+1]))
+			}
+			value, exists := constants[invoke[1]]
+			if !exists {
+				t.Fatalf("传输层 case %s 引用了未定义的 full method 常量 %s", matched[2], invoke[1])
+			}
+			verb, exists := apisTransportVerbBySource[matched[1]]
+			if !exists {
+				t.Fatalf("传输层 case %s 使用了未登记的 HTTP 动词写法 %s（新增动词需同步对账表）", matched[2], matched[1])
+			}
+			register(verb+" "+matched[2], value)
+			continue
+		}
+
+		// ② Upload() 的商城 early branch（proto-less 上传不经 RoundTrip）：
+		// `if upload.Path == "<路径>" {` 的下一行必须是 uploadApis 调用，键统一为 "POST <路径>"
+		if matched := apisTransportUploadPathPattern.FindStringSubmatch(trimmed); matched != nil {
+			if index+1 >= len(lines) {
+				t.Fatalf("传输层 Upload early branch %s 后缺少调用行", matched[1])
+			}
+			invoke := apisTransportUploadInvokePattern.FindStringSubmatch(strings.TrimSpace(lines[index+1]))
+			if invoke == nil {
+				t.Fatalf("传输层 Upload early branch %s 的下一行不是 uploadApis 调用：%s", matched[1], strings.TrimSpace(lines[index+1]))
+			}
+			value, exists := constants[invoke[1]]
+			if !exists {
+				t.Fatalf("传输层 Upload early branch %s 引用了未定义的 full method 常量 %s", matched[1], invoke[1])
+			}
+			register(http.MethodPost+" "+matched[1], value)
+		}
 	}
 	return cases
 }
@@ -306,7 +343,7 @@ func apisRequireSiblingRepo(t *testing.T) {
 }
 
 // TestApisReconcileSDKSourceTransportAndCases - SDK 资源层 ↔ 传输层 ↔ 用例表三向一致
-// （不依赖兄弟仓库；约束不变式：typed 方法数 = 传输 case 数 = 用例表条数 = 53）
+// （不依赖兄弟仓库；约束不变式：typed 方法数 = 传输 case 数 = 用例表条数 = 60）
 func TestApisReconcileSDKSourceTransportAndCases(t *testing.T) {
 
 	routes := loadApisSDKRoutes(t)
@@ -521,10 +558,19 @@ var apisShapeFiles = []apisShapeFile{
 	{sdkType: "ApisUsageRecord", serverType: "ApisUsageRecord", serverFile: "backend/app/models/basic/apis-usage.go"},
 	{sdkType: "ApisUsageDaily", serverType: "ApisUsageDaily", serverFile: "backend/app/models/basic/apis-usage.go"},
 
-	// 输出：商品浏览白名单视图
-	{sdkType: "ApisOfferProduct", serverType: "OfferProduct", serverFile: "backend/app/service/apis/catalog.go"},
+	// 输出：商品浏览白名单视图（套餐中心：套餐字段 + 产品明细）
 	{sdkType: "ApisOfferPlan", serverType: "OfferPlan", serverFile: "backend/app/service/apis/catalog.go"},
-	{sdkType: "ApisProductOffer", serverType: "ProductOffer", serverFile: "backend/app/service/apis/catalog.go"},
+	{sdkType: "ApisOfferPlanItem", serverType: "OfferPlanItem", serverFile: "backend/app/service/apis/catalog.go"},
+
+	// 输出：平台管理视图与套餐明细模型
+	{sdkType: "ApisPlanItem", serverType: "ApisPlanItem", serverFile: "backend/app/models/basic/apis-catalog.go"},
+	{sdkType: "ApisPlanView", serverType: "PlanView", serverFile: "backend/app/service/apis/catalog.go"},
+
+	// 输出：能力上游状态族
+	{sdkType: "ApisUpstreamStatus", serverType: "UpstreamStatus", serverFile: "backend/app/service/apis/upstream.go"},
+	{sdkType: "ApisUpstreamKeyStatus", serverType: "UpstreamKeyStatus", serverFile: "backend/app/service/apis/upstream.go"},
+	{sdkType: "ApisUpstreamDataStatus", serverType: "UpstreamDataStatus", serverFile: "backend/app/service/apis/upstream.go"},
+	{sdkType: "ApisUpstreamCacheStatus", serverType: "UpstreamCacheStatus", serverFile: "backend/app/service/apis/upstream.go"},
 
 	// 输出：操作结果与看板
 	{sdkType: "ApisBalanceState", serverType: "BalanceState", serverFile: "backend/app/service/apis/balance.go"},
@@ -539,6 +585,11 @@ var apisShapeFiles = []apisShapeFile{
 	// 输入：写路径入参
 	{sdkType: "ApisProductInput", serverType: "ProductParams", serverFile: "backend/app/service/apis/catalog.go"},
 	{sdkType: "ApisPlanInput", serverType: "PlanParams", serverFile: "backend/app/service/apis/catalog.go"},
+	{sdkType: "ApisPlanItemInput", serverType: "PlanItemParams", serverFile: "backend/app/service/apis/catalog.go"},
+	{sdkType: "ApisUpstreamKeyInput", serverType: "UpstreamKeyParams", serverFile: "backend/app/service/apis/upstream.go"},
+	{sdkType: "ApisUpstreamVerifyInput", serverType: "UpstreamVerifyParams", serverFile: "backend/app/service/apis/upstream.go"},
+	{sdkType: "ApisUpstreamCacheInput", serverType: "UpstreamCacheParams", serverFile: "backend/app/service/apis/upstream.go"},
+	{sdkType: "ApisUpstreamOptionsInput", serverType: "UpstreamOptionsParams", serverFile: "backend/app/service/apis/upstream.go"},
 	{sdkType: "ApisOrderInput", serverType: "OrderParams", serverFile: "backend/app/service/apis/order.go"},
 	{sdkType: "ApisOrderTarget", serverType: "OrderPayParams", serverFile: "backend/app/service/apis/order.go"},
 	{sdkType: "ApisOrderCancelInput", serverType: "OrderCancelParams", serverFile: "backend/app/service/apis/order.go"},
@@ -587,10 +638,20 @@ func apisNormalizeType(value string) string {
 	return prefix + normalized
 }
 
-// apisSDKResultKind - SDK 返回列表 → 形态与元素类型（`*Page[T]` / `*T` / 导出三元组）
+// apisSDKResultKind - SDK 返回列表 → 形态与元素类型（`*Page[T]` / `*T` / 导出三元组 /
+// 上游 void 方法的裸 error / SetUpstreamOptions 的 map[string]any）
 func apisSDKResultKind(returns string) (string, string) {
 
 	trimmed := strings.TrimSpace(returns)
+	if trimmed == "error" {
+		// 上游 void 方法只返回裸 error（平台 apisOK(nil,...) 空数据）
+		return "void", ""
+	}
+	// error 是管理面方法的固定尾返回，形态由剩余返回列表决定
+	trimmed = strings.TrimSuffix(trimmed, ", error")
+	if trimmed == "map[string]any" {
+		return "one", "map[string]any"
+	}
 	if strings.HasPrefix(trimmed, "*Page[") && strings.HasSuffix(trimmed, "]") {
 		return "page", strings.TrimSuffix(strings.TrimPrefix(trimmed, "*Page["), "]")
 	}
@@ -622,7 +683,12 @@ func loadApisSDKResults(t *testing.T) map[string]apisSDKResult {
 			t.Errorf("SDK 方法 %s 的返回列表无法解析（签名格式可能已变化）", name)
 			continue
 		}
-		kind, element := apisSDKResultKind(matched[2])
+		returns := matched[2]
+		if returns == "" {
+			// 裸 error 返回（上游 void 方法）落在捕获组 3
+			returns = matched[3]
+		}
+		kind, element := apisSDKResultKind(returns)
 		results[name] = apisSDKResult{kind: kind, element: element}
 	}
 	return results
@@ -697,11 +763,16 @@ func apisHandlerBody(t *testing.T, source, handler string) string {
 }
 
 // apisPlatformPayload - 平台处理器的载荷形态与元素类型：
-// 信封字面量（id/monthSpent/导出）→ 字面量类型；`apisOK(apisPage(...))` → 分页（元素取服务层首个返回类型）；
-// 其余单对象 → 服务层首个返回类型。全部机械推导，元素类型再经 apisNormalizeType 映射到 SDK 命名。
+// `apisOK(nil,...)` → 空数据（上游 void 方法）；信封字面量（id/monthSpent/导出）→ 字面量类型；
+// `apisOK(apisPage(...))` → 分页（元素取服务层首个返回类型）；其余单对象 → 服务层首个返回类型。
+// 全部机械推导，元素类型再经 apisNormalizeType 映射到 SDK 命名。
 func apisPlatformPayload(t *testing.T, body string, spec apisServerSpec, returns map[string]string) (string, string) {
 
 	t.Helper()
+	if strings.Contains(body, "apisOK(nil,") {
+		// 平台空数据响应（上游 Set/Clear/Verify 四条），SDK 侧对应裸 error 返回
+		return "void", ""
+	}
 	if matched := apisServerEnvelopeLiteralPattern.FindStringSubmatch(body); matched != nil {
 		if matched[1] == "apisBillExportEnvelope" {
 			return "export", matched[1]

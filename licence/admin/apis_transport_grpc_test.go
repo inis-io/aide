@@ -24,6 +24,8 @@ import (
 // ① 断言 SDK 分发的 full method 与平台登记表登记的服务/方法一致（打错即 Unimplemented 或走错方法，直接失败）；
 // ② 断言请求体：GET 的 query 经传输层折叠为 JSON（数字/布尔还原为原生类型），写路径 body 原样透传；
 // ③ 断言响应信封解析与 HTTP 侧同形（typed 方法与协议无关）。
+// UploadUpstreamData 不经 RoundTrip，走 Upload() 的商城 early branch（uploadApis：JSON 承载 base64），
+// 假服务同样按 full method 注册的 unary 方法处理，与平台装配方式一致。
 //
 // 假服务端按平台的装配方式注册 ServiceDesc（licencev1.AdminRequest/AdminResponse 信封，
 // 无生成 stub），从而在 SDK 侧真正验证 conn.Invoke + fullMethod 常量链路。
@@ -129,7 +131,7 @@ func (this *apisGRPCServer) hitMethods() []string {
 	return methods
 }
 
-// TestApisRoutesGRPC - 53 条商城路由逐条经真实 gRPC 调用（bufconn）校验
+// TestApisRoutesGRPC - 60 条商城路由逐条经真实 gRPC 调用（bufconn）校验
 func TestApisRoutesGRPC(t *testing.T) {
 
 	cases := apisRouteCases()

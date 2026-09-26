@@ -2,12 +2,18 @@ package admin
 
 // 本文件为 API 商城（apis 域）DTO，与平台逐一对齐（口径沿用 admin-types.go 头部约定）：
 //   - 输出结构对齐 licen-hub/backend/app/models/basic/apis-*.go 各模型的 json tag，
-//     以及 app/service/apis/*.go 的白名单视图（商品浏览 OfferProduct/OfferPlan、操作结果 RechargeResult/BalanceState）；
+//     以及 app/service/apis/*.go 的白名单视图（商品浏览套餐中心 OfferPlan/OfferPlanItem、
+//     操作结果 RechargeResult/BalanceState、能力上游状态 UpstreamStatus 族）；
 //   - 输入结构对齐 licen-hub/backend/app/service/apis/*.go 的 *Params（写路径入参）与 *Query（读路径筛选）；
 //   - 时间戳除特别注明外均为毫秒（平台 autoCreateTime:milli）。
 //
-// 金额口径：余额与订单金额单位为「分」（affects 充值/调整/退款）；metered（付费制按量）套餐单价为
-// 「万分/次」（ApisPlan.Price），两者不是同一标度，展示与换算由调用方自行处理。
+// 金额口径：余额与订单金额单位为「分」（affects 充值/调整/退款）；metered（付费制按量）单价为
+// 「万分/次」，落在套餐明细行（ApisPlanItem.Price / ApisOfferPlanItem.Price），
+// 两者不是同一标度，展示与换算由调用方自行处理。
+//
+// 套餐多产品化（设计 02 §2.2）：套餐不再绑定单一产品，额度/单价/限额逐产品落在 ApisPlanItem
+// 明细行（订阅制四维 quota、付费制单价、两种模式通用的并发/QPS）；订阅的周期用量按
+// 订阅 × 产品分维记账（平台 apis_subscription_usages），订阅主表不再携带产品与已用量字段。
 
 // ============================= 商城目录（产品 / 套餐） =============================
 
@@ -54,35 +60,21 @@ type ApisProduct struct {
 }
 
 // ApisPlan - API 套餐 / 价格方案（平台 models/basic.ApisPlan）
-// billingMode=subscription 时 Price 为每周期价格（分），quota* 为周期内额度；
-// billingMode=metered 时 Price 为单价（万分/次），quota* 强制为 0（只受并发量与 QPS 约束）。
+// 套餐为「产品明细的载体」：billingMode=subscription 时 Price 为每周期总价（分），
+// 计费与限额逐产品落在明细行（ApisPlanItem）；billingMode=metered 时 Price 恒 0（单价在明细行）。
 type ApisPlan struct {
 	// Id - 主键
 	Id int `json:"id"`
 	// PlanNo - 套餐编号（PLN-{年}-%06d）
 	PlanNo string `json:"planNo"`
-	// ProductId - 所属产品ID
-	ProductId int `json:"productId"`
 	// Name - 套餐名称（如「包月-基础版」「按量-标准价」）
 	Name string `json:"name"`
 	// BillingMode - 计费模式（subscription 订阅制 / metered 付费制按量）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期价格（分）/ 付费制单价（万分/次）
+	// Price - 订阅制每周期总价（分）；付费制恒 0（单价在明细行）
 	Price int64 `json:"price"`
 	// Period - 订阅周期（monthly/quarterly/yearly），付费制为空
 	Period string `json:"period"`
-	// Quota - 订阅制周期内包含调用次数（0=不限量）
-	Quota int64 `json:"quota"`
-	// QuotaDaily - 订阅制每日调用量上限（自然日 UTC+8，0=不限）
-	QuotaDaily int64 `json:"quotaDaily"`
-	// QuotaWeekly - 订阅制每周调用量上限（自然周周一起，0=不限）
-	QuotaWeekly int64 `json:"quotaWeekly"`
-	// QuotaMonthly - 订阅制每月调用量上限（自然月，0=不限）
-	QuotaMonthly int64 `json:"quotaMonthly"`
-	// ConcurrencyLimit - 并发量上限（两种计费模式都生效，0=跟随平台默认）
-	ConcurrencyLimit int `json:"concurrencyLimit"`
-	// QpsLimit - 调用速率上限（0=跟随平台默认）
-	QpsLimit int `json:"qpsLimit"`
 	// Status - 状态（on_sale 上架 / off_sale 下架 / archived 归档）
 	Status string `json:"status"`
 	// Version - 乐观锁版本
@@ -95,24 +87,81 @@ type ApisPlan struct {
 	DeleteAt int64 `json:"deleteAt"`
 }
 
-// ApisOfferProduct - 商品浏览的产品白名单视图（平台 service/apis.OfferProduct）：
-// 商品浏览的两条路由返回的整体是 ApisProductOffer（`find` 的页元素 / `take` 的返回），
-// 本类型是其 `product` 字段的组件类型（同样剥离 upstreamConfig、uid 与内部字段）。
-type ApisOfferProduct struct {
+// ApisPlanItem - 套餐 × 产品明细（平台 models/basic.ApisPlanItem）：
+// price 仅 metered 套餐使用（该产品按量单价，万分/次）；四维 quota 仅 subscription 套餐使用；
+// concurrencyLimit / qpsLimit 两种模式通用（0=跟随平台默认）。
+type ApisPlanItem struct {
 	// Id - 主键
 	Id int `json:"id"`
+	// PlanId - 套餐ID
+	PlanId int `json:"planId"`
+	// ProductId - 产品ID
+	ProductId int `json:"productId"`
+	// Price - 按量单价（万分/次，仅 metered 明细；订阅明细恒 0）
+	Price int64 `json:"price"`
+	// Quota - 订阅制周期内包含调用次数（0=不限量；metered 明细恒 0）
+	Quota int64 `json:"quota"`
+	// QuotaDaily - 订阅制每日调用量上限（自然日 UTC+8，0=不限；metered 明细恒 0）
+	QuotaDaily int64 `json:"quotaDaily"`
+	// QuotaWeekly - 订阅制每周调用量上限（自然周周一起，0=不限；metered 明细恒 0）
+	QuotaWeekly int64 `json:"quotaWeekly"`
+	// QuotaMonthly - 订阅制每月调用量上限（自然月，0=不限；metered 明细恒 0）
+	QuotaMonthly int64 `json:"quotaMonthly"`
+	// ConcurrencyLimit - 并发量上限（两种计费模式都生效，0=跟随平台默认）
+	ConcurrencyLimit int `json:"concurrencyLimit"`
+	// QpsLimit - 调用速率上限（0=跟随平台默认）
+	QpsLimit int `json:"qpsLimit"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// ApisPlanView - 平台管理视图的套餐（含产品明细；平台 service/apis.PlanView）
+type ApisPlanView struct {
+	// ApisPlan - 套餐主表字段（内嵌平铺）
+	ApisPlan
+	// Items - 产品明细（逐产品额度/单价/限额）
+	Items []ApisPlanItem `json:"items"`
+}
+
+// ApisOfferPlan - 商品浏览的套餐白名单视图（平台 service/apis.OfferPlan）：
+// 商城以套餐为中心（浏览的两条路由返回套餐分页/详情），套餐卡片携带全部产品明细；
+// 白名单字段——剥离产品 upstreamConfig/uid/version 等内部字段。
+type ApisOfferPlan struct {
+	// Id - 主键
+	Id int `json:"id"`
+	// PlanNo - 套餐编号
+	PlanNo string `json:"planNo"`
+	// Name - 套餐名称
+	Name string `json:"name"`
+	// BillingMode - 计费模式（subscription/metered）
+	BillingMode string `json:"billingMode"`
+	// Price - 订阅制每周期总价（分）；付费制恒 0（单价在明细行）
+	Price int64 `json:"price"`
+	// Period - 订阅周期（月/季/年），付费制为空
+	Period string `json:"period"`
+	// Status - 状态（浏览视图恒为 on_sale）
+	Status string `json:"status"`
+	// Items - 产品明细（逐产品额度/单价/限额 + 产品摘要）
+	Items []ApisOfferPlanItem `json:"items"`
+}
+
+// ApisOfferPlanItem - 商品浏览的套餐明细白名单视图（平台 service/apis.OfferPlanItem）：
+// 产品摘要只带展示与定价所需信息 + 该产品在套餐内的额度/单价/限额。
+type ApisOfferPlanItem struct {
+	// ProductId - 产品ID
+	ProductId int `json:"productId"`
 	// ProductNo - 产品编号
 	ProductNo string `json:"productNo"`
 	// Capability - 能力编码
 	Capability string `json:"capability"`
-	// Name - 产品名称
-	Name string `json:"name"`
+	// ProductName - 产品名称
+	ProductName string `json:"productName"`
 	// Summary - 产品摘要
 	Summary string `json:"summary"`
-	// Description - 产品详情（富文本）
-	Description string `json:"description"`
-	// Status - 状态（浏览视图恒为 on_sale）
-	Status string `json:"status"`
 	// FreeDailyQuota - 每日免费调用次数（0=无）
 	FreeDailyQuota int64 `json:"freeDailyQuota"`
 	// FreeMonthlyQuota - 每月免费调用次数（0=无）
@@ -121,52 +170,20 @@ type ApisOfferProduct struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
 	CacheDiscount int `json:"cacheDiscount"`
-	// Sort - 商城展示排序
-	Sort int `json:"sort"`
-	// Tags - 商城展示标签
-	Tags string `json:"tags"`
-	// UpdateAt - 更新时间（毫秒）
-	UpdateAt int64 `json:"updateAt"`
-}
-
-// ApisOfferPlan - 商品浏览的套餐白名单视图（平台 service/apis.OfferPlan）
-type ApisOfferPlan struct {
-	// Id - 主键
-	Id int `json:"id"`
-	// PlanNo - 套餐编号
-	PlanNo string `json:"planNo"`
-	// ProductId - 所属产品ID
-	ProductId int `json:"productId"`
-	// Name - 套餐名称
-	Name string `json:"name"`
-	// BillingMode - 计费模式（subscription/metered）
-	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期价格（分）/ 付费制单价（万分/次）
+	// Price - 按量单价（万分/次，仅 metered 明细；订阅明细恒 0）
 	Price int64 `json:"price"`
-	// Period - 订阅周期（月/季/年）
-	Period string `json:"period"`
-	// Quota - 周期内包含调用次数（0=不限量）
+	// Quota - 订阅制周期内包含调用次数（0=不限量；metered 明细恒 0）
 	Quota int64 `json:"quota"`
-	// QuotaDaily - 每日调用量上限（0=不限）
+	// QuotaDaily - 订阅制每日调用量上限（0=不限；metered 明细恒 0）
 	QuotaDaily int64 `json:"quotaDaily"`
-	// QuotaWeekly - 每周调用量上限（0=不限）
+	// QuotaWeekly - 订阅制每周调用量上限（0=不限；metered 明细恒 0）
 	QuotaWeekly int64 `json:"quotaWeekly"`
-	// QuotaMonthly - 每月调用量上限（0=不限）
+	// QuotaMonthly - 订阅制每月调用量上限（0=不限；metered 明细恒 0）
 	QuotaMonthly int64 `json:"quotaMonthly"`
 	// ConcurrencyLimit - 并发量上限（0=跟随平台默认）
 	ConcurrencyLimit int `json:"concurrencyLimit"`
 	// QpsLimit - 调用速率上限（0=跟随平台默认）
 	QpsLimit int `json:"qpsLimit"`
-	// Status - 状态（浏览视图恒为 on_sale）
-	Status string `json:"status"`
-}
-
-// ApisProductOffer - 商品浏览视图（产品 + 在售套餐；平台 service/apis.ProductOffer）
-type ApisProductOffer struct {
-	// Product - 产品白名单视图
-	Product ApisOfferProduct `json:"product"`
-	// Plans - 在售套餐白名单视图
-	Plans []ApisOfferPlan `json:"plans"`
 }
 
 // ApisProductInput - 产品写路径入参（平台 service/apis.ProductParams）
@@ -203,33 +220,43 @@ type ApisProductInput struct {
 	Version int `json:"version"`
 }
 
+// ApisPlanItemInput - 套餐产品明细入参（平台 service/apis.PlanItemParams）；
+// 平台明细随套餐整体提交、**全量替换**，本结构不使用 omitempty：
+// metered 明细 Price>0 且四维额度恒 0；subscription 明细 Price 恒 0、额度 0=不限。
+type ApisPlanItemInput struct {
+	// ProductId - 明细产品（必填，同套餐内不重复）
+	ProductId int `json:"productId"`
+	// Price - 按量单价（万分/次），仅 metered 套餐使用；subscription 明细强制 0
+	Price int64 `json:"price"`
+	// Quota - 订阅制周期内包含调用次数（0=不限量）
+	Quota int64 `json:"quota"`
+	// QuotaDaily - 订阅制每日调用量上限（0=不限）
+	QuotaDaily int64 `json:"quotaDaily"`
+	// QuotaWeekly - 订阅制每周调用量上限（0=不限）
+	QuotaWeekly int64 `json:"quotaWeekly"`
+	// QuotaMonthly - 订阅制每月调用量上限（0=不限）
+	QuotaMonthly int64 `json:"quotaMonthly"`
+	// ConcurrencyLimit - 并发量上限（两种计费模式通用，0=跟随平台默认）
+	ConcurrencyLimit int `json:"concurrencyLimit"`
+	// QpsLimit - 调用速率上限（0=跟随平台默认）
+	QpsLimit int `json:"qpsLimit"`
+}
+
 // ApisPlanInput - 套餐写路径入参（平台 service/apis.PlanParams）
-// 平台 Update 为**全量替换**（服务层 buildPlan 重建整行），因此本结构不使用 omitempty。
+// 平台 Update 为**全量替换**（套餐主表整行 + 明细整体替换），因此本结构不使用 omitempty。
 type ApisPlanInput struct {
 	// Id - 0=新增，>0=修改（修改必填）
 	Id int `json:"id"`
-	// ProductId - 所属产品ID（修改时不可变更）
-	ProductId int `json:"productId"`
 	// Name - 套餐名称（新增必填）
 	Name string `json:"name"`
 	// BillingMode - 计费模式（subscription 订阅制 / metered 付费制按量）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期价格（分）/ 付费制单价（万分/次）
+	// Price - 订阅制每周期总价（分）；付费制恒 0（单价在明细行）
 	Price int64 `json:"price"`
 	// Period - 订阅周期（monthly/quarterly/yearly），付费制留空
 	Period string `json:"period"`
-	// Quota - 周期内包含调用次数（0=不限量）
-	Quota int64 `json:"quota"`
-	// QuotaDaily - 每日调用量上限（0=不限）
-	QuotaDaily int64 `json:"quotaDaily"`
-	// QuotaWeekly - 每周调用量上限（0=不限）
-	QuotaWeekly int64 `json:"quotaWeekly"`
-	// QuotaMonthly - 每月调用量上限（0=不限）
-	QuotaMonthly int64 `json:"quotaMonthly"`
-	// ConcurrencyLimit - 并发量上限（0=跟随平台默认）
-	ConcurrencyLimit int `json:"concurrencyLimit"`
-	// QpsLimit - 调用速率上限（0=跟随平台默认）
-	QpsLimit int `json:"qpsLimit"`
+	// Items - 产品明细（至少一条，同产品不重复）
+	Items []ApisPlanItemInput `json:"items"`
 	// Status - 状态（on_sale/off_sale/archived）
 	Status string `json:"status"`
 	// Version - 乐观锁版本（>0 且与当前行不一致时返回 409；0=跳过冲突校验）
@@ -413,6 +440,8 @@ type ApisRefundReviewInput struct {
 
 // ApisSubscription - 订阅实例（平台 models/basic.ApisSubscription）
 // 状态机：active →（到期未续）expired；active →（退订/退款审批通过）cancelled。
+// 套餐多产品化后订阅只挂套餐（产品集合由套餐明细决定），周期用量按订阅 × 产品
+// 分维记账（平台 apis_subscription_usages），主表不再携带产品与已用量字段。
 type ApisSubscription struct {
 	// Id - 主键
 	Id int `json:"id"`
@@ -422,8 +451,6 @@ type ApisSubscription struct {
 	UserId int `json:"userId"`
 	// PlanId - 套餐ID
 	PlanId int `json:"planId"`
-	// ProductId - 产品ID（冗余便于查询）
-	ProductId int `json:"productId"`
 	// OrderNo - 来源订单号（续费时刷新为最新订单）
 	OrderNo string `json:"orderNo"`
 	// Status - 状态（active/expired/cancelled/suspended）
@@ -434,8 +461,6 @@ type ApisSubscription struct {
 	CurrentPeriodEnd int64 `json:"currentPeriodEnd"`
 	// AutoRenew - 到期自动续费（从余额账户扣款生成新订单）
 	AutoRenew bool `json:"autoRenew"`
-	// PeriodUsed - 当前周期已用量（DB 账面值，实时值以平台缓存为准）
-	PeriodUsed int64 `json:"periodUsed"`
 	// CancelledAt - 退订时间（毫秒，0=未退订）
 	CancelledAt int64 `json:"cancelledAt"`
 	// CancelReason - 退订原因
@@ -937,6 +962,94 @@ type ApisUsageDailySummary struct {
 	ChargeModes []ApisUsageDailySummaryGroup `json:"chargeModes"`
 	// TodayRealtime - 今日实时调用量（单用户视角才有值，平台全量视图为 null）
 	TodayRealtime []ApisUsageDailySummaryGroup `json:"todayRealtime"`
+}
+
+// ============================= 能力上游管理 =============================
+
+// ApisUpstreamKeyStatus - 上游密钥状态（平台 service/apis.UpstreamKeyStatus；面板展示用，绝不回传明文）
+type ApisUpstreamKeyStatus struct {
+	// Name - 键名引用（config 表 no）
+	Name string `json:"name"`
+	// Configured - 是否已配置
+	Configured bool `json:"configured"`
+	// Hint - 掩码提示（前 4 位 + ****；未配置为空串）
+	Hint string `json:"hint"`
+}
+
+// ApisUpstreamDataStatus - 上游数据文件状态（平台 service/apis.UpstreamDataStatus，如 ip2region 离线库）
+type ApisUpstreamDataStatus struct {
+	// Source - 数据来源：embedded（内嵌默认）/ external（外部文件）/ off（显式关闭）
+	Source string `json:"source"`
+	// Path - 外部文件路径（source = external 时有值）
+	Path string `json:"path"`
+	// Size - 文件字节数（external）
+	Size int64 `json:"size"`
+	// ModTime - 文件更新时间（毫秒，external）
+	ModTime int64 `json:"modTime"`
+	// Available - 兜底源当前是否可用（加载成功）
+	Available bool `json:"available"`
+}
+
+// ApisUpstreamCacheStatus - 上游缓存状态（平台 service/apis.UpstreamCacheStatus）
+type ApisUpstreamCacheStatus struct {
+	// CacheTtl - 平台缓存有效期（duration 字符串，如 "12h"）
+	CacheTtl string `json:"cacheTtl"`
+	// CacheHours - 平台缓存有效期（小时，便于数字输入）
+	CacheHours int `json:"cacheHours"`
+	// DbRefreshDays - 库记录回源阈值（天）
+	DbRefreshDays int `json:"dbRefreshDays"`
+}
+
+// ApisUpstreamStatus - 能力上游状态视图（平台 service/apis.UpstreamStatus）
+type ApisUpstreamStatus struct {
+	// Capability - 能力编码
+	Capability string `json:"capability"`
+	// Key - 密钥状态
+	Key ApisUpstreamKeyStatus `json:"key"`
+	// Data - 数据文件状态（无数据文件概念的能力为 nil）
+	Data *ApisUpstreamDataStatus `json:"data"`
+	// Cache - 缓存状态（无缓存概念的能力为 nil）
+	Cache *ApisUpstreamCacheStatus `json:"cache"`
+	// Extra - 能力自定义补充（如上游端点、超时毫秒）
+	Extra map[string]any `json:"extra,omitempty"`
+}
+
+// ApisUpstreamKeyInput - 上游密钥设置入参（平台 service/apis.UpstreamKeyParams；明文只存在于本次请求调用栈，绝不回显）
+type ApisUpstreamKeyInput struct {
+	// Capability - 能力编码
+	Capability string `json:"capability"`
+	// Value - 密钥明文
+	Value string `json:"value"`
+}
+
+// ApisUpstreamVerifyInput - 上游配置有效性验证入参（平台 service/apis.UpstreamVerifyParams；
+// 「变更先验证，有效才允许保存」，真实探测上游，不持久化）
+type ApisUpstreamVerifyInput struct {
+	// Capability - 能力编码
+	Capability string `json:"capability"`
+	// Scene - 验证场景：key（候选密钥）/ endpoint（候选接口地址）
+	Scene string `json:"scene"`
+	// Value - 候选值（密钥明文或接口地址）
+	Value string `json:"value"`
+}
+
+// ApisUpstreamCacheInput - 上游缓存策略设置入参（平台 service/apis.UpstreamCacheParams）
+type ApisUpstreamCacheInput struct {
+	// Capability - 能力编码
+	Capability string `json:"capability"`
+	// CacheHours - 平台缓存有效期（小时）
+	CacheHours int `json:"cacheHours"`
+	// DbRefreshDays - 库记录回源阈值（天）
+	DbRefreshDays int `json:"dbRefreshDays"`
+}
+
+// ApisUpstreamOptionsInput - 上游高级参数设置入参（平台 service/apis.UpstreamOptionsParams；
+// 键值形态由能力自定义，平台能力包逐项校验）
+type ApisUpstreamOptionsInput struct {
+	// Capability - 能力编码
+	Capability string `json:"capability"`
+	// Options - 高级参数键值对
+	Options map[string]any `json:"options"`
 }
 
 // apisBillExportEnvelope - 账单导出信封（平台 HTTP apisBillExportEnvelope / gRPC apisBillExportEnvelope）
