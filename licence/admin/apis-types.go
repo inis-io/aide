@@ -7,13 +7,14 @@ package admin
 //   - 输入结构对齐 licen-hub/backend/app/service/apis/*.go 的 *Params（写路径入参）与 *Query（读路径筛选）；
 //   - 时间戳除特别注明外均为毫秒（平台 autoCreateTime:milli）。
 //
-// 金额口径：余额与订单金额单位为「分」（affects 充值/调整/退款）；metered（付费制按量）单价为
-// 「万分/次」，落在套餐明细行（ApisPlanItem.Price / ApisOfferPlanItem.Price），
-// 两者不是同一标度，展示与换算由调用方自行处理。
+// 金额口径：余额与订单金额单位为「分」（affects 充值/调整/退款）；按量兜底单价（meteredPrice）为
+// 「万分/次」，落在产品层（ApisProduct.MeteredPrice，商城浏览经 ApisOfferPlanItem.MeteredPrice
+// 透出），两者不是同一标度，展示与换算由调用方自行处理。
 //
-// 套餐多产品化（设计 02 §2.2）：套餐不再绑定单一产品，额度/单价/限额逐产品落在 ApisPlanItem
-// 明细行（订阅制四维 quota、付费制单价、两种模式通用的并发/QPS）；订阅的周期用量按
-// 订阅 × 产品分维记账（平台 apis_subscription_usages），订阅主表不再携带产品与已用量字段。
+// 套餐多产品化（设计 02 §2.2）：套餐不再绑定单一产品，订阅额度/限额逐产品落在 ApisPlanItem
+// 明细行（四维 quota + 并发/QPS）；按量计费已自套餐明细下沉产品层（ApisProduct 的
+// meteredPrice / meteredConcurrencyLimit / meteredQpsLimit），套餐 billingMode 只剩 subscription。
+// 订阅的周期用量按订阅 × 产品分维记账（平台 apis_subscription_usages），订阅主表不再携带产品与已用量字段。
 
 // ============================= 商城目录（产品 / 套餐） =============================
 
@@ -43,6 +44,12 @@ type ApisProduct struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费：订阅内累积折算额度，按量按折扣价结算）
 	CacheDiscount int `json:"cacheDiscount"`
+	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按余额按量扣费）
+	MeteredPrice int64 `json:"meteredPrice"`
+	// MeteredConcurrencyLimit - 按量并发上限（0=平台默认）
+	MeteredConcurrencyLimit int64 `json:"meteredConcurrencyLimit"`
+	// MeteredQpsLimit - 按量 QPS 上限（0=平台默认）
+	MeteredQpsLimit int64 `json:"meteredQpsLimit"`
 	// Sort - 商城展示排序
 	Sort int `json:"sort"`
 	// Tags - 商城展示标签
@@ -60,20 +67,20 @@ type ApisProduct struct {
 }
 
 // ApisPlan - API 套餐 / 价格方案（平台 models/basic.ApisPlan）
-// 套餐为「产品明细的载体」：billingMode=subscription 时 Price 为每周期总价（分），
-// 计费与限额逐产品落在明细行（ApisPlanItem）；billingMode=metered 时 Price 恒 0（单价在明细行）。
+// 套餐为「产品明细的载体」：billingMode 只剩 subscription（订阅制），Price 为每周期总价（分），
+// 计费与限额逐产品落在明细行（ApisPlanItem）；按量计费已下沉产品层（ApisProduct 的 metered 三字段）。
 type ApisPlan struct {
 	// Id - 主键
 	Id int `json:"id"`
 	// PlanNo - 套餐编号（PLN-{年}-%06d）
 	PlanNo string `json:"planNo"`
-	// Name - 套餐名称（如「包月-基础版」「按量-标准价」）
+	// Name - 套餐名称（如「包月-基础版」）
 	Name string `json:"name"`
-	// BillingMode - 计费模式（subscription 订阅制 / metered 付费制按量）
+	// BillingMode - 计费模式（恒为 subscription 订阅制；按量计费见产品 meteredPrice）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期总价（分）；付费制恒 0（单价在明细行）
+	// Price - 订阅制每周期总价（分）
 	Price int64 `json:"price"`
-	// Period - 订阅周期（monthly/quarterly/yearly），付费制为空
+	// Period - 订阅周期（monthly/quarterly/yearly）
 	Period string `json:"period"`
 	// Status - 状态（on_sale 上架 / off_sale 下架 / archived 归档）
 	Status string `json:"status"`
@@ -88,8 +95,8 @@ type ApisPlan struct {
 }
 
 // ApisPlanItem - 套餐 × 产品明细（平台 models/basic.ApisPlanItem）：
-// price 仅 metered 套餐使用（该产品按量单价，万分/次）；四维 quota 仅 subscription 套餐使用；
-// concurrencyLimit / qpsLimit 两种模式通用（0=跟随平台默认）。
+// 四维 quota 为订阅制额度（0=不限）；concurrencyLimit / qpsLimit 为订阅明细限额（0=跟随平台默认）；
+// 按量单价已下沉 apis_products.metered_price（price 列已随迁移删除）。
 type ApisPlanItem struct {
 	// Id - 主键
 	Id int `json:"id"`
@@ -97,19 +104,17 @@ type ApisPlanItem struct {
 	PlanId int `json:"planId"`
 	// ProductId - 产品ID
 	ProductId int `json:"productId"`
-	// Price - 按量单价（万分/次，仅 metered 明细；订阅明细恒 0）
-	Price int64 `json:"price"`
-	// Quota - 订阅制周期内包含调用次数（0=不限量；metered 明细恒 0）
+	// Quota - 订阅制周期内包含调用次数（0=不限量）
 	Quota int64 `json:"quota"`
-	// QuotaDaily - 订阅制每日调用量上限（自然日 UTC+8，0=不限；metered 明细恒 0）
+	// QuotaDaily - 订阅制每日调用量上限（自然日 UTC+8，0=不限）
 	QuotaDaily int64 `json:"quotaDaily"`
-	// QuotaWeekly - 订阅制每周调用量上限（自然周周一起，0=不限；metered 明细恒 0）
+	// QuotaWeekly - 订阅制每周调用量上限（自然周周一起，0=不限）
 	QuotaWeekly int64 `json:"quotaWeekly"`
-	// QuotaMonthly - 订阅制每月调用量上限（自然月，0=不限；metered 明细恒 0）
+	// QuotaMonthly - 订阅制每月调用量上限（自然月，0=不限）
 	QuotaMonthly int64 `json:"quotaMonthly"`
-	// ConcurrencyLimit - 并发量上限（两种计费模式都生效，0=跟随平台默认）
+	// ConcurrencyLimit - 并发量上限（订阅明细限额，0=跟随平台默认）
 	ConcurrencyLimit int `json:"concurrencyLimit"`
-	// QpsLimit - 调用速率上限（0=跟随平台默认）
+	// QpsLimit - 调用速率上限（订阅明细限额，0=跟随平台默认）
 	QpsLimit int `json:"qpsLimit"`
 	// CreateAt - 创建时间（毫秒）
 	CreateAt int64 `json:"createAt"`
@@ -123,7 +128,7 @@ type ApisPlanItem struct {
 type ApisPlanView struct {
 	// ApisPlan - 套餐主表字段（内嵌平铺）
 	ApisPlan
-	// Items - 产品明细（逐产品额度/单价/限额）
+	// Items - 产品明细（逐产品订阅额度/限额）
 	Items []ApisPlanItem `json:"items"`
 }
 
@@ -137,20 +142,21 @@ type ApisOfferPlan struct {
 	PlanNo string `json:"planNo"`
 	// Name - 套餐名称
 	Name string `json:"name"`
-	// BillingMode - 计费模式（subscription/metered）
+	// BillingMode - 计费模式（恒为 subscription 订阅制）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期总价（分）；付费制恒 0（单价在明细行）
+	// Price - 订阅制每周期总价（分）
 	Price int64 `json:"price"`
-	// Period - 订阅周期（月/季/年），付费制为空
+	// Period - 订阅周期（月/季/年）
 	Period string `json:"period"`
 	// Status - 状态（浏览视图恒为 on_sale）
 	Status string `json:"status"`
-	// Items - 产品明细（逐产品额度/单价/限额 + 产品摘要）
+	// Items - 产品明细（逐产品订阅额度/限额 + 产品摘要与按量兜底单价）
 	Items []ApisOfferPlanItem `json:"items"`
 }
 
 // ApisOfferPlanItem - 商品浏览的套餐明细白名单视图（平台 service/apis.OfferPlanItem）：
-// 产品摘要只带展示与定价所需信息 + 该产品在套餐内的额度/单价/限额。
+// 产品摘要只带展示与定价所需信息 + 该产品在套餐内的订阅额度/限额；
+// meteredPrice 为产品按量兜底单价（订阅超量/无订阅按余额按量扣费价，0=不提供按量计费）。
 type ApisOfferPlanItem struct {
 	// ProductId - 产品ID
 	ProductId int `json:"productId"`
@@ -170,15 +176,15 @@ type ApisOfferPlanItem struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
 	CacheDiscount int `json:"cacheDiscount"`
-	// Price - 按量单价（万分/次，仅 metered 明细；订阅明细恒 0）
-	Price int64 `json:"price"`
-	// Quota - 订阅制周期内包含调用次数（0=不限量；metered 明细恒 0）
+	// MeteredPrice - 产品按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅按余额按量扣费）
+	MeteredPrice int64 `json:"meteredPrice"`
+	// Quota - 订阅制周期内包含调用次数（0=不限量）
 	Quota int64 `json:"quota"`
-	// QuotaDaily - 订阅制每日调用量上限（0=不限；metered 明细恒 0）
+	// QuotaDaily - 订阅制每日调用量上限（0=不限）
 	QuotaDaily int64 `json:"quotaDaily"`
-	// QuotaWeekly - 订阅制每周调用量上限（0=不限；metered 明细恒 0）
+	// QuotaWeekly - 订阅制每周调用量上限（0=不限）
 	QuotaWeekly int64 `json:"quotaWeekly"`
-	// QuotaMonthly - 订阅制每月调用量上限（0=不限；metered 明细恒 0）
+	// QuotaMonthly - 订阅制每月调用量上限（0=不限）
 	QuotaMonthly int64 `json:"quotaMonthly"`
 	// ConcurrencyLimit - 并发量上限（0=跟随平台默认）
 	ConcurrencyLimit int `json:"concurrencyLimit"`
@@ -188,7 +194,8 @@ type ApisOfferPlanItem struct {
 
 // ApisProductInput - 产品写路径入参（平台 service/apis.ProductParams）
 // 平台 Update 为**全量替换**（服务层按入参重建整行），因此本结构不使用 omitempty：
-// 未显式赋值的数字字段会按 0 落库（如 cacheDiscount=0 表示缓存命中免费）。
+// 未显式赋值的数字字段会按 0 落库（如 cacheDiscount=0 表示缓存命中免费、
+// meteredPrice=0 表示不提供按量计费、meteredConcurrencyLimit/meteredQpsLimit=0 表示跟随平台默认）。
 type ApisProductInput struct {
 	// Id - 0=新增，>0=修改（修改必填）
 	Id int `json:"id"`
@@ -212,6 +219,12 @@ type ApisProductInput struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
 	CacheDiscount int `json:"cacheDiscount"`
+	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按余额按量扣费）
+	MeteredPrice int64 `json:"meteredPrice"`
+	// MeteredConcurrencyLimit - 按量并发上限（0=平台默认）
+	MeteredConcurrencyLimit int64 `json:"meteredConcurrencyLimit"`
+	// MeteredQpsLimit - 按量 QPS 上限（0=平台默认）
+	MeteredQpsLimit int64 `json:"meteredQpsLimit"`
 	// Sort - 商城展示排序
 	Sort int `json:"sort"`
 	// Tags - 商城展示标签
@@ -222,12 +235,10 @@ type ApisProductInput struct {
 
 // ApisPlanItemInput - 套餐产品明细入参（平台 service/apis.PlanItemParams）；
 // 平台明细随套餐整体提交、**全量替换**，本结构不使用 omitempty：
-// metered 明细 Price>0 且四维额度恒 0；subscription 明细 Price 恒 0、额度 0=不限。
+// 四维 quota 为订阅制额度（0=不限），concurrencyLimit / qpsLimit 为订阅明细限额（0=跟随平台默认）。
 type ApisPlanItemInput struct {
 	// ProductId - 明细产品（必填，同套餐内不重复）
 	ProductId int `json:"productId"`
-	// Price - 按量单价（万分/次），仅 metered 套餐使用；subscription 明细强制 0
-	Price int64 `json:"price"`
 	// Quota - 订阅制周期内包含调用次数（0=不限量）
 	Quota int64 `json:"quota"`
 	// QuotaDaily - 订阅制每日调用量上限（0=不限）
@@ -236,9 +247,9 @@ type ApisPlanItemInput struct {
 	QuotaWeekly int64 `json:"quotaWeekly"`
 	// QuotaMonthly - 订阅制每月调用量上限（0=不限）
 	QuotaMonthly int64 `json:"quotaMonthly"`
-	// ConcurrencyLimit - 并发量上限（两种计费模式通用，0=跟随平台默认）
+	// ConcurrencyLimit - 并发量上限（订阅明细限额，0=跟随平台默认）
 	ConcurrencyLimit int `json:"concurrencyLimit"`
-	// QpsLimit - 调用速率上限（0=跟随平台默认）
+	// QpsLimit - 调用速率上限（订阅明细限额，0=跟随平台默认）
 	QpsLimit int `json:"qpsLimit"`
 }
 
@@ -249,11 +260,11 @@ type ApisPlanInput struct {
 	Id int `json:"id"`
 	// Name - 套餐名称（新增必填）
 	Name string `json:"name"`
-	// BillingMode - 计费模式（subscription 订阅制 / metered 付费制按量）
+	// BillingMode - 计费模式（平台只接受 subscription 订阅制，留空按 subscription 处理；按量计费已下沉产品层）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期总价（分）；付费制恒 0（单价在明细行）
+	// Price - 订阅制每周期总价（分）
 	Price int64 `json:"price"`
-	// Period - 订阅周期（monthly/quarterly/yearly），付费制留空
+	// Period - 订阅周期（monthly/quarterly/yearly）
 	Period string `json:"period"`
 	// Items - 产品明细（至少一条，同产品不重复）
 	Items []ApisPlanItemInput `json:"items"`
@@ -289,7 +300,7 @@ type ApisPlanQuery struct {
 	Order string `json:"order,omitempty"`
 	// ProductId - 所属产品ID
 	ProductId int `json:"productId,omitempty"`
-	// BillingMode - 计费模式（subscription/metered）
+	// BillingMode - 计费模式（平台套餐只剩 subscription 订阅制）
 	BillingMode string `json:"billingMode,omitempty"`
 	// Status - 状态（on_sale/off_sale/archived）
 	Status string `json:"status,omitempty"`

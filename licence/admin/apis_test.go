@@ -84,13 +84,13 @@ func apisBillExportData(fileName string) map[string]any {
 }
 
 // apisOfferPlanItemRow - 套餐中心明细行（平台 service/apis.OfferPlanItem 的白名单投影：
-// 产品摘要 + 该产品在套餐内的额度/单价/限额，无 upstreamConfig/uid/version 等内部字段）
+// 产品摘要 + 该产品在套餐内的订阅额度/限额与产品按量兜底单价，无 upstreamConfig/uid/version 等内部字段）
 func apisOfferPlanItemRow() map[string]any {
 	return map[string]any{
 		"productId": 3, "productNo": "APD-2026-000003", "capability": "ip-locate",
 		"productName": "IP 定位", "summary": "查 IP 归属地",
 		"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50, "cacheDiscount": 100,
-		"price": 0, "quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+		"meteredPrice": 120, "quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
 		"concurrencyLimit": 10, "qpsLimit": 20,
 	}
 }
@@ -105,11 +105,11 @@ func apisOfferPlanRow() map[string]any {
 	}
 }
 
-// apisPlanItemRow - 套餐明细行（ApisPlanItem 全量 json tag，PlanView.Items 的元素）
+// apisPlanItemRow - 套餐明细行（ApisPlanItem 全量 json tag，PlanView.Items 的元素；订阅语义）
 func apisPlanItemRow() map[string]any {
 	return map[string]any{
-		"id": 81, "planId": 8, "productId": 3, "price": 120,
-		"quota": 0, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+		"id": 81, "planId": 8, "productId": 3,
+		"quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
 		"concurrencyLimit": 10, "qpsLimit": 20,
 		"createAt": 1780000000000, "updateAt": 1780000000000, "deleteAt": 0,
 	}
@@ -118,8 +118,8 @@ func apisPlanItemRow() map[string]any {
 // apisPlanViewRow - 平台管理视图套餐行（平台 service/apis.PlanView：套餐主表字段 + items 明细）
 func apisPlanViewRow() map[string]any {
 	return map[string]any{
-		"id": 8, "planNo": "PLN-2026-000008", "name": "按量-标准价",
-		"billingMode": "metered", "price": 0, "period": "", "status": "off_sale", "version": 1,
+		"id": 8, "planNo": "PLN-2026-000008", "name": "包月-基础版",
+		"billingMode": "subscription", "price": 9900, "period": "monthly", "status": "off_sale", "version": 1,
 		"createAt": 1780000000000, "updateAt": 1780000000000, "deleteAt": 0,
 		"items": []any{apisPlanItemRow()},
 	}
@@ -381,18 +381,18 @@ func apisRouteCases() []apisRouteCase {
 			// 页元素是平台管理视图 PlanView（套餐主表 + items 明细）
 			data: apisPageData([]any{apisPlanViewRow()}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindPlans(context.Background(), &ApisPlanQuery{Page: 1, ProductId: 3, BillingMode: "metered"})
+				page, err := client.Apis.FindPlans(context.Background(), &ApisPlanQuery{Page: 1, ProductId: 3, BillingMode: "subscription"})
 				if err != nil {
 					t.Fatalf("套餐分页失败: %v", err)
 				}
-				if len(page.Data) != 1 || page.Data[0].BillingMode != "metered" || page.Data[0].Status != "off_sale" {
+				if len(page.Data) != 1 || page.Data[0].BillingMode != "subscription" || page.Data[0].Status != "off_sale" {
 					t.Fatalf("套餐解析不符: %+v", page.Data)
 				}
-				if len(page.Data[0].Items) != 1 || page.Data[0].Items[0].ProductId != 3 || page.Data[0].Items[0].Price != 120 {
+				if len(page.Data[0].Items) != 1 || page.Data[0].Items[0].ProductId != 3 || page.Data[0].Items[0].Quota != 10000 {
 					t.Fatalf("套餐明细解析不符: %+v", page.Data[0].Items)
 				}
 			},
-			wantQuery: map[string]string{"page": "1", "productId": "3", "billingMode": "metered"},
+			wantQuery: map[string]string{"page": "1", "productId": "3", "billingMode": "subscription"},
 		},
 		{
 			name: "GetPlan", service: "ApisCatalogAdminService",
@@ -403,7 +403,7 @@ func apisRouteCases() []apisRouteCase {
 				if err != nil {
 					t.Fatalf("套餐详情失败: %v", err)
 				}
-				if row.PlanNo != "PLN-2026-000008" || len(row.Items) != 1 || row.Items[0].Price != 120 {
+				if row.PlanNo != "PLN-2026-000008" || len(row.Items) != 1 || row.Items[0].Quota != 10000 {
 					t.Fatalf("套餐详情解析不符: %+v", row)
 				}
 			},
@@ -428,7 +428,7 @@ func apisRouteCases() []apisRouteCase {
 			// 明细随套餐整体提交：未赋值的数字字段仍须上送（平台按入参全量替换）
 			wantBody: []string{
 				`"name":"包年-专业版"`, `"billingMode":"subscription"`, `"period":"yearly"`,
-				`"items":[{"productId":3,"price":0,"quota":200000,"quotaDaily":0,"quotaWeekly":0,"quotaMonthly":0,"concurrencyLimit":0,"qpsLimit":0}]`,
+				`"items":[{"productId":3,"quota":200000,"quotaDaily":0,"quotaWeekly":0,"quotaMonthly":0,"concurrencyLimit":0,"qpsLimit":0}]`,
 			},
 		},
 		{
@@ -449,7 +449,7 @@ func apisRouteCases() []apisRouteCase {
 			},
 			wantBody: []string{
 				`"id":12`, `"version":1`, `"status":"on_sale"`,
-				`"items":[{"productId":3,"price":0,"quota":200000,"quotaDaily":0,"quotaWeekly":0,"quotaMonthly":0,"concurrencyLimit":0,"qpsLimit":0}]`,
+				`"items":[{"productId":3,"quota":200000,"quotaDaily":0,"quotaWeekly":0,"quotaMonthly":0,"concurrencyLimit":0,"qpsLimit":0}]`,
 			},
 		},
 		{
@@ -1297,14 +1297,14 @@ func TestApisFindMarketProductsPlatformShape(t *testing.T) {
 							"productId": 3, "productNo": "APD-2026-000003", "capability": "ip-locate",
 							"productName": "IP 定位", "summary": "查 IP 归属地",
 							"freeDailyQuota": 100, "freeMonthlyQuota": 5000, "trialQuota": 50, "cacheDiscount": 100,
-							"price": 0, "quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
+							"meteredPrice": 120, "quota": 10000, "quotaDaily": 0, "quotaWeekly": 0, "quotaMonthly": 0,
 							"concurrencyLimit": 10, "qpsLimit": 20
 						}
 					]
 				},
 				{
-					"id": 9, "planNo": "PLN-2026-000009", "name": "按量-标准价",
-					"billingMode": "metered", "price": 0, "period": "", "status": "on_sale",
+					"id": 9, "planNo": "PLN-2026-000009", "name": "包年-专业版",
+					"billingMode": "subscription", "price": 99000, "period": "yearly", "status": "on_sale",
 					"items": []
 				}
 			],
@@ -1326,7 +1326,8 @@ func TestApisFindMarketProductsPlatformShape(t *testing.T) {
 	if first.Id != 8 || first.PlanNo != "PLN-2026-000008" || first.BillingMode != "subscription" || first.Price != 9900 {
 		t.Fatalf("套餐未按平台形状解析（疑似退回旧商品视图）: %+v", first)
 	}
-	if len(first.Items) != 1 || first.Items[0].ProductId != 3 || first.Items[0].Capability != "ip-locate" || first.Items[0].Quota != 10000 {
+	if len(first.Items) != 1 || first.Items[0].ProductId != 3 || first.Items[0].Capability != "ip-locate" ||
+		first.Items[0].Quota != 10000 || first.Items[0].MeteredPrice != 120 {
 		t.Fatalf("items 未按平台形状解析: %+v", first.Items)
 	}
 

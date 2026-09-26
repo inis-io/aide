@@ -22,8 +22,9 @@ import (
 // 纪律要点：
 //   - 归属与数据范围一律由平台服务层裁决（member 强制本人、platform 按 apis 域范围），SDK 只做 typed 传参；
 //   - 幂等键（requestId）由调用方生成并显式传入，SDK 不代为生成，失败后不得跨协议自动重试；
-//   - 金额单位为「分」，metered 套餐的按量单价为「万分/次」且落在套餐明细行（ApisPlanItem.Price）；
-//   - 套餐多产品化：额度/单价/限额逐产品配置（ApisPlanInput.Items 全量替换），
+//   - 金额单位为「分」，按量兜底单价为「万分/次」且落在产品层（ApisProduct.MeteredPrice，
+//     商城浏览经 ApisOfferPlanItem.MeteredPrice 透出）；
+//   - 套餐多产品化：订阅额度/限额逐产品配置（ApisPlanInput.Items 全量替换，billingMode 只剩 subscription），
 //     商城浏览以套餐为中心（ApisOfferPlan.Items 携带全部产品明细）；
 //   - 能力上游管理（upstream* 9 条）：密钥只进不出（响应只给掩码），数据文件上传 HTTP 走 multipart、
 //     gRPC 走 JSON base64（由传输层各自适配，方法签名一致）；
@@ -145,7 +146,7 @@ const (
 // FindMarketProducts - 在售套餐分页（商城以套餐为中心：on_sale 套餐及其产品明细）：
 // GET /api/apis-market/find
 // 权限码 apis.market.read；页元素是**套餐浏览视图**（ApisOfferPlan，Items 携带逐产品
-// 额度/单价/限额与产品摘要），经白名单投影（剥离 upstreamConfig/uid 等内部字段）。
+// 订阅额度/限额、产品摘要与按量兜底单价），经白名单投影（剥离 upstreamConfig/uid 等内部字段）。
 func (this *ApisResource) FindMarketProducts(ctx context.Context, params *ApisPlanQuery) (*Page[ApisOfferPlan], error) {
 
 	var result Page[ApisOfferPlan]
@@ -225,8 +226,8 @@ func (this *ApisResource) GetPlan(ctx context.Context, id int) (*ApisPlanView, e
 }
 
 // CreatePlan - 新建套餐（status 缺省 off_sale；明细随套餐同事务写入）：POST /api/apis-plans/create
-// 权限码 apis.catalog.create；明细至少一条且同产品不重复，上架时 metered 明细单价必须大于 0、
-// 同产品全局只允许出现在一条在售 metered 套餐明细中（平台校验，冲突返回 409）。
+// 权限码 apis.catalog.create；明细至少一条且同产品不重复；billingMode 只接受 subscription
+// （留空按 subscription 处理，按量计费已下沉产品层），订阅周期须为 monthly/quarterly/yearly（平台校验）。
 func (this *ApisResource) CreatePlan(ctx context.Context, input ApisPlanInput) (*ApisPlan, error) {
 
 	var result ApisPlan
