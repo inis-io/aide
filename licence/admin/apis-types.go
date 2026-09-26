@@ -7,7 +7,7 @@ package admin
 //   - 输入结构对齐 licen-hub/backend/app/service/apis/*.go 的 *Params（写路径入参）与 *Query（读路径筛选）；
 //   - 时间戳除特别注明外均为毫秒（平台 autoCreateTime:milli）。
 //
-// 金额口径：余额与订单金额单位为「分」（affects 充值/调整/退款）；按量兜底单价（meteredPrice）为
+// 金额口径：钱包余额与订单金额单位为「分」（affects 充值/调整/退款）；按量兜底单价（meteredPrice）为
 // 「万分/次」，落在产品层（ApisProduct.MeteredPrice，商城浏览经 ApisOfferPlanItem.MeteredPrice
 // 透出），两者不是同一标度，展示与换算由调用方自行处理。
 //
@@ -44,7 +44,7 @@ type ApisProduct struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费：订阅内累积折算额度，按量按折扣价结算）
 	CacheDiscount int `json:"cacheDiscount"`
-	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按余额按量扣费）
+	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按钱包按量扣费）
 	MeteredPrice int64 `json:"meteredPrice"`
 	// MeteredConcurrencyLimit - 按量并发上限（0=平台默认）
 	MeteredConcurrencyLimit int64 `json:"meteredConcurrencyLimit"`
@@ -156,7 +156,7 @@ type ApisOfferPlan struct {
 
 // ApisOfferPlanItem - 商品浏览的套餐明细白名单视图（平台 service/apis.OfferPlanItem）：
 // 产品摘要只带展示与定价所需信息 + 该产品在套餐内的订阅额度/限额；
-// meteredPrice 为产品按量兜底单价（订阅超量/无订阅按余额按量扣费价，0=不提供按量计费）。
+// meteredPrice 为产品按量兜底单价（订阅超量/无订阅按钱包按量扣费价，0=不提供按量计费）。
 type ApisOfferPlanItem struct {
 	// ProductId - 产品ID
 	ProductId int `json:"productId"`
@@ -176,7 +176,7 @@ type ApisOfferPlanItem struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
 	CacheDiscount int `json:"cacheDiscount"`
-	// MeteredPrice - 产品按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅按余额按量扣费）
+	// MeteredPrice - 产品按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅按钱包按量扣费）
 	MeteredPrice int64 `json:"meteredPrice"`
 	// Quota - 订阅制周期内包含调用次数（0=不限量）
 	Quota int64 `json:"quota"`
@@ -219,7 +219,7 @@ type ApisProductInput struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费）
 	CacheDiscount int `json:"cacheDiscount"`
-	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按余额按量扣费）
+	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按钱包按量扣费）
 	MeteredPrice int64 `json:"meteredPrice"`
 	// MeteredConcurrencyLimit - 按量并发上限（0=平台默认）
 	MeteredConcurrencyLimit int64 `json:"meteredConcurrencyLimit"`
@@ -326,7 +326,7 @@ type ApisOrder struct {
 	Amount int64 `json:"amount"`
 	// Status - 状态（pending/paid/cancelled/refunded/closed）
 	Status string `json:"status"`
-	// PayChannel - 支付通道（balance 余额账户 / offline 线下人工确认）
+	// PayChannel - 支付通道（balance 钱包账户 / offline 线下人工确认）
 	PayChannel string `json:"payChannel"`
 	// PaidAt - 支付时间（毫秒，0=未支付）
 	PaidAt int64 `json:"paidAt"`
@@ -358,7 +358,7 @@ type ApisOrderInput struct {
 	UserId int `json:"userId,omitempty"`
 	// PlanId - 购买的套餐（必填）
 	PlanId int `json:"planId,omitempty"`
-	// PayChannel - 支付通道（balance 余额即付 / offline 线下人工确认；空=balance）
+	// PayChannel - 支付通道（balance 钱包余额即付 / offline 线下人工确认；空=balance）
 	PayChannel string `json:"payChannel,omitempty"`
 	// RequestId - 幂等键（必填；重复提交返回原单）
 	RequestId string `json:"requestId,omitempty"`
@@ -470,7 +470,7 @@ type ApisSubscription struct {
 	CurrentPeriodStart int64 `json:"currentPeriodStart"`
 	// CurrentPeriodEnd - 当前计费周期结束（毫秒）
 	CurrentPeriodEnd int64 `json:"currentPeriodEnd"`
-	// AutoRenew - 到期自动续费（从余额账户扣款生成新订单）
+	// AutoRenew - 到期自动续费（从钱包账户扣款生成新订单）
 	AutoRenew bool `json:"autoRenew"`
 	// CancelledAt - 退订时间（毫秒，0=未退订）
 	CancelledAt int64 `json:"cancelledAt"`
@@ -508,11 +508,14 @@ type ApisSubscriptionQuery struct {
 	CreateAt []int64 `json:"createAt,omitempty"`
 }
 
-// ============================= 余额账户与充值 =============================
+// ============================= 平台钱包与充值 =============================
+//
+// 平台级钱包（一人一户），API 商城为首个消费方：钱包余额只通过钱包流水变更，apis 商城的
+// 充值/按量扣费/订阅扣款都记在同一钱包上；后续业务域消费同一钱包时复用本组 DTO 与路由。
 
-// ApisBalanceAccount - 余额账户（平台 models/basic.ApisBalanceAccount）
-// 余额只通过 apis_balance_logs 流水变更；frozen 为预扣冻结金额；monthlySpendLimit 只约束新消费。
-type ApisBalanceAccount struct {
+// WalletAccount - 平台钱包账户（平台 models/basic.WalletAccount）
+// 余额只通过钱包流水变更；frozen 为预扣冻结金额；monthlySpendLimit 只约束新消费。
+type WalletAccount struct {
 	// Id - 主键
 	Id int `json:"id"`
 	// UserId - 归属用户ID（一人一户）
@@ -535,16 +538,16 @@ type ApisBalanceAccount struct {
 	DeleteAt int64 `json:"deleteAt"`
 }
 
-// ApisBalanceLog - 账户流水（平台 models/basic.ApisBalanceLog，只追加）
+// WalletLog - 钱包流水（平台 models/basic.WalletLog，只追加）
 // txType：recharge/consume/hold/release/refund/subscribe/adjust；amount 收入为正、支出为负。
-type ApisBalanceLog struct {
+type WalletLog struct {
 	// Id - 主键
 	Id int `json:"id"`
 	// LogNo - 流水号（BTX-{年}-%06d）
 	LogNo string `json:"logNo"`
 	// UserId - 归属用户ID
 	UserId int `json:"userId"`
-	// AccountId - 余额账户ID
+	// AccountId - 钱包账户ID
 	AccountId int `json:"accountId"`
 	// TxType - 流水类型（recharge/consume/hold/release/refund/subscribe/adjust）
 	TxType string `json:"txType"`
@@ -558,13 +561,15 @@ type ApisBalanceLog struct {
 	RefNo string `json:"refNo"`
 	// Remark - 备注
 	Remark string `json:"remark"`
+	// OperatorId - 操作人用户ID（平台侧操作人；用户自助产生的流水为 0）
+	OperatorId int `json:"operatorId"`
 	// CreateAt - 创建时间（毫秒）
 	CreateAt int64 `json:"createAt"`
 }
 
-// ApisRecharge - 充值单（平台 models/basic.ApisRecharge）
+// WalletRecharge - 充值单（平台 models/basic.WalletRecharge）
 // 状态机：pending →（事务内写 recharge 流水入账）paid / cancelled / closed（超时未支付）。
-type ApisRecharge struct {
+type WalletRecharge struct {
 	// Id - 主键
 	Id int `json:"id"`
 	// RechargeNo - 充值单号（RCG-{年}-%06d）
@@ -585,6 +590,8 @@ type ApisRecharge struct {
 	PaidAt int64 `json:"paidAt"`
 	// PayTxNo - 外部流水号
 	PayTxNo string `json:"payTxNo"`
+	// OperatorId - 确认入账操作人用户ID（0=系统/自助）
+	OperatorId int `json:"operatorId"`
 	// Version - 乐观锁版本
 	Version int `json:"version"`
 	// CreateAt - 创建时间（毫秒）
@@ -595,8 +602,8 @@ type ApisRecharge struct {
 	DeleteAt int64 `json:"deleteAt"`
 }
 
-// ApisBalanceState - 余额变更结果（平台 service/apis.BalanceState，Adjust 接口的 data）
-type ApisBalanceState struct {
+// WalletState - 钱包变更结果（平台 service/apis.BalanceState，Adjust 接口的 data）
+type WalletState struct {
 	// UserId - 归属用户ID
 	UserId int `json:"userId"`
 	// AccountId - 余额账户ID
@@ -617,10 +624,10 @@ type ApisBalanceState struct {
 	Replayed bool `json:"replayed"`
 }
 
-// ApisRechargeResult - 充值单操作结果（平台 service/apis.RechargeResult）
-type ApisRechargeResult struct {
+// WalletRechargeResult - 充值单操作结果（平台 service/apis.RechargeResult）
+type WalletRechargeResult struct {
 	// Recharge - 充值单快照
-	Recharge ApisRecharge `json:"recharge"`
+	Recharge WalletRecharge `json:"recharge"`
 	// Replayed - 是否命中幂等（本次未产生新的资金变动）
 	Replayed bool `json:"replayed"`
 	// Balance - 入账后的账户余额（分；创建申请时为 0）
@@ -629,14 +636,14 @@ type ApisRechargeResult struct {
 	LogNo string `json:"logNo"`
 }
 
-// ApisBalanceSpentResult - 本月已消费（平台 HTTP {monthSpent} / gRPC apisSpentEnvelope）
-type ApisBalanceSpentResult struct {
-	// MonthSpent - 本月已消费（分；权威口径为余额流水）
+// WalletSpentResult - 本月已消费（平台 HTTP {monthSpent} / gRPC apisSpentEnvelope）
+type WalletSpentResult struct {
+	// MonthSpent - 本月已消费（分；权威口径为钱包流水）
 	MonthSpent int64 `json:"monthSpent"`
 }
 
-// ApisRechargeInput - 充值申请入参（平台 service/apis.RechargeParams）
-type ApisRechargeInput struct {
+// WalletRechargeInput - 充值申请入参（平台 service/apis.RechargeParams）
+type WalletRechargeInput struct {
 	// UserId - 归属用户（member 侧须为本人或 0=取登录态，平台侧可代用户发起）
 	UserId int `json:"userId,omitempty"`
 	// Amount - 充值金额（分，下限为平台配置，默认 10 元）
@@ -647,8 +654,8 @@ type ApisRechargeInput struct {
 	RequestId string `json:"requestId,omitempty"`
 }
 
-// ApisRechargeConfirmInput - 平台确认充值入账入参（平台 service/apis.RechargeConfirmParams）
-type ApisRechargeConfirmInput struct {
+// WalletRechargeConfirmInput - 平台确认充值入账入参（平台 service/apis.RechargeConfirmParams）
+type WalletRechargeConfirmInput struct {
 	// Id - 充值单ID（与 RechargeNo 二选一）
 	Id int `json:"id,omitempty"`
 	// RechargeNo - 充值单号（与 Id 二选一）
@@ -659,8 +666,8 @@ type ApisRechargeConfirmInput struct {
 	PayTxNo string `json:"payTxNo,omitempty"`
 }
 
-// ApisRechargeQuery - 充值单查询（平台 service/apis.RechargeQuery；member 侧强制本人）
-type ApisRechargeQuery struct {
+// WalletRechargeQuery - 充值单查询（平台 service/apis.RechargeQuery；member 侧强制本人）
+type WalletRechargeQuery struct {
 	// Page - 页码（默认 1）
 	Page int `json:"page,omitempty"`
 	// Limit - 每页数量（默认 10）
@@ -679,8 +686,8 @@ type ApisRechargeQuery struct {
 	No string `json:"no,omitempty"`
 }
 
-// ApisBalanceLogQuery - 余额流水查询（平台 service/apis.BalanceLogQuery）
-type ApisBalanceLogQuery struct {
+// WalletLogQuery - 钱包流水查询（平台 service/apis.BalanceLogQuery）
+type WalletLogQuery struct {
 	// Page - 页码（默认 1）
 	Page int `json:"page,omitempty"`
 	// Limit - 每页数量（默认 10）
@@ -697,8 +704,8 @@ type ApisBalanceLogQuery struct {
 	CreateAt []int64 `json:"createAt,omitempty"`
 }
 
-// ApisAccountQuery - 余额账户查询（平台 service/apis.AccountQuery，平台侧账户运营）
-type ApisAccountQuery struct {
+// WalletAccountQuery - 钱包账户查询（平台 service/apis.AccountQuery，平台侧账户运营）
+type WalletAccountQuery struct {
 	// Page - 页码（默认 1）
 	Page int `json:"page,omitempty"`
 	// Limit - 每页数量（默认 10）
@@ -711,9 +718,9 @@ type ApisAccountQuery struct {
 	Status string `json:"status,omitempty"`
 }
 
-// ApisBalanceAdjustInput - 平台调整余额入参（平台 service/apis.AdjustParams）
+// WalletAdjustInput - 平台调整钱包余额入参（平台 service/apis.AdjustParams）
 // Amount 可正可负：正数赠送、负数扣减（平台按原始参数读取，不丢负号）；Reason 必填并写审计。
-type ApisBalanceAdjustInput struct {
+type WalletAdjustInput struct {
 	// UserId - 目标用户（平台侧必须显式指定且落在读写范围内）
 	UserId int `json:"userId,omitempty"`
 	// Amount - 调整金额（分），正数赠送、负数扣减

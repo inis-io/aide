@@ -12,7 +12,7 @@ import (
 
 // ApisResource - API 商城资源（`/api/apis-market/*`、`/api/apis-products/*`（含能力上游管理
 // upstream*）、`/api/apis-plans/*`、`/api/apis-orders/*`、`/api/apis-subscriptions/*`、
-// `/api/apis-recharges/*`、`/api/apis-balances/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、
+// `/api/wallet-recharges/*`、`/api/wallet-accounts/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、
 // `/api/apis-monitor/*`）。
 //
 // 覆盖范围：licen-hub 商城管理面 **60 条受控路由**（7 个 gRPC 服务），方法名与平台登记表
@@ -55,7 +55,8 @@ const (
 	apisOrderService = "licenhub.licence.v1.ApisOrderAdminService"
 	// apisSubscriptionService - 订阅（我的订阅与自助动作）
 	apisSubscriptionService = "licenhub.licence.v1.ApisSubscriptionAdminService"
-	// apisBalanceService - 余额账户与充值（自助 + 平台运营）
+	// apisBalanceService - 钱包账户与充值（自助 + 平台运营；gRPC 传输层内部标识，
+	// 不随 SDK 钱包改名而变化——服务名与 full method 保持原值）
 	apisBalanceService = "licenhub.licence.v1.ApisBalanceAdminService"
 	// apisUsageService - 账务与用量只读视图（我的账单/用量）
 	apisUsageService = "licenhub.licence.v1.ApisUsageAdminService"
@@ -535,150 +536,150 @@ func (this *ApisResource) SetSubscriptionAutoRenew(ctx context.Context, id int, 
 	return &result, nil
 }
 
-// ============================= 余额与充值（apis-recharges / apis-balances，13） =============================
+// ============================= 平台钱包与充值（wallet-recharges / wallet-accounts，13） =============================
 
-// FindRecharges - 充值单分页（member 强制本人；平台侧按数据范围）：GET /api/apis-recharges/find
-// 权限码 apis.balance.read。
-func (this *ApisResource) FindRecharges(ctx context.Context, params *ApisRechargeQuery) (*Page[ApisRecharge], error) {
+// FindWalletRecharges - 充值单分页（member 强制本人；平台侧按数据范围）：GET /api/wallet-recharges/find
+// 权限码 wallet.account.read。
+func (this *ApisResource) FindWalletRecharges(ctx context.Context, params *WalletRechargeQuery) (*Page[WalletRecharge], error) {
 
-	var result Page[ApisRecharge]
-	if err := this.client.get(ctx, "/api/apis-recharges/find", params, &result); err != nil {
+	var result Page[WalletRecharge]
+	if err := this.client.get(ctx, "/api/wallet-recharges/find", params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetRecharge - 充值单详情：GET /api/apis-recharges/take?id=N
-// 权限码 apis.balance.read。
-func (this *ApisResource) GetRecharge(ctx context.Context, id int) (*ApisRecharge, error) {
+// GetWalletRecharge - 充值单详情：GET /api/wallet-recharges/take?id=N
+// 权限码 wallet.account.read。
+func (this *ApisResource) GetWalletRecharge(ctx context.Context, id int) (*WalletRecharge, error) {
 
-	var result ApisRecharge
-	if err := this.client.getWithQuery(ctx, "/api/apis-recharges/take", idQuery(id), &result); err != nil {
+	var result WalletRecharge
+	if err := this.client.getWithQuery(ctx, "/api/wallet-recharges/take", idQuery(id), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// CreateRecharge - 提交线下充值申请（requestId 幂等，重复提交返回原单）：POST /api/apis-recharges/create
-// 权限码 apis.balance.recharge；金额下限与账户状态由平台校验。
-func (this *ApisResource) CreateRecharge(ctx context.Context, input ApisRechargeInput) (*ApisRechargeResult, error) {
+// CreateWalletRecharge - 提交线下充值申请（requestId 幂等，重复提交返回原单）：POST /api/wallet-recharges/create
+// 权限码 wallet.recharge；金额下限与账户状态由平台校验。
+func (this *ApisResource) CreateWalletRecharge(ctx context.Context, input WalletRechargeInput) (*WalletRechargeResult, error) {
 
-	var result ApisRechargeResult
-	if err := this.client.post(ctx, "/api/apis-recharges/create", input, &result); err != nil {
+	var result WalletRechargeResult
+	if err := this.client.post(ctx, "/api/wallet-recharges/create", input, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// CancelRecharge - 取消充值单（仅待支付）：POST /api/apis-recharges/cancel
-// 权限码 apis.balance.recharge。
-func (this *ApisResource) CancelRecharge(ctx context.Context, id int, reason string) (*ApisRecharge, error) {
+// CancelWalletRecharge - 取消充值单（仅待支付）：POST /api/wallet-recharges/cancel
+// 权限码 wallet.recharge。
+func (this *ApisResource) CancelWalletRecharge(ctx context.Context, id int, reason string) (*WalletRecharge, error) {
 
-	var result ApisRecharge
-	if err := this.client.post(ctx, "/api/apis-recharges/cancel", map[string]any{"id": id, "reason": reason}, &result); err != nil {
+	var result WalletRecharge
+	if err := this.client.post(ctx, "/api/wallet-recharges/cancel", map[string]any{"id": id, "reason": reason}, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// ConfirmRecharge - 确认充值入账（同事务写 recharge 流水，重复确认幂等返回 replayed=true）：
-// POST /api/apis-recharges/confirm
-// 权限码 apis.balance.adjust（风险级别 high）；reviewNote 必填。
-func (this *ApisResource) ConfirmRecharge(ctx context.Context, input ApisRechargeConfirmInput) (*ApisRechargeResult, error) {
+// ConfirmWalletRecharge - 确认充值入账（同事务写 recharge 流水，重复确认幂等返回 replayed=true）：
+// POST /api/wallet-recharges/confirm
+// 权限码 wallet.adjust（风险级别 high）；reviewNote 必填。
+func (this *ApisResource) ConfirmWalletRecharge(ctx context.Context, input WalletRechargeConfirmInput) (*WalletRechargeResult, error) {
 
-	var result ApisRechargeResult
-	if err := this.client.post(ctx, "/api/apis-recharges/confirm", input, &result); err != nil {
+	var result WalletRechargeResult
+	if err := this.client.post(ctx, "/api/wallet-recharges/confirm", input, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetBalance - 我的余额账户（惰性建户，归属取登录态）：GET /api/apis-balances/take
-// 权限码 apis.balance.read。
-func (this *ApisResource) GetBalance(ctx context.Context) (*ApisBalanceAccount, error) {
+// GetWallet - 我的钱包账户（惰性建户，归属取登录态）：GET /api/wallet-accounts/take
+// 权限码 wallet.account.read。
+func (this *ApisResource) GetWallet(ctx context.Context) (*WalletAccount, error) {
 
-	var result ApisBalanceAccount
-	if err := this.client.get(ctx, "/api/apis-balances/take", nil, &result); err != nil {
+	var result WalletAccount
+	if err := this.client.get(ctx, "/api/wallet-accounts/take", nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetBalanceSpent - 本月已消费（分；权威口径为余额流水）：GET /api/apis-balances/spent
-// 权限码 apis.balance.read；与 monthlySpendLimit 配套展示。
-func (this *ApisResource) GetBalanceSpent(ctx context.Context) (*ApisBalanceSpentResult, error) {
+// GetWalletSpent - 本月已消费（分；权威口径为钱包流水）：GET /api/wallet-accounts/spent
+// 权限码 wallet.account.read；与 monthlySpendLimit 配套展示。
+func (this *ApisResource) GetWalletSpent(ctx context.Context) (*WalletSpentResult, error) {
 
-	var result ApisBalanceSpentResult
-	if err := this.client.get(ctx, "/api/apis-balances/spent", nil, &result); err != nil {
+	var result WalletSpentResult
+	if err := this.client.get(ctx, "/api/wallet-accounts/spent", nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// FindBalanceLogs - 余额流水分页（member 强制本人；平台侧按数据范围）：GET /api/apis-balances/logs
-// 权限码 apis.balance.read。
-func (this *ApisResource) FindBalanceLogs(ctx context.Context, params *ApisBalanceLogQuery) (*Page[ApisBalanceLog], error) {
+// FindWalletLogs - 钱包流水分页（member 强制本人；平台侧按数据范围）：GET /api/wallet-accounts/logs
+// 权限码 wallet.account.read。
+func (this *ApisResource) FindWalletLogs(ctx context.Context, params *WalletLogQuery) (*Page[WalletLog], error) {
 
-	var result Page[ApisBalanceLog]
-	if err := this.client.get(ctx, "/api/apis-balances/logs", params, &result); err != nil {
+	var result Page[WalletLog]
+	if err := this.client.get(ctx, "/api/wallet-accounts/logs", params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// SetBalanceLimit - 设置月度消费限制（0=关闭；不得低于本月已消费）：POST /api/apis-balances/limit
-// 权限码 apis.balance.manage；负数由平台拒绝（参数按原始值读取）。
-func (this *ApisResource) SetBalanceLimit(ctx context.Context, userId int, limit int64) (*ApisBalanceAccount, error) {
+// SetWalletLimit - 设置月度消费限制（0=关闭；不得低于本月已消费）：POST /api/wallet-accounts/limit
+// 权限码 wallet.account.manage；负数由平台拒绝（参数按原始值读取）。
+func (this *ApisResource) SetWalletLimit(ctx context.Context, userId int, limit int64) (*WalletAccount, error) {
 
-	var result ApisBalanceAccount
+	var result WalletAccount
 	body := map[string]any{"userId": userId, "limit": limit}
-	if err := this.client.post(ctx, "/api/apis-balances/limit", body, &result); err != nil {
+	if err := this.client.post(ctx, "/api/wallet-accounts/limit", body, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// AdjustBalance - 平台调整余额（正数赠送、负数扣减；说明必填并写审计）：POST /api/apis-balances/adjust
-// 权限码 apis.balance.adjust（风险级别 high）；返回调整后的余额状态（幂等命中时 replayed=true）。
-func (this *ApisResource) AdjustBalance(ctx context.Context, input ApisBalanceAdjustInput) (*ApisBalanceState, error) {
+// AdjustWallet - 平台调整钱包余额（正数赠送、负数扣减；说明必填并写审计）：POST /api/wallet-accounts/adjust
+// 权限码 wallet.adjust（风险级别 high）；返回调整后的钱包状态（幂等命中时 replayed=true）。
+func (this *ApisResource) AdjustWallet(ctx context.Context, input WalletAdjustInput) (*WalletState, error) {
 
-	var result ApisBalanceState
-	if err := this.client.post(ctx, "/api/apis-balances/adjust", input, &result); err != nil {
+	var result WalletState
+	if err := this.client.post(ctx, "/api/wallet-accounts/adjust", input, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// SetBalanceStatus - 账户风控状态流转（normal/frozen；冻结后禁止消费与充值，仅可退款）：
-// POST /api/apis-balances/status
-// 权限码 apis.balance.manage（风险级别 high）。
-func (this *ApisResource) SetBalanceStatus(ctx context.Context, userId int, status string, reason string) (*ApisBalanceAccount, error) {
+// SetWalletStatus - 钱包账户风控状态流转（normal/frozen；冻结后禁止消费与充值，仅可退款）：
+// POST /api/wallet-accounts/status
+// 权限码 wallet.account.manage（风险级别 high）。
+func (this *ApisResource) SetWalletStatus(ctx context.Context, userId int, status string, reason string) (*WalletAccount, error) {
 
-	var result ApisBalanceAccount
+	var result WalletAccount
 	body := map[string]any{"userId": userId, "status": status, "reason": reason}
-	if err := this.client.post(ctx, "/api/apis-balances/status", body, &result); err != nil {
+	if err := this.client.post(ctx, "/api/wallet-accounts/status", body, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// FindManageBalances - 账户运营分页（平台侧，按用户/状态筛选）：GET /api/apis-balances/manage/find
-// 权限码 apis.balance.manage。
-func (this *ApisResource) FindManageBalances(ctx context.Context, params *ApisAccountQuery) (*Page[ApisBalanceAccount], error) {
+// FindManageWallets - 钱包账户运营分页（平台侧，按用户/状态筛选）：GET /api/wallet-accounts/manage/find
+// 权限码 wallet.account.manage。
+func (this *ApisResource) FindManageWallets(ctx context.Context, params *WalletAccountQuery) (*Page[WalletAccount], error) {
 
-	var result Page[ApisBalanceAccount]
-	if err := this.client.get(ctx, "/api/apis-balances/manage/find", params, &result); err != nil {
+	var result Page[WalletAccount]
+	if err := this.client.get(ctx, "/api/wallet-accounts/manage/find", params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetManageBalance - 账户运营详情（按 userId；不存在则惰性建户）：GET /api/apis-balances/manage/take?userId=N
-// 权限码 apis.balance.manage；userId 必填。
-func (this *ApisResource) GetManageBalance(ctx context.Context, userId int) (*ApisBalanceAccount, error) {
+// GetManageWallet - 钱包账户运营详情（按 userId；不存在则惰性建户）：GET /api/wallet-accounts/manage/take?userId=N
+// 权限码 wallet.account.manage；userId 必填。
+func (this *ApisResource) GetManageWallet(ctx context.Context, userId int) (*WalletAccount, error) {
 
-	var result ApisBalanceAccount
-	if err := this.client.get(ctx, "/api/apis-balances/manage/take", map[string]any{"userId": userId}, &result); err != nil {
+	var result WalletAccount
+	if err := this.client.get(ctx, "/api/wallet-accounts/manage/take", map[string]any{"userId": userId}, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -783,12 +784,12 @@ func (this *ApisResource) ExportMonitorBills(ctx context.Context, params *ApisBi
 	return this.exportBills(ctx, "/api/apis-monitor/bills/export", params)
 }
 
-// FindMonitorBalanceLogs - 余额流水监控分页（平台全量，按用户/类型/单号筛选）：
+// FindMonitorBalanceLogs - 钱包流水监控分页（平台全量，按用户/类型/单号筛选）：
 // GET /api/apis-monitor/logs/find
 // 权限码 apis.monitor.read。
-func (this *ApisResource) FindMonitorBalanceLogs(ctx context.Context, params *ApisBalanceLogQuery) (*Page[ApisBalanceLog], error) {
+func (this *ApisResource) FindMonitorBalanceLogs(ctx context.Context, params *WalletLogQuery) (*Page[WalletLog], error) {
 
-	var result Page[ApisBalanceLog]
+	var result Page[WalletLog]
 	if err := this.client.get(ctx, "/api/apis-monitor/logs/find", params, &result); err != nil {
 		return nil, err
 	}

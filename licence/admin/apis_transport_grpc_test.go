@@ -49,8 +49,8 @@ func newApisGRPCServer(t *testing.T, cases []apisRouteCase) (*apisGRPCServer, *g
 	server := &apisGRPCServer{t: t, calls: map[string][]string{}, byMethod: map[string]apisRouteCase{}}
 	grouped := map[string][]string{}
 	for _, one := range cases {
-		server.byMethod[one.name] = one
-		grouped[one.service] = append(grouped[one.service], one.name)
+		server.byMethod[one.rpcName()] = one
+		grouped[one.service] = append(grouped[one.service], one.rpcName())
 	}
 
 	grpcServer := grpc.NewServer()
@@ -158,7 +158,7 @@ func TestApisRoutesGRPC(t *testing.T) {
 
 			one.invoke(t, client)
 
-			fullMethod := "/" + apisGRPCPackage + "." + one.service + "/" + one.name
+			fullMethod := "/" + apisGRPCPackage + "." + one.service + "/" + one.rpcName()
 			bodies := server.bodies(fullMethod)
 			if len(bodies) != 1 {
 				t.Fatalf("%s 应恰好调用一次，实际 %d 次（已调用：%v）", fullMethod, len(bodies), server.hitMethods())
@@ -204,7 +204,7 @@ func TestApisRoutesGRPC(t *testing.T) {
 	// 全局闭环：被调用的 full method 集合与用例表声明的集合逐字相同（不多不少，无跨用例串线）
 	expected := make([]string, 0, len(cases))
 	for _, one := range cases {
-		expected = append(expected, "/"+apisGRPCPackage+"."+one.service+"/"+one.name)
+		expected = append(expected, "/"+apisGRPCPackage+"."+one.service+"/"+one.rpcName())
 	}
 	slices.Sort(expected)
 	if got := server.hitMethods(); !slices.Equal(got, expected) {
@@ -247,7 +247,7 @@ func TestApisGRPCBusinessErrorEnvelope(t *testing.T) {
 	client.transport = &grpcAdminTransport{client: client, conn: conn}
 	client.Apis = &ApisResource{client: client}
 
-	_, err = client.Apis.CreateRecharge(context.Background(), ApisRechargeInput{Amount: 100, RequestId: "rcg-1"})
+	_, err = client.Apis.CreateWalletRecharge(context.Background(), WalletRechargeInput{Amount: 100, RequestId: "rcg-1"})
 	var apiErr *APIError
 	if err == nil || !strings.Contains(err.Error(), "下限") {
 		t.Fatalf("业务错误应返回 *APIError: %T %v", err, err)

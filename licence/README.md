@@ -395,7 +395,7 @@ artifact, _ := adm.Artifacts.Upload(ctx, admin.ArtifactUploadInput{VersionId: 12
 pub, _ := adm.SigningKeys.Public(ctx, "license", "", projectId)   // 按项目导出验签公钥（license 用途必填 projectId）
 verify, _ := adm.Artifacts.VerifyWithFile(ctx, 3, "app.tar.gz", file) // 服务端代验
 
-// API 商城管理面（53 条受控路由：目录 / 订单 / 订阅 / 余额充值 / 账单 / 用量 / 监控）
+// API 商城管理面（53 条受控路由：目录 / 订单 / 订阅 / 平台钱包充值 / 账单 / 用量 / 监控）
 offers, _ := adm.Apis.FindMarketProducts(ctx, &admin.ApisProductQuery{Page: 1, Status: "on_sale"}) // 页元素是商品视图（product + plans）
 order, _ := adm.Apis.CreateOrder(ctx, admin.ApisOrderInput{
 	PlanId: 3, PayChannel: "balance", RequestId: "req-20260817-1", // requestId 由调用方生成（幂等键）
@@ -403,7 +403,7 @@ order, _ := adm.Apis.CreateOrder(ctx, admin.ApisOrderInput{
 fileName, content, _ := adm.Apis.ExportBills(ctx, &admin.ApisBillQuery{UserId: 7}) // xlsx 原始字节（信封 base64 已解码）
 ```
 
-资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录/机器席位）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）、`UpgradeRecords`（升级执行记录，只读）、`Modules`（项目功能模块）、`SaasMenus`（菜单清单草稿/发布/归档）、`SaasFeatures`（功能字典登记/禁用/删除）、`SaasPlans`（套餐定义/状态流转）、`SaasTenants`（租户开通/变更/状态机/重签/批量续期/用量/留痕）、`SaasReview`（租户申请单审批）、`Apis`（API 商城目录/订单/订阅/余额充值/账单/用量/监控，共 53 条受控路由）。
+资源清单：`Qualification`（资格申请/审批）、`Projects`、`Instances`、`Licenses`（申请/审批/续期/暂停/吊销/重签/载荷/公钥/激活记录/机器席位）、`SigningKeys`、`Artifacts`、`Versions`（含发布/归档）、`UpgradeRecords`（升级执行记录，只读）、`Modules`（项目功能模块）、`SaasMenus`（菜单清单草稿/发布/归档）、`SaasFeatures`（功能字典登记/禁用/删除）、`SaasPlans`（套餐定义/状态流转）、`SaasTenants`（租户开通/变更/状态机/重签/批量续期/用量/留痕）、`SaasReview`（租户申请单审批）、`Apis`（API 商城目录/订单/订阅/平台钱包充值/账单/用量/监控，共 53 条受控路由）。
 
 注意：管理面账密通过所选传输上送，生产环境无论 HTTP 还是 gRPC 都**必须使用 TLS**。
 
@@ -1390,7 +1390,9 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 
 #### Apis - API 商城（管理面 53 条受控路由，7 个 gRPC 服务）
 
-> 覆盖「目录维护（产品/套餐）→ 下单/支付/退款 → 订阅 → 余额与充值 → 账单/用量/监控」全链路。
+> 覆盖「目录维护（产品/套餐）→ 下单/支付/退款 → 订阅 → 平台钱包与充值 → 账单/用量/监控」全链路。
+> 钱包为平台级账户（一人一户），API 商城是首个消费方；gRPC 侧服务名与方法名（`ApisBalanceAdminService` 等）
+> 是传输层内部标识，不随钱包改名而变化（SDK 方法名与 gRPC 方法名仅钱包组不一致）。
 > member 侧路由由平台强制本人，platform 侧按 apis 域数据范围放行；稳定权限码与风险级别与平台 `GenRoute` 逐字一致。
 > gRPC 侧是 **proto-less 服务**（`ApisMarketAdminService`/`ApisCatalogAdminService`/`ApisOrderAdminService`/
 > `ApisSubscriptionAdminService`/`ApisBalanceAdminService`/`ApisUsageAdminService`/`ApisMonitorAdminService`，
@@ -1446,23 +1448,23 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `CancelSubscription` | 退订（仅生效中订阅；已付费用不退，退款走 `ApplyRefund`） | `POST /api/apis-subscriptions/cancel` | `id int, reason string` → `*ApisSubscription` |
 | `SetSubscriptionAutoRenew` | 调整自动续费偏好（显式 `false` 同样上送） | `POST /api/apis-subscriptions/auto-renew` | `id int, autoRenew bool` → `*ApisSubscription` |
 
-**ApisBalanceAdminService（余额与充值，13）**
+**ApisBalanceAdminService（平台钱包与充值，13）**
 
 | 方法 | 说明 | 路由 | 参数 → 返回 |
 |---|---|---|---|
-| `FindRecharges` | 充值单分页 | `GET /api/apis-recharges/find` | `*ApisRechargeQuery` → `*Page[ApisRecharge]` |
-| `GetRecharge` | 充值单详情 | `GET /api/apis-recharges/take?id=N` | `id int` → `*ApisRecharge` |
-| `CreateRecharge` | 提交线下充值申请（`requestId` 幂等） | `POST /api/apis-recharges/create` | `ApisRechargeInput` → `*ApisRechargeResult` |
-| `CancelRecharge` | 取消充值单（仅待支付） | `POST /api/apis-recharges/cancel` | `id int, reason string` → `*ApisRecharge` |
-| `ConfirmRecharge` | 确认充值入账（重复确认幂等返回 `replayed=true`，风险 high） | `POST /api/apis-recharges/confirm` | `ApisRechargeConfirmInput` → `*ApisRechargeResult` |
-| `GetBalance` | 我的余额账户（惰性建户，归属取登录态） | `GET /api/apis-balances/take` | 无 → `*ApisBalanceAccount` |
-| `GetBalanceSpent` | 本月已消费（分；权威口径为余额流水） | `GET /api/apis-balances/spent` | 无 → `*ApisBalanceSpentResult` |
-| `FindBalanceLogs` | 余额流水分页 | `GET /api/apis-balances/logs` | `*ApisBalanceLogQuery` → `*Page[ApisBalanceLog]` |
-| `SetBalanceLimit` | 设置月度消费限制（0=关闭；负数由平台拒绝） | `POST /api/apis-balances/limit` | `userId int, limit int64` → `*ApisBalanceAccount` |
-| `AdjustBalance` | 平台调整余额（正数赠送/负数扣减，说明必填，风险 high） | `POST /api/apis-balances/adjust` | `ApisBalanceAdjustInput` → `*ApisBalanceState` |
-| `SetBalanceStatus` | 账户风控状态流转（normal/frozen，风险 high） | `POST /api/apis-balances/status` | `userId int, status string, reason string` → `*ApisBalanceAccount` |
-| `FindManageBalances` | 账户运营分页（平台侧） | `GET /api/apis-balances/manage/find` | `*ApisAccountQuery` → `*Page[ApisBalanceAccount]` |
-| `GetManageBalance` | 账户运营详情（按 userId；不存在则惰性建户） | `GET /api/apis-balances/manage/take?userId=N` | `userId int` → `*ApisBalanceAccount` |
+| `FindWalletRecharges` | 充值单分页 | `GET /api/wallet-recharges/find` | `*WalletRechargeQuery` → `*Page[WalletRecharge]` |
+| `GetWalletRecharge` | 充值单详情 | `GET /api/wallet-recharges/take?id=N` | `id int` → `*WalletRecharge` |
+| `CreateWalletRecharge` | 提交线下充值申请（`requestId` 幂等） | `POST /api/wallet-recharges/create` | `WalletRechargeInput` → `*WalletRechargeResult` |
+| `CancelWalletRecharge` | 取消充值单（仅待支付） | `POST /api/wallet-recharges/cancel` | `id int, reason string` → `*WalletRecharge` |
+| `ConfirmWalletRecharge` | 确认充值入账（重复确认幂等返回 `replayed=true`，风险 high） | `POST /api/wallet-recharges/confirm` | `WalletRechargeConfirmInput` → `*WalletRechargeResult` |
+| `GetWallet` | 我的钱包账户（惰性建户，归属取登录态） | `GET /api/wallet-accounts/take` | 无 → `*WalletAccount` |
+| `GetWalletSpent` | 本月已消费（分；权威口径为钱包流水） | `GET /api/wallet-accounts/spent` | 无 → `*WalletSpentResult` |
+| `FindWalletLogs` | 钱包流水分页 | `GET /api/wallet-accounts/logs` | `*WalletLogQuery` → `*Page[WalletLog]` |
+| `SetWalletLimit` | 设置月度消费限制（0=关闭；负数由平台拒绝） | `POST /api/wallet-accounts/limit` | `userId int, limit int64` → `*WalletAccount` |
+| `AdjustWallet` | 平台调整钱包余额（正数赠送/负数扣减，说明必填，风险 high） | `POST /api/wallet-accounts/adjust` | `WalletAdjustInput` → `*WalletState` |
+| `SetWalletStatus` | 钱包账户风控状态流转（normal/frozen，风险 high） | `POST /api/wallet-accounts/status` | `userId int, status string, reason string` → `*WalletAccount` |
+| `FindManageWallets` | 钱包账户运营分页（平台侧） | `GET /api/wallet-accounts/manage/find` | `*WalletAccountQuery` → `*Page[WalletAccount]` |
+| `GetManageWallet` | 钱包账户运营详情（按 userId；不存在则惰性建户） | `GET /api/wallet-accounts/manage/take?userId=N` | `userId int` → `*WalletAccount` |
 
 **ApisUsageAdminService（我的账务与用量，6）**
 
@@ -1482,7 +1484,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `FindMonitorBills` | 账单监控分页（平台全量） | `GET /api/apis-monitor/bills/find` | `*ApisBillQuery` → `*Page[ApisBill]` |
 | `GetMonitorBill` | 账单监控详情 | `GET /api/apis-monitor/bills/take?id=N` | `id int` → `*ApisBill` |
 | `ExportMonitorBills` | 账单监控导出（xlsx；平台全量或按用户筛选） | `GET /api/apis-monitor/bills/export` | `*ApisBillQuery` → `(fileName string, content []byte, err error)` |
-| `FindMonitorBalanceLogs` | 余额流水监控分页（平台全量） | `GET /api/apis-monitor/logs/find` | `*ApisBalanceLogQuery` → `*Page[ApisBalanceLog]` |
+| `FindMonitorBalanceLogs` | 钱包流水监控分页（平台全量） | `GET /api/apis-monitor/logs/find` | `*WalletLogQuery` → `*Page[WalletLog]` |
 | `FindMonitorUsageRecords` | 用量监控流水（平台全量） | `GET /api/apis-monitor/usage/find` | `*ApisUsageRecordQuery` → `*Page[ApisUsageRecord]` |
 | `FindMonitorUsageDaily` | 用量监控日聚合（平台全量） | `GET /api/apis-monitor/usage/daily` | `*ApisUsageDailyQuery` → `*Page[ApisUsageDaily]` |
 | `GetMonitorUsageSummary` | 用量看板汇总（平台全量视图 `TodayRealtime` 为 null） | `GET /api/apis-monitor/usage/summary` | `*ApisUsageDailySummaryQuery` → `*ApisUsageDailySummary` |
@@ -1500,7 +1502,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 > `ApisProductInput` / `ApisPlanInput` 对应平台**全量替换**语义（未赋值字段按零值落库），SDK 侧不使用 `omitempty`；
 > 其余写路径采用 `omitempty`，但 `ApisRefundReviewInput.Approve`、`SetSubscriptionAutoRenew` 的 `autoRenew`
-> 与 `AdjustBalance` 的负数金额始终显式上送——平台按「是否提交」判定语义时不允许折叠。
+> 与 `AdjustWallet` 的负数金额始终显式上送——平台按「是否提交」判定语义时不允许折叠。
 
 ### 20.6 主要 DTO 说明（`admin/admin-types.go` + `admin/apis-types.go`）
 
@@ -1532,8 +1534,8 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `ApisOrderTarget` / `ApisOrderCancelInput` | 订单目标（id 与单号二选一）/ 取消或关闭（附 `Reason`） |
 | `ApisOrderConfirmInput` | 线下收款确认：`ReviewNote` 必填、`PayTxNo` 可选 |
 | `ApisRefundApplyInput` / `ApisRefundReviewInput` | 退款申请（`RequestId` 幂等、`Reason` 必填）/ 退款审批（`Approve` **显式上送**、`ReviewNote` 必填） |
-| `ApisRechargeInput` / `ApisRechargeConfirmInput` | 充值申请（`RequestId` 必填、金额下限平台配置）/ 确认入账（`ReviewNote` 必填、`PayTxNo` 可选） |
-| `ApisBalanceAdjustInput` | 平台调整余额：`Amount` 可正可负（调用方保真传输，负数不被折叠）、`Reason` 必填、`RequestId` 幂等 |
+| `WalletRechargeInput` / `WalletRechargeConfirmInput` | 充值申请（`RequestId` 必填、金额下限平台配置）/ 确认入账（`ReviewNote` 必填、`PayTxNo` 可选） |
+| `WalletAdjustInput` | 平台调整钱包余额：`Amount` 可正可负（调用方保真传输，负数不被折叠）、`Reason` 必填、`RequestId` 幂等 |
 
 **查询参数**（find/rows 类共用；数组字段（如 `Status []string`、`ProjectId []int`）序列化为 `key[]=v` 重复键；`Page` 默认 1，`Limit` 默认 10）：
 
@@ -1551,10 +1553,10 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `SaasTenantUsageFindParams` | `TenantId` / `ProjectId` / `LimitKey`、`StartTime` / `EndTime`（毫秒） |
 | `QualificationFindParams` / `SaasMenuFindParams` / `SaasFeatureFindParams` / `SaasPlanFindParams` | `Status` 等常规筛选 |
 | `ApisProductQuery` / `ApisPlanQuery` | 产品（`Capability` / `Status` / `Keyword` 模糊）/ 套餐（`ProductId` / `BillingMode` / `Status`） |
-| `ApisOrderQuery` / `ApisSubscriptionQuery` / `ApisRechargeQuery` | 订单（`OrderType` / `PayChannel` / `PlanId` / `No`）/ 订阅（`SubNo` / `ProductId` / `PlanId`）/ 充值单（`PayChannel` / `No`），均含 `Page` / `Limit` / `Order` / `CreateAt` 毫秒区间 |
+| `ApisOrderQuery` / `ApisSubscriptionQuery` / `WalletRechargeQuery` | 订单（`OrderType` / `PayChannel` / `PlanId` / `No`）/ 订阅（`SubNo` / `ProductId` / `PlanId`）/ 充值单（`PayChannel` / `No`），均含 `Page` / `Limit` / `Order` / `CreateAt` 毫秒区间 |
 | `ApisBillQuery` | 账单（`BillType` / `Status` / `No` / `CreateAt` 区间；两条导出接口按同口径筛选并忽略分页） |
-| `ApisBalanceLogQuery` | 余额流水（`TxType` **多值 IN**、`RefNo`、`CreateAt` 区间） |
-| `ApisAccountQuery` | 账户运营（`UserId` / `Status`） |
+| `WalletLogQuery` | 钱包流水（`TxType` **多值 IN**、`RefNo`、`CreateAt` 区间） |
+| `WalletAccountQuery` | 钱包账户运营（`UserId` / `Status`） |
 | `ApisUsageRecordQuery` / `ApisUsageDailyQuery` | 用量（`Capability` / `ChargeMode` / `Result` / `CacheHit` 三态 / `ActivationNo` / `RequestId` + `CreateAt` 区间；日聚合按 `StatDate` 区间） |
 | `ApisUsageDailySummaryQuery` | 看板汇总（`UserId` / `Capability` / `StatDate` 区间；缺省最近 30 天，跨度上限 92 天） |
 
@@ -1580,8 +1582,8 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `ApisOfferProduct` / `ApisOfferPlan` / `ApisProductOffer` | 商品浏览白名单视图（剥离 `UpstreamConfig` / `Uid` 等内部字段）：`ApisProductOffer` = `product` + `plans`，商品浏览的两条路由（`find` 的**页元素**与 `take`）都返回它，组件类型分别是 `ApisOfferProduct` / `ApisOfferPlan` |
 | `ApisProduct` / `ApisPlan` | 产品（draft/on_sale/off_sale/archived）/ 套餐（subscription 订阅制、metered 付费制按量；`Price` 单位随计费模式为「分」或「万分/次」） |
 | `ApisOrder` / `ApisSubscription` | 订单（pending→paid→refunded / cancelled / closed；退款单 `OrderType=refund` + `RefundOrderNo`）/ 订阅（active ↔ expired/cancelled，含周期与自动续费偏好） |
-| `ApisBalanceAccount` / `ApisBalanceLog` / `ApisRecharge` | 余额账户（`Balance` / `Frozen` / `MonthlySpendLimit` / `Status`）/ 流水（只追加，`TxType` 为 recharge/consume/hold/release/refund/subscribe/adjust）/ 充值单（pending→paid/cancelled/closed） |
-| `ApisBalanceState` / `ApisRechargeResult` / `ApisBalanceSpentResult` | 调整结果（含 `Available` / `Replayed`）/ 充值结果（`Recharge` + `Balance` + `LogNo` + `Replayed`）/ 本月已消费 `{monthSpent}`（分） |
+| `WalletAccount` / `WalletLog` / `WalletRecharge` | 平台钱包账户（`Balance` / `Frozen` / `MonthlySpendLimit` / `Status`）/ 流水（只追加，`TxType` 为 recharge/consume/hold/release/refund/subscribe/adjust，含 `OperatorId` 操作人）/ 充值单（pending→paid/cancelled/closed，含 `OperatorId` 操作人） |
+| `WalletState` / `WalletRechargeResult` / `WalletSpentResult` | 调整结果（含 `Available` / `Replayed`）/ 充值结果（`Recharge` + `Balance` + `LogNo` + `Replayed`）/ 本月已消费 `{monthSpent}`（分） |
 | `ApisBill` | 账单（subscription 周期账单 / metered 按量账单；`Detail` 为明细快照 JSON，生成后不可变） |
 | `ApisUsageRecord` / `ApisUsageDaily` | 调用流水（`ChargeMode` / `Result` / `CacheHit` / `UpstreamMs`）/ 日聚合（账单与看板只读本表，不扫流水） |
 | `ApisUsageDailySummary`（含 `ApisUsageDailySummaryTotals` / `Day` / `Group`） | 看板汇总（服务端 GROUP BY + 单用户视角今日实时条带；`Totals` 恒等于 `Days` 求和） |

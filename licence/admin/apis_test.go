@@ -25,10 +25,14 @@ const apisGRPCPackage = "licenhub.licence.v1"
 
 // apisRouteCase - 单条商城路由用例
 type apisRouteCase struct {
-	// name - SDK 方法名（与平台 ApisSpecs.Method 逐字一致，gRPC 假服务端按此注册方法）
+	// name - SDK 方法名（SDK 资源层逐字一致；钱包组经平台级钱包改名后与 gRPC 方法名不同，见 rpc 字段）
 	name string
 	// service - gRPC 服务短名（如 ApisMarketAdminService）
 	service string
+	// rpc - gRPC 方法名（full method 尾段，与平台 ApisSpecs.Method 逐字一致，gRPC 假服务端按此注册方法）；
+	// 平台钱包升级为平台级钱包后 SDK 方法名破坏性改名，而 gRPC 传输层内部标识（服务名/方法名）不改名，
+	// 两者仅钱包组 13 条路由不一致；空串表示与 name 相同
+	rpc string
 	// method - HTTP 动词；path - 管理面 HTTP 路径（gRPC 侧仅用于定位同一条业务动作）
 	method string
 	path   string
@@ -51,6 +55,15 @@ type apisRouteCase struct {
 // apisPageData - 分页 data（{data,count,page}）
 func apisPageData(rows []any, count int, page int) map[string]any {
 	return map[string]any{"data": rows, "count": count, "page": page}
+}
+
+// rpcName - 用例的 gRPC 方法名（缺省与 SDK 方法名一致；仅钱包组用例显式声明旧名）
+func (this apisRouteCase) rpcName() string {
+
+	if this.rpc == "" {
+		return this.name
+	}
+	return this.rpc
 }
 
 // apisOrderRow - 订单行（字段覆盖订单模型全量 json tag，用于两类订单路由）
@@ -720,31 +733,34 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"id":3`, `"autoRenew":false`},
 		},
 
-		// ---------- ApisBalanceAdminService（13） ----------
+		// ---------- ApisBalanceAdminService（13；平台级钱包，API 商城为首个消费方） ----------
 		{
-			name: "FindRecharges", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-recharges/find",
+			name: "FindWalletRecharges", rpc: "FindRecharges", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-recharges/find",
 			data: apisPageData([]any{map[string]any{
 				"id": 4, "rechargeNo": "RCG-2026-000004", "userId": 7, "amount": 100000,
-				"payChannel": "offline", "status": "pending", "requestId": "rcg-req-4", "paidAt": 0, "version": 1,
+				"payChannel": "offline", "status": "pending", "requestId": "rcg-req-4", "operatorId": 1, "paidAt": 0, "version": 1,
 			}}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindRecharges(context.Background(), &ApisRechargeQuery{Page: 1, Status: "pending", No: "RCG-2026-000004"})
+				page, err := client.Apis.FindWalletRecharges(context.Background(), &WalletRechargeQuery{Page: 1, Status: "pending", No: "RCG-2026-000004"})
 				if err != nil {
 					t.Fatalf("充值单分页失败: %v", err)
 				}
 				if len(page.Data) != 1 || page.Data[0].Amount != 100000 {
 					t.Fatalf("充值单解析不符: %+v", page.Data)
 				}
+				if page.Data[0].OperatorId != 1 {
+					t.Fatalf("充值单操作人解析不符: %+v", page.Data[0])
+				}
 			},
 			wantQuery: map[string]string{"page": "1", "status": "pending", "no": "RCG-2026-000004"},
 		},
 		{
-			name: "GetRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-recharges/take",
-			data: map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "pending", "amount": 100000},
+			name: "GetWalletRecharge", rpc: "GetRecharge", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-recharges/take",
+			data: map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "pending", "amount": 100000, "operatorId": 0},
 			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.GetRecharge(context.Background(), 4)
+				row, err := client.Apis.GetWalletRecharge(context.Background(), 4)
 				if err != nil {
 					t.Fatalf("充值单详情失败: %v", err)
 				}
@@ -755,14 +771,14 @@ func apisRouteCases() []apisRouteCase {
 			wantQuery: map[string]string{"id": "4"},
 		},
 		{
-			name: "CreateRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/apis-recharges/create",
+			name: "CreateWalletRecharge", rpc: "CreateRecharge", service: "ApisBalanceAdminService",
+			method: http.MethodPost, path: "/api/wallet-recharges/create",
 			data: map[string]any{
 				"recharge": map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "pending", "amount": 100000},
 				"replayed": false, "balance": 0, "logNo": "",
 			},
 			invoke: func(t *testing.T, client *AdminClient) {
-				result, err := client.Apis.CreateRecharge(context.Background(), ApisRechargeInput{
+				result, err := client.Apis.CreateWalletRecharge(context.Background(), WalletRechargeInput{
 					Amount: 100000, PayChannel: "offline", RequestId: "rcg-req-4",
 				})
 				if err != nil {
@@ -775,11 +791,11 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"amount":100000`, `"payChannel":"offline"`, `"requestId":"rcg-req-4"`},
 		},
 		{
-			name: "CancelRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/apis-recharges/cancel",
+			name: "CancelWalletRecharge", rpc: "CancelRecharge", service: "ApisBalanceAdminService",
+			method: http.MethodPost, path: "/api/wallet-recharges/cancel",
 			data: map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "cancelled"},
 			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.CancelRecharge(context.Background(), 4, "已改走其它通道")
+				row, err := client.Apis.CancelWalletRecharge(context.Background(), 4, "已改走其它通道")
 				if err != nil {
 					t.Fatalf("取消充值单失败: %v", err)
 				}
@@ -790,14 +806,14 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"id":4`, `"reason":"已改走其它通道"`},
 		},
 		{
-			name: "ConfirmRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/apis-recharges/confirm",
+			name: "ConfirmWalletRecharge", rpc: "ConfirmRecharge", service: "ApisBalanceAdminService",
+			method: http.MethodPost, path: "/api/wallet-recharges/confirm",
 			data: map[string]any{
 				"recharge": map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "paid", "paidAt": 1780000002000},
 				"replayed": false, "balance": 100000, "logNo": "BTX-2026-000011",
 			},
 			invoke: func(t *testing.T, client *AdminClient) {
-				result, err := client.Apis.ConfirmRecharge(context.Background(), ApisRechargeConfirmInput{
+				result, err := client.Apis.ConfirmWalletRecharge(context.Background(), WalletRechargeConfirmInput{
 					RechargeNo: "RCG-2026-000004", ReviewNote: "银行到账", PayTxNo: "BANK-002",
 				})
 				if err != nil {
@@ -810,25 +826,25 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"rechargeNo":"RCG-2026-000004"`, `"reviewNote":"银行到账"`, `"payTxNo":"BANK-002"`},
 		},
 		{
-			name: "GetBalance", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-balances/take",
+			name: "GetWallet", rpc: "GetBalance", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-accounts/take",
 			data: map[string]any{"id": 2, "userId": 7, "balance": 8600, "frozen": 600, "monthlySpendLimit": 50000, "status": "normal", "version": 4},
 			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.GetBalance(context.Background())
+				row, err := client.Apis.GetWallet(context.Background())
 				if err != nil {
-					t.Fatalf("我的余额账户失败: %v", err)
+					t.Fatalf("我的钱包账户失败: %v", err)
 				}
 				if row.Balance != 8600 || row.Frozen != 600 || row.MonthlySpendLimit != 50000 {
-					t.Fatalf("余额账户解析不符: %+v", row)
+					t.Fatalf("钱包账户解析不符: %+v", row)
 				}
 			},
 		},
 		{
-			name: "GetBalanceSpent", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-balances/spent",
+			name: "GetWalletSpent", rpc: "GetBalanceSpent", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-accounts/spent",
 			data: map[string]any{"monthSpent": 4300},
 			invoke: func(t *testing.T, client *AdminClient) {
-				result, err := client.Apis.GetBalanceSpent(context.Background())
+				result, err := client.Apis.GetWalletSpent(context.Background())
 				if err != nil {
 					t.Fatalf("本月已消费失败: %v", err)
 				}
@@ -838,32 +854,32 @@ func apisRouteCases() []apisRouteCase {
 			},
 		},
 		{
-			name: "FindBalanceLogs", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-balances/logs",
+			name: "FindWalletLogs", rpc: "FindBalanceLogs", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-accounts/logs",
 			data: apisPageData([]any{map[string]any{
 				"id": 31, "logNo": "BTX-2026-000031", "userId": 7, "accountId": 2, "txType": "consume",
-				"amount": -400, "balanceAfter": 8600, "requestId": "call-req-31", "refNo": "BILL-2026-000005", "createAt": 1780000003000,
+				"amount": -400, "balanceAfter": 8600, "requestId": "call-req-31", "refNo": "BILL-2026-000005", "operatorId": 0, "createAt": 1780000003000,
 			}}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindBalanceLogs(context.Background(), &ApisBalanceLogQuery{
+				page, err := client.Apis.FindWalletLogs(context.Background(), &WalletLogQuery{
 					Page: 1, TxType: []string{"consume", "hold"}, RefNo: "BILL-2026-000005",
 				})
 				if err != nil {
-					t.Fatalf("余额流水分页失败: %v", err)
+					t.Fatalf("钱包流水分页失败: %v", err)
 				}
 				if len(page.Data) != 1 || page.Data[0].Amount != -400 || page.Data[0].BalanceAfter != 8600 {
-					t.Fatalf("余额流水解析不符: %+v", page.Data)
+					t.Fatalf("钱包流水解析不符: %+v", page.Data)
 				}
 			},
 			wantQuery:      map[string]string{"page": "1", "refNo": "BILL-2026-000005"},
 			wantMultiQuery: map[string][]string{"txType[]": {"consume", "hold"}},
 		},
 		{
-			name: "SetBalanceLimit", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/apis-balances/limit",
+			name: "SetWalletLimit", rpc: "SetBalanceLimit", service: "ApisBalanceAdminService",
+			method: http.MethodPost, path: "/api/wallet-accounts/limit",
 			data: map[string]any{"id": 2, "userId": 7, "balance": 8600, "monthlySpendLimit": 50000, "status": "normal"},
 			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.SetBalanceLimit(context.Background(), 7, 50000)
+				row, err := client.Apis.SetWalletLimit(context.Background(), 7, 50000)
 				if err != nil {
 					t.Fatalf("设置月度消费限制失败: %v", err)
 				}
@@ -874,18 +890,18 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"userId":7`, `"limit":50000`},
 		},
 		{
-			name: "AdjustBalance", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/apis-balances/adjust",
+			name: "AdjustWallet", rpc: "AdjustBalance", service: "ApisBalanceAdminService",
+			method: http.MethodPost, path: "/api/wallet-accounts/adjust",
 			data: map[string]any{
 				"userId": 7, "accountId": 2, "balance": 8100, "frozen": 0, "available": 8100,
 				"version": 5, "requestId": "adj-req-1", "logNo": "BTX-2026-000032", "replayed": false,
 			},
 			invoke: func(t *testing.T, client *AdminClient) {
-				state, err := client.Apis.AdjustBalance(context.Background(), ApisBalanceAdjustInput{
+				state, err := client.Apis.AdjustWallet(context.Background(), WalletAdjustInput{
 					UserId: 7, Amount: -500, RequestId: "adj-req-1", Reason: "误计费回退",
 				})
 				if err != nil {
-					t.Fatalf("平台调整余额失败: %v", err)
+					t.Fatalf("平台调整钱包余额失败: %v", err)
 				}
 				if state.Balance != 8100 || state.Available != 8100 || state.LogNo != "BTX-2026-000032" {
 					t.Fatalf("调整结果解析不符: %+v", state)
@@ -895,13 +911,13 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"userId":7`, `"amount":-500`, `"requestId":"adj-req-1"`, `"reason":"误计费回退"`},
 		},
 		{
-			name: "SetBalanceStatus", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/apis-balances/status",
+			name: "SetWalletStatus", rpc: "SetBalanceStatus", service: "ApisBalanceAdminService",
+			method: http.MethodPost, path: "/api/wallet-accounts/status",
 			data: map[string]any{"id": 2, "userId": 7, "balance": 8100, "status": "frozen"},
 			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.SetBalanceStatus(context.Background(), 7, "frozen", "异常调用")
+				row, err := client.Apis.SetWalletStatus(context.Background(), 7, "frozen", "异常调用")
 				if err != nil {
-					t.Fatalf("账户风控状态流转失败: %v", err)
+					t.Fatalf("钱包账户风控状态流转失败: %v", err)
 				}
 				if row.Status != "frozen" {
 					t.Fatalf("状态流转结果解析不符: %+v", row)
@@ -910,31 +926,31 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"userId":7`, `"status":"frozen"`, `"reason":"异常调用"`},
 		},
 		{
-			name: "FindManageBalances", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-balances/manage/find",
+			name: "FindManageWallets", rpc: "FindManageBalances", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-accounts/manage/find",
 			data: apisPageData([]any{map[string]any{"id": 2, "userId": 7, "balance": 8100, "status": "frozen"}}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindManageBalances(context.Background(), &ApisAccountQuery{Page: 1, UserId: 7, Status: "frozen"})
+				page, err := client.Apis.FindManageWallets(context.Background(), &WalletAccountQuery{Page: 1, UserId: 7, Status: "frozen"})
 				if err != nil {
-					t.Fatalf("账户运营分页失败: %v", err)
+					t.Fatalf("钱包账户运营分页失败: %v", err)
 				}
 				if len(page.Data) != 1 || page.Data[0].Status != "frozen" {
-					t.Fatalf("账户运营分页解析不符: %+v", page.Data)
+					t.Fatalf("钱包账户运营分页解析不符: %+v", page.Data)
 				}
 			},
 			wantQuery: map[string]string{"page": "1", "userId": "7", "status": "frozen"},
 		},
 		{
-			name: "GetManageBalance", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/apis-balances/manage/take",
+			name: "GetManageWallet", rpc: "GetManageBalance", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-accounts/manage/take",
 			data: map[string]any{"id": 2, "userId": 7, "balance": 8100, "status": "normal"},
 			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.GetManageBalance(context.Background(), 7)
+				row, err := client.Apis.GetManageWallet(context.Background(), 7)
 				if err != nil {
-					t.Fatalf("账户运营详情失败: %v", err)
+					t.Fatalf("钱包账户运营详情失败: %v", err)
 				}
 				if row.UserId != 7 || row.Balance != 8100 {
-					t.Fatalf("账户运营详情解析不符: %+v", row)
+					t.Fatalf("钱包账户运营详情解析不符: %+v", row)
 				}
 			},
 			wantQuery: map[string]string{"userId": "7"},
@@ -1125,11 +1141,11 @@ func apisRouteCases() []apisRouteCase {
 				"id": 31, "logNo": "BTX-2026-000031", "userId": 7, "txType": "adjust", "amount": -500, "balanceAfter": 8100,
 			}}, 1, 1),
 			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindMonitorBalanceLogs(context.Background(), &ApisBalanceLogQuery{
+				page, err := client.Apis.FindMonitorBalanceLogs(context.Background(), &WalletLogQuery{
 					Page: 1, UserId: 7, TxType: []string{"adjust"},
 				})
 				if err != nil {
-					t.Fatalf("余额流水监控分页失败: %v", err)
+					t.Fatalf("钱包流水监控分页失败: %v", err)
 				}
 				if len(page.Data) != 1 || page.Data[0].TxType != "adjust" || page.Data[0].Amount != -500 {
 					t.Fatalf("监控流水解析不符: %+v", page.Data)

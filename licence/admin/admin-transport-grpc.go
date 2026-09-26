@@ -481,31 +481,31 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 	case http.MethodPost + " /api/apis-subscriptions/auto-renew":
 		response, err = this.invokeApis(callCtx, apisSetSubscriptionAutoRenewFullMethod, request)
 
-	case http.MethodGet + " /api/apis-recharges/find":
+	case http.MethodGet + " /api/wallet-recharges/find":
 		response, err = this.invokeApis(callCtx, apisFindRechargesFullMethod, request)
-	case http.MethodGet + " /api/apis-recharges/take":
+	case http.MethodGet + " /api/wallet-recharges/take":
 		response, err = this.invokeApis(callCtx, apisGetRechargeFullMethod, request)
-	case http.MethodPost + " /api/apis-recharges/create":
+	case http.MethodPost + " /api/wallet-recharges/create":
 		response, err = this.invokeApis(callCtx, apisCreateRechargeFullMethod, request)
-	case http.MethodPost + " /api/apis-recharges/cancel":
+	case http.MethodPost + " /api/wallet-recharges/cancel":
 		response, err = this.invokeApis(callCtx, apisCancelRechargeFullMethod, request)
-	case http.MethodPost + " /api/apis-recharges/confirm":
+	case http.MethodPost + " /api/wallet-recharges/confirm":
 		response, err = this.invokeApis(callCtx, apisConfirmRechargeFullMethod, request)
-	case http.MethodGet + " /api/apis-balances/take":
+	case http.MethodGet + " /api/wallet-accounts/take":
 		response, err = this.invokeApis(callCtx, apisGetBalanceFullMethod, request)
-	case http.MethodGet + " /api/apis-balances/spent":
+	case http.MethodGet + " /api/wallet-accounts/spent":
 		response, err = this.invokeApis(callCtx, apisGetBalanceSpentFullMethod, request)
-	case http.MethodGet + " /api/apis-balances/logs":
+	case http.MethodGet + " /api/wallet-accounts/logs":
 		response, err = this.invokeApis(callCtx, apisFindBalanceLogsFullMethod, request)
-	case http.MethodPost + " /api/apis-balances/limit":
+	case http.MethodPost + " /api/wallet-accounts/limit":
 		response, err = this.invokeApis(callCtx, apisSetBalanceLimitFullMethod, request)
-	case http.MethodPost + " /api/apis-balances/adjust":
+	case http.MethodPost + " /api/wallet-accounts/adjust":
 		response, err = this.invokeApis(callCtx, apisAdjustBalanceFullMethod, request)
-	case http.MethodPost + " /api/apis-balances/status":
+	case http.MethodPost + " /api/wallet-accounts/status":
 		response, err = this.invokeApis(callCtx, apisSetBalanceStatusFullMethod, request)
-	case http.MethodGet + " /api/apis-balances/manage/find":
+	case http.MethodGet + " /api/wallet-accounts/manage/find":
 		response, err = this.invokeApis(callCtx, apisFindManageBalancesFullMethod, request)
-	case http.MethodGet + " /api/apis-balances/manage/take":
+	case http.MethodGet + " /api/wallet-accounts/manage/take":
 		response, err = this.invokeApis(callCtx, apisGetManageBalanceFullMethod, request)
 
 	case http.MethodGet + " /api/apis-bills/find":
