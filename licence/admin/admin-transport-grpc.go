@@ -481,16 +481,6 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 	case http.MethodPost + " /api/apis-subscriptions/auto-renew":
 		response, err = this.invokeApis(callCtx, apisSetSubscriptionAutoRenewFullMethod, request)
 
-	case http.MethodGet + " /api/wallet-recharges/find":
-		response, err = this.invokeApis(callCtx, apisFindRechargesFullMethod, request)
-	case http.MethodGet + " /api/wallet-recharges/take":
-		response, err = this.invokeApis(callCtx, apisGetRechargeFullMethod, request)
-	case http.MethodPost + " /api/wallet-recharges/create":
-		response, err = this.invokeApis(callCtx, apisCreateRechargeFullMethod, request)
-	case http.MethodPost + " /api/wallet-recharges/cancel":
-		response, err = this.invokeApis(callCtx, apisCancelRechargeFullMethod, request)
-	case http.MethodPost + " /api/wallet-recharges/confirm":
-		response, err = this.invokeApis(callCtx, apisConfirmRechargeFullMethod, request)
 	case http.MethodGet + " /api/wallet-accounts/take":
 		response, err = this.invokeApis(callCtx, apisGetBalanceFullMethod, request)
 	case http.MethodGet + " /api/wallet-accounts/spent":

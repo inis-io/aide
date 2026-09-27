@@ -131,7 +131,7 @@ func (this *apisGRPCServer) hitMethods() []string {
 	return methods
 }
 
-// TestApisRoutesGRPC - 60 条商城路由逐条经真实 gRPC 调用（bufconn）校验
+// TestApisRoutesGRPC - 55 条商城路由逐条经真实 gRPC 调用（bufconn）校验
 func TestApisRoutesGRPC(t *testing.T) {
 
 	cases := apisRouteCases()
@@ -217,16 +217,16 @@ func TestApisRoutesGRPC(t *testing.T) {
 func TestApisGRPCBusinessErrorEnvelope(t *testing.T) {
 
 	grpcServer := grpc.NewServer()
-	raw := []byte(`{"bizCode":"RECHARGE_BELOW_MIN","minAmount":10000}`)
+	raw := []byte(`{"bizCode":"ADJUST_REASON_REQUIRED"}`)
 	grpcServer.RegisterService(&grpc.ServiceDesc{
 		ServiceName: apisGRPCPackage + ".ApisBalanceAdminService",
 		HandlerType: (*any)(nil),
 		Streams:     []grpc.StreamDesc{},
 		Metadata:    "grpc/admin/v1/apis.go",
 		Methods: []grpc.MethodDesc{{
-			MethodName: "CreateRecharge",
+			MethodName: "AdjustBalance",
 			Handler: func(any, context.Context, func(any) error, grpc.UnaryServerInterceptor) (any, error) {
-				return &licencev1.AdminResponse{Code: http.StatusBadRequest, Message: "充值金额不得低于平台下限（10 元）！", DataJson: raw}, nil
+				return &licencev1.AdminResponse{Code: http.StatusBadRequest, Message: "调整说明必填！", DataJson: raw}, nil
 			},
 		}},
 	}, &apisGRPCServer{t: t})
@@ -247,15 +247,15 @@ func TestApisGRPCBusinessErrorEnvelope(t *testing.T) {
 	client.transport = &grpcAdminTransport{client: client, conn: conn}
 	client.Apis = &ApisResource{client: client}
 
-	_, err = client.Apis.CreateWalletRecharge(context.Background(), WalletRechargeInput{Amount: 100, RequestId: "rcg-1"})
+	_, err = client.Apis.AdjustWallet(context.Background(), WalletAdjustInput{UserId: 7, Amount: 100, RequestId: "adj-1"})
 	var apiErr *APIError
-	if err == nil || !strings.Contains(err.Error(), "下限") {
+	if err == nil || !strings.Contains(err.Error(), "调整说明") {
 		t.Fatalf("业务错误应返回 *APIError: %T %v", err, err)
 	}
 	if !errors.As(err, &apiErr) || apiErr.Code != http.StatusBadRequest {
 		t.Fatalf("业务错误码应映射为 400: %+v", apiErr)
 	}
-	if !strings.Contains(string(apiErr.Data), "RECHARGE_BELOW_MIN") {
+	if !strings.Contains(string(apiErr.Data), "ADJUST_REASON_REQUIRED") {
 		t.Fatalf("业务错误明细应原样保留: %s", string(apiErr.Data))
 	}
 }

@@ -12,10 +12,9 @@ import (
 
 // ApisResource - API 商城资源（`/api/apis-market/*`、`/api/apis-products/*`（含能力上游管理
 // upstream*）、`/api/apis-plans/*`、`/api/apis-orders/*`、`/api/apis-subscriptions/*`、
-// `/api/wallet-recharges/*`、`/api/wallet-accounts/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、
-// `/api/apis-monitor/*`）。
+// `/api/wallet-accounts/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、`/api/apis-monitor/*`）。
 //
-// 覆盖范围：licen-hub 商城管理面 **60 条受控路由**（7 个 gRPC 服务），方法名与平台登记表
+// 覆盖范围：licen-hub 商城管理面 **55 条受控路由**（7 个 gRPC 服务），方法名与平台登记表
 // `backend/grpc/admin/v1/apis.go` 的 `ApisSpecs().Method` 逐字一致，便于协议矩阵式对账；
 // 三向一致性（SDK 方法 ↔ 传输层 case ↔ 平台登记表）由 `apis_reconcile_test.go` 强制守护。
 //
@@ -55,7 +54,7 @@ const (
 	apisOrderService = "licenhub.licence.v1.ApisOrderAdminService"
 	// apisSubscriptionService - 订阅（我的订阅与自助动作）
 	apisSubscriptionService = "licenhub.licence.v1.ApisSubscriptionAdminService"
-	// apisBalanceService - 钱包账户与充值（自助 + 平台运营；gRPC 传输层内部标识，
+	// apisBalanceService - 钱包账户（自助 + 平台运营；gRPC 传输层内部标识，
 	// 不随 SDK 钱包改名而变化——服务名与 full method 保持原值）
 	apisBalanceService = "licenhub.licence.v1.ApisBalanceAdminService"
 	// apisUsageService - 账务与用量只读视图（我的账单/用量）
@@ -110,11 +109,6 @@ const (
 	apisSetSubscriptionAutoRenewFullMethod = "/" + apisSubscriptionService + "/SetSubscriptionAutoRenew"
 
 	// ---------- ApisBalanceAdminService ----------
-	apisFindRechargesFullMethod      = "/" + apisBalanceService + "/FindRecharges"
-	apisGetRechargeFullMethod        = "/" + apisBalanceService + "/GetRecharge"
-	apisCreateRechargeFullMethod     = "/" + apisBalanceService + "/CreateRecharge"
-	apisCancelRechargeFullMethod     = "/" + apisBalanceService + "/CancelRecharge"
-	apisConfirmRechargeFullMethod    = "/" + apisBalanceService + "/ConfirmRecharge"
 	apisGetBalanceFullMethod         = "/" + apisBalanceService + "/GetBalance"
 	apisGetBalanceSpentFullMethod    = "/" + apisBalanceService + "/GetBalanceSpent"
 	apisFindBalanceLogsFullMethod    = "/" + apisBalanceService + "/FindBalanceLogs"
@@ -536,63 +530,9 @@ func (this *ApisResource) SetSubscriptionAutoRenew(ctx context.Context, id int, 
 	return &result, nil
 }
 
-// ============================= 平台钱包与充值（wallet-recharges / wallet-accounts，13） =============================
-
-// FindWalletRecharges - 充值单分页（member 强制本人；平台侧按数据范围）：GET /api/wallet-recharges/find
-// 权限码 wallet.account.read。
-func (this *ApisResource) FindWalletRecharges(ctx context.Context, params *WalletRechargeQuery) (*Page[WalletRecharge], error) {
-
-	var result Page[WalletRecharge]
-	if err := this.client.get(ctx, "/api/wallet-recharges/find", params, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// GetWalletRecharge - 充值单详情：GET /api/wallet-recharges/take?id=N
-// 权限码 wallet.account.read。
-func (this *ApisResource) GetWalletRecharge(ctx context.Context, id int) (*WalletRecharge, error) {
-
-	var result WalletRecharge
-	if err := this.client.getWithQuery(ctx, "/api/wallet-recharges/take", idQuery(id), &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// CreateWalletRecharge - 提交线下充值申请（requestId 幂等，重复提交返回原单）：POST /api/wallet-recharges/create
-// 权限码 wallet.recharge；金额下限与账户状态由平台校验。
-func (this *ApisResource) CreateWalletRecharge(ctx context.Context, input WalletRechargeInput) (*WalletRechargeResult, error) {
-
-	var result WalletRechargeResult
-	if err := this.client.post(ctx, "/api/wallet-recharges/create", input, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// CancelWalletRecharge - 取消充值单（仅待支付）：POST /api/wallet-recharges/cancel
-// 权限码 wallet.recharge。
-func (this *ApisResource) CancelWalletRecharge(ctx context.Context, id int, reason string) (*WalletRecharge, error) {
-
-	var result WalletRecharge
-	if err := this.client.post(ctx, "/api/wallet-recharges/cancel", map[string]any{"id": id, "reason": reason}, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// ConfirmWalletRecharge - 确认充值入账（同事务写 recharge 流水，重复确认幂等返回 replayed=true）：
-// POST /api/wallet-recharges/confirm
-// 权限码 wallet.adjust（风险级别 high）；reviewNote 必填。
-func (this *ApisResource) ConfirmWalletRecharge(ctx context.Context, input WalletRechargeConfirmInput) (*WalletRechargeResult, error) {
-
-	var result WalletRechargeResult
-	if err := this.client.post(ctx, "/api/wallet-recharges/confirm", input, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
+// ============================= 平台钱包（wallet-accounts，8） =============================
+// 充值申请/充值审核已整体下线（平台 wallet_recharges 表删除），只保留管理员人工调账 adjust：
+// 账户余额只经 AdjustWallet 变更并记钱包流水（txType=adjust）。
 
 // GetWallet - 我的钱包账户（惰性建户，归属取登录态）：GET /api/wallet-accounts/take
 // 权限码 wallet.account.read。
@@ -835,7 +775,7 @@ func (this *ApisResource) GetMonitorUsageSummary(ctx context.Context, params *Ap
 // ============================= 资源层内部助手 =============================
 
 // apisTargetQuery - 「id 与单号二选一」的查询参数（空值不上送，与平台 apisNeedTarget 口径一致）。
-// key 为单号参数名（订单用 orderNo、充值单用 rechargeNo）。
+// key 为单号参数名（当前仅订单用 orderNo）。
 func apisTargetQuery(id int, key string, no string) url.Values {
 	query := url.Values{}
 	if id > 0 {

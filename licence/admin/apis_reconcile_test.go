@@ -47,8 +47,9 @@ const (
 	apisServerServiceDir = apisSiblingRepoPath + "/backend/app/service/apis"
 	// apisServerPackage - 平台 proto-less 服务的权威包名（曾出现 lichenhub 笔误，此处回归守护）
 	apisServerPackage = "licenhub.licence.v1"
-	// apisRouteCount - 商城管理面受控路由条数（与平台登记表条数互为断言）
-	apisRouteCount = 60
+	// apisRouteCount - 商城管理面受控路由条数（与平台登记表条数互为断言；
+	// 充值申请/充值审核 5 条路由随功能下线删除后 60 → 55）
+	apisRouteCount = 55
 )
 
 var (
@@ -108,7 +109,7 @@ var (
 	// 本 SDK 并行推进，落地后需把本表键名同步为平台新名（键为旧名时靠映射兼容，双侧同名时直比）。
 	apisPlatformTypeAliases = map[string]string{
 		"OfferPlan": "ApisOfferPlan", "OfferPlanItem": "ApisOfferPlanItem", "PlanView": "ApisPlanView",
-		"BalanceState": "WalletState", "RechargeResult": "WalletRechargeResult",
+		"BalanceState":           "WalletState",
 		"UsageDailySummary":      "ApisUsageDailySummary",
 		"UsageDailySummaryDay":   "ApisUsageDailySummaryDay",
 		"UsageDailySummaryGroup": "ApisUsageDailySummaryGroup",
@@ -125,22 +126,18 @@ var (
 		"soft_delete.DeletedAt": "int64",
 	}
 	// apisWalletRPCNames - 钱包组 SDK 方法名 → gRPC 方法名：平台级钱包升级后 SDK 方法名破坏性改名，
-	// 而 gRPC 传输层内部标识（服务名/方法名）按双协议纪律保持不变，两者仅这 13 条不再逐字一致；
+	// 而 gRPC 传输层内部标识（服务名/方法名）按双协议纪律保持不变，两者仅这 8 条不再逐字一致
+	// （充值组 5 条已随功能下线从两侧同步删除）；
 	// 对账时 full method 尾段按本表核对，其余方法仍要求 SDK 方法名 == gRPC 方法名。
 	apisWalletRPCNames = map[string]string{
-		"FindWalletRecharges":   "FindRecharges",
-		"GetWalletRecharge":     "GetRecharge",
-		"CreateWalletRecharge":  "CreateRecharge",
-		"CancelWalletRecharge":  "CancelRecharge",
-		"ConfirmWalletRecharge": "ConfirmRecharge",
-		"GetWallet":             "GetBalance",
-		"GetWalletSpent":        "GetBalanceSpent",
-		"FindWalletLogs":        "FindBalanceLogs",
-		"SetWalletLimit":        "SetBalanceLimit",
-		"AdjustWallet":          "AdjustBalance",
-		"SetWalletStatus":       "SetBalanceStatus",
-		"FindManageWallets":     "FindManageBalances",
-		"GetManageWallet":       "GetManageBalance",
+		"GetWallet":         "GetBalance",
+		"GetWalletSpent":    "GetBalanceSpent",
+		"FindWalletLogs":    "FindBalanceLogs",
+		"SetWalletLimit":    "SetBalanceLimit",
+		"AdjustWallet":      "AdjustBalance",
+		"SetWalletStatus":   "SetBalanceStatus",
+		"FindManageWallets": "FindManageBalances",
+		"GetManageWallet":   "GetManageBalance",
 	}
 	// apisSDKNameByRPC - gRPC 方法名 → SDK 方法名（钱包组反向映射；平台登记表 Method 为 gRPC 方法名）
 	apisSDKNameByRPC = func() map[string]string {
@@ -162,7 +159,7 @@ func apisRPCNameOf(sdkMethod string) string {
 }
 
 // apisIsMallRoute - 是否为商城管理面路由（apis-* 前缀 + 平台级钱包 wallet-* 前缀；
-// 钱包组 HTTP 路径已升级为 /api/wallet-accounts/* 与 /api/wallet-recharges/*，仍属商城对账范围）
+// 钱包组 HTTP 路径为 /api/wallet-accounts/*，仍属商城对账范围）
 func apisIsMallRoute(path string) bool {
 
 	return strings.HasPrefix(path, "/api/apis-") || strings.HasPrefix(path, "/api/wallet-")
@@ -388,7 +385,7 @@ func apisRequireSiblingRepo(t *testing.T) {
 }
 
 // TestApisReconcileSDKSourceTransportAndCases - SDK 资源层 ↔ 传输层 ↔ 用例表三向一致
-// （不依赖兄弟仓库；约束不变式：typed 方法数 = 传输 case 数 = 用例表条数 = 60）
+// （不依赖兄弟仓库；约束不变式：typed 方法数 = 传输 case 数 = 用例表条数 = 55）
 func TestApisReconcileSDKSourceTransportAndCases(t *testing.T) {
 
 	routes := loadApisSDKRoutes(t)
@@ -604,7 +601,6 @@ var apisShapeFiles = []apisShapeFile{
 	{sdkType: "ApisBill", serverType: "ApisBill", serverFile: "backend/app/models/basic/apis-billing.go"},
 	{sdkType: "WalletAccount", serverType: "WalletAccount", serverFile: "backend/app/models/basic/wallet.go"},
 	{sdkType: "WalletLog", serverType: "WalletLog", serverFile: "backend/app/models/basic/wallet.go"},
-	{sdkType: "WalletRecharge", serverType: "WalletRecharge", serverFile: "backend/app/models/basic/wallet.go"},
 	{sdkType: "ApisUsageRecord", serverType: "ApisUsageRecord", serverFile: "backend/app/models/basic/apis-usage.go"},
 	{sdkType: "ApisUsageDaily", serverType: "ApisUsageDaily", serverFile: "backend/app/models/basic/apis-usage.go"},
 
@@ -624,7 +620,6 @@ var apisShapeFiles = []apisShapeFile{
 
 	// 输出：操作结果与看板
 	{sdkType: "WalletState", serverType: "BalanceState", serverFile: "backend/app/service/apis/balance.go"},
-	{sdkType: "WalletRechargeResult", serverType: "RechargeResult", serverFile: "backend/app/service/apis/recharge.go"},
 	{sdkType: "WalletSpentResult", serverType: "apisSpentEnvelope", serverFile: "backend/grpc/admin/v1/apis.go"},
 	{sdkType: "IdResult", serverType: "apisIdEnvelope", serverFile: "backend/grpc/admin/v1/apis.go"},
 	{sdkType: "apisBillExportEnvelope", serverType: "apisBillExportEnvelope", serverFile: "backend/grpc/admin/v1/apis.go"},
@@ -646,8 +641,6 @@ var apisShapeFiles = []apisShapeFile{
 	{sdkType: "ApisOrderConfirmInput", serverType: "OrderConfirmParams", serverFile: "backend/app/service/apis/order.go"},
 	{sdkType: "ApisRefundApplyInput", serverType: "RefundApplyParams", serverFile: "backend/app/service/apis/refund.go"},
 	{sdkType: "ApisRefundReviewInput", serverType: "RefundReviewParams", serverFile: "backend/app/service/apis/refund.go"},
-	{sdkType: "WalletRechargeInput", serverType: "RechargeParams", serverFile: "backend/app/service/apis/recharge.go"},
-	{sdkType: "WalletRechargeConfirmInput", serverType: "RechargeConfirmParams", serverFile: "backend/app/service/apis/recharge.go"},
 	{sdkType: "WalletAdjustInput", serverType: "AdjustParams", serverFile: "backend/app/service/apis/balance.go"},
 
 	// 输入：读路径筛选
@@ -656,7 +649,6 @@ var apisShapeFiles = []apisShapeFile{
 	{sdkType: "ApisOrderQuery", serverType: "OrderQuery", serverFile: "backend/app/service/apis/order.go"},
 	{sdkType: "ApisBillQuery", serverType: "BillQuery", serverFile: "backend/app/service/apis/order.go"},
 	{sdkType: "ApisSubscriptionQuery", serverType: "SubscriptionQuery", serverFile: "backend/app/service/apis/subscription.go"},
-	{sdkType: "WalletRechargeQuery", serverType: "RechargeQuery", serverFile: "backend/app/service/apis/recharge.go"},
 	{sdkType: "WalletLogQuery", serverType: "BalanceLogQuery", serverFile: "backend/app/service/apis/balance.go"},
 	{sdkType: "WalletAccountQuery", serverType: "AccountQuery", serverFile: "backend/app/service/apis/balance.go"},
 	{sdkType: "ApisUsageRecordQuery", serverType: "UsageRecordQuery", serverFile: "backend/app/service/apis/usage.go"},

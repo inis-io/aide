@@ -3,11 +3,11 @@ package admin
 // 本文件为 API 商城（apis 域）DTO，与平台逐一对齐（口径沿用 admin-types.go 头部约定）：
 //   - 输出结构对齐 licen-hub/backend/app/models/basic/apis-*.go 各模型的 json tag，
 //     以及 app/service/apis/*.go 的白名单视图（商品浏览套餐中心 OfferPlan/OfferPlanItem、
-//     操作结果 RechargeResult/BalanceState、能力上游状态 UpstreamStatus 族）；
+//     操作结果 BalanceState、能力上游状态 UpstreamStatus 族）；
 //   - 输入结构对齐 licen-hub/backend/app/service/apis/*.go 的 *Params（写路径入参）与 *Query（读路径筛选）；
 //   - 时间戳除特别注明外均为毫秒（平台 autoCreateTime:milli）。
 //
-// 金额口径：钱包余额与订单金额单位为「分」（affects 充值/调整/退款）；按量兜底单价（meteredPrice）为
+// 金额口径：钱包余额与订单金额单位为「分」（affects 调整/退款）；按量兜底单价（meteredPrice）为
 // 「万分/次」，落在产品层（ApisProduct.MeteredPrice，商城浏览经 ApisOfferPlanItem.MeteredPrice
 // 透出），两者不是同一标度，展示与换算由调用方自行处理。
 //
@@ -508,10 +508,12 @@ type ApisSubscriptionQuery struct {
 	CreateAt []int64 `json:"createAt,omitempty"`
 }
 
-// ============================= 平台钱包与充值 =============================
+// ============================= 平台钱包 =============================
 //
 // 平台级钱包（一人一户），API 商城为首个消费方：钱包余额只通过钱包流水变更，apis 商城的
-// 充值/按量扣费/订阅扣款都记在同一钱包上；后续业务域消费同一钱包时复用本组 DTO 与路由。
+// 按量扣费/订阅扣款都记在同一钱包上；后续业务域消费同一钱包时复用本组 DTO 与路由。
+// 充值申请/充值审核已整体下线（平台 wallet_recharges 表删除），余额只经管理员人工调账
+// adjust 变更（txType=adjust，operator_id 溯源操作人）。
 
 // WalletAccount - 平台钱包账户（平台 models/basic.WalletAccount）
 // 余额只通过钱包流水变更；frozen 为预扣冻结金额；monthlySpendLimit 只约束新消费。
@@ -526,7 +528,7 @@ type WalletAccount struct {
 	Frozen int64 `json:"frozen"`
 	// MonthlySpendLimit - 月度消费限制（分，0=不限制）
 	MonthlySpendLimit int64 `json:"monthlySpendLimit"`
-	// Status - 状态（normal 正常 / frozen 风控冻结，冻结后禁止消费与充值，仅可退款）
+	// Status - 状态（normal 正常 / frozen 风控冻结，冻结后禁止消费，仅可退款）
 	Status string `json:"status"`
 	// Version - 乐观锁版本
 	Version int `json:"version"`
@@ -567,41 +569,6 @@ type WalletLog struct {
 	CreateAt int64 `json:"createAt"`
 }
 
-// WalletRecharge - 充值单（平台 models/basic.WalletRecharge）
-// 状态机：pending →（事务内写 recharge 流水入账）paid / cancelled / closed（超时未支付）。
-type WalletRecharge struct {
-	// Id - 主键
-	Id int `json:"id"`
-	// RechargeNo - 充值单号（RCG-{年}-%06d）
-	RechargeNo string `json:"rechargeNo"`
-	// UserId - 归属用户ID
-	UserId int `json:"userId"`
-	// Amount - 充值金额（分）
-	Amount int64 `json:"amount"`
-	// PayChannel - 支付通道（offline 线下转账人工确认 / adjust 平台赠送调整）
-	PayChannel string `json:"payChannel"`
-	// Status - 状态（pending/paid/cancelled/closed 超时未支付）
-	Status string `json:"status"`
-	// RequestId - 幂等键
-	RequestId string `json:"requestId"`
-	// ReviewNote - 平台确认/调整说明（adjust 通道必填，写审计）
-	ReviewNote string `json:"reviewNote"`
-	// PaidAt - 到账时间（毫秒，0=未到账）
-	PaidAt int64 `json:"paidAt"`
-	// PayTxNo - 外部流水号
-	PayTxNo string `json:"payTxNo"`
-	// OperatorId - 确认入账操作人用户ID（0=系统/自助）
-	OperatorId int `json:"operatorId"`
-	// Version - 乐观锁版本
-	Version int `json:"version"`
-	// CreateAt - 创建时间（毫秒）
-	CreateAt int64 `json:"createAt"`
-	// UpdateAt - 更新时间（毫秒）
-	UpdateAt int64 `json:"updateAt"`
-	// DeleteAt - 删除时间（毫秒，0=未删除）
-	DeleteAt int64 `json:"deleteAt"`
-}
-
 // WalletState - 钱包变更结果（平台 service/apis.BalanceState，Adjust 接口的 data）
 type WalletState struct {
 	// UserId - 归属用户ID
@@ -624,66 +591,10 @@ type WalletState struct {
 	Replayed bool `json:"replayed"`
 }
 
-// WalletRechargeResult - 充值单操作结果（平台 service/apis.RechargeResult）
-type WalletRechargeResult struct {
-	// Recharge - 充值单快照
-	Recharge WalletRecharge `json:"recharge"`
-	// Replayed - 是否命中幂等（本次未产生新的资金变动）
-	Replayed bool `json:"replayed"`
-	// Balance - 入账后的账户余额（分；创建申请时为 0）
-	Balance int64 `json:"balance"`
-	// LogNo - 入账流水号（创建申请时为空）
-	LogNo string `json:"logNo"`
-}
-
 // WalletSpentResult - 本月已消费（平台 HTTP {monthSpent} / gRPC apisSpentEnvelope）
 type WalletSpentResult struct {
 	// MonthSpent - 本月已消费（分；权威口径为钱包流水）
 	MonthSpent int64 `json:"monthSpent"`
-}
-
-// WalletRechargeInput - 充值申请入参（平台 service/apis.RechargeParams）
-type WalletRechargeInput struct {
-	// UserId - 归属用户（member 侧须为本人或 0=取登录态，平台侧可代用户发起）
-	UserId int `json:"userId,omitempty"`
-	// Amount - 充值金额（分，下限为平台配置，默认 10 元）
-	Amount int64 `json:"amount,omitempty"`
-	// PayChannel - 支付通道（当前仅 offline；空=offline）
-	PayChannel string `json:"payChannel,omitempty"`
-	// RequestId - 幂等键（必填）
-	RequestId string `json:"requestId,omitempty"`
-}
-
-// WalletRechargeConfirmInput - 平台确认充值入账入参（平台 service/apis.RechargeConfirmParams）
-type WalletRechargeConfirmInput struct {
-	// Id - 充值单ID（与 RechargeNo 二选一）
-	Id int `json:"id,omitempty"`
-	// RechargeNo - 充值单号（与 Id 二选一）
-	RechargeNo string `json:"rechargeNo,omitempty"`
-	// ReviewNote - 平台确认说明（必填，写审计与充值单）
-	ReviewNote string `json:"reviewNote,omitempty"`
-	// PayTxNo - 外部流水号（可选，如银行转账凭证号）
-	PayTxNo string `json:"payTxNo,omitempty"`
-}
-
-// WalletRechargeQuery - 充值单查询（平台 service/apis.RechargeQuery；member 侧强制本人）
-type WalletRechargeQuery struct {
-	// Page - 页码（默认 1）
-	Page int `json:"page,omitempty"`
-	// Limit - 每页数量（默认 10）
-	Limit int `json:"limit,omitempty"`
-	// Order - 排序
-	Order string `json:"order,omitempty"`
-	// UserId - 归属用户（平台侧按读范围筛选；member 须为本人或 0）
-	UserId int `json:"userId,omitempty"`
-	// Status - 状态（pending/paid/cancelled/closed）
-	Status string `json:"status,omitempty"`
-	// PayChannel - 支付通道（offline/adjust）
-	PayChannel string `json:"payChannel,omitempty"`
-	// CreateAt - 创建时间区间（毫秒 [起,止]）
-	CreateAt []int64 `json:"createAt,omitempty"`
-	// No - 单号（充值单号精确匹配）
-	No string `json:"no,omitempty"`
 }
 
 // WalletLogQuery - 钱包流水查询（平台 service/apis.BalanceLogQuery）

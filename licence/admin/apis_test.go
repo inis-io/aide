@@ -31,7 +31,7 @@ type apisRouteCase struct {
 	service string
 	// rpc - gRPC 方法名（full method 尾段，与平台 ApisSpecs.Method 逐字一致，gRPC 假服务端按此注册方法）；
 	// 平台钱包升级为平台级钱包后 SDK 方法名破坏性改名，而 gRPC 传输层内部标识（服务名/方法名）不改名，
-	// 两者仅钱包组 13 条路由不一致；空串表示与 name 相同
+	// 两者仅钱包组 8 条路由不一致（充值组 5 条已随功能下线删除）；空串表示与 name 相同
 	rpc string
 	// method - HTTP 动词；path - 管理面 HTTP 路径（gRPC 侧仅用于定位同一条业务动作）
 	method string
@@ -138,7 +138,7 @@ func apisPlanViewRow() map[string]any {
 	}
 }
 
-// apisRouteCases - 60 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
+// apisRouteCases - 55 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
 func apisRouteCases() []apisRouteCase {
 	autoRenew := false
 	return []apisRouteCase{
@@ -733,98 +733,8 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"id":3`, `"autoRenew":false`},
 		},
 
-		// ---------- ApisBalanceAdminService（13；平台级钱包，API 商城为首个消费方） ----------
-		{
-			name: "FindWalletRecharges", rpc: "FindRecharges", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/wallet-recharges/find",
-			data: apisPageData([]any{map[string]any{
-				"id": 4, "rechargeNo": "RCG-2026-000004", "userId": 7, "amount": 100000,
-				"payChannel": "offline", "status": "pending", "requestId": "rcg-req-4", "operatorId": 1, "paidAt": 0, "version": 1,
-			}}, 1, 1),
-			invoke: func(t *testing.T, client *AdminClient) {
-				page, err := client.Apis.FindWalletRecharges(context.Background(), &WalletRechargeQuery{Page: 1, Status: "pending", No: "RCG-2026-000004"})
-				if err != nil {
-					t.Fatalf("充值单分页失败: %v", err)
-				}
-				if len(page.Data) != 1 || page.Data[0].Amount != 100000 {
-					t.Fatalf("充值单解析不符: %+v", page.Data)
-				}
-				if page.Data[0].OperatorId != 1 {
-					t.Fatalf("充值单操作人解析不符: %+v", page.Data[0])
-				}
-			},
-			wantQuery: map[string]string{"page": "1", "status": "pending", "no": "RCG-2026-000004"},
-		},
-		{
-			name: "GetWalletRecharge", rpc: "GetRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodGet, path: "/api/wallet-recharges/take",
-			data: map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "pending", "amount": 100000, "operatorId": 0},
-			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.GetWalletRecharge(context.Background(), 4)
-				if err != nil {
-					t.Fatalf("充值单详情失败: %v", err)
-				}
-				if row.RechargeNo != "RCG-2026-000004" || row.Status != "pending" {
-					t.Fatalf("充值单详情解析不符: %+v", row)
-				}
-			},
-			wantQuery: map[string]string{"id": "4"},
-		},
-		{
-			name: "CreateWalletRecharge", rpc: "CreateRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/wallet-recharges/create",
-			data: map[string]any{
-				"recharge": map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "pending", "amount": 100000},
-				"replayed": false, "balance": 0, "logNo": "",
-			},
-			invoke: func(t *testing.T, client *AdminClient) {
-				result, err := client.Apis.CreateWalletRecharge(context.Background(), WalletRechargeInput{
-					Amount: 100000, PayChannel: "offline", RequestId: "rcg-req-4",
-				})
-				if err != nil {
-					t.Fatalf("提交充值申请失败: %v", err)
-				}
-				if result.Recharge.RechargeNo != "RCG-2026-000004" || result.Replayed {
-					t.Fatalf("充值申请结果解析不符: %+v", result)
-				}
-			},
-			wantBody: []string{`"amount":100000`, `"payChannel":"offline"`, `"requestId":"rcg-req-4"`},
-		},
-		{
-			name: "CancelWalletRecharge", rpc: "CancelRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/wallet-recharges/cancel",
-			data: map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "cancelled"},
-			invoke: func(t *testing.T, client *AdminClient) {
-				row, err := client.Apis.CancelWalletRecharge(context.Background(), 4, "已改走其它通道")
-				if err != nil {
-					t.Fatalf("取消充值单失败: %v", err)
-				}
-				if row.Status != "cancelled" {
-					t.Fatalf("取消结果解析不符: %+v", row)
-				}
-			},
-			wantBody: []string{`"id":4`, `"reason":"已改走其它通道"`},
-		},
-		{
-			name: "ConfirmWalletRecharge", rpc: "ConfirmRecharge", service: "ApisBalanceAdminService",
-			method: http.MethodPost, path: "/api/wallet-recharges/confirm",
-			data: map[string]any{
-				"recharge": map[string]any{"id": 4, "rechargeNo": "RCG-2026-000004", "status": "paid", "paidAt": 1780000002000},
-				"replayed": false, "balance": 100000, "logNo": "BTX-2026-000011",
-			},
-			invoke: func(t *testing.T, client *AdminClient) {
-				result, err := client.Apis.ConfirmWalletRecharge(context.Background(), WalletRechargeConfirmInput{
-					RechargeNo: "RCG-2026-000004", ReviewNote: "银行到账", PayTxNo: "BANK-002",
-				})
-				if err != nil {
-					t.Fatalf("确认充值入账失败: %v", err)
-				}
-				if result.Balance != 100000 || result.LogNo != "BTX-2026-000011" {
-					t.Fatalf("入账结果解析不符: %+v", result)
-				}
-			},
-			wantBody: []string{`"rechargeNo":"RCG-2026-000004"`, `"reviewNote":"银行到账"`, `"payTxNo":"BANK-002"`},
-		},
+		// ---------- ApisBalanceAdminService（8；平台级钱包，API 商城为首个消费方；
+		// 充值申请/充值审核已整体下线，只保留管理员人工调账 adjust） ----------
 		{
 			name: "GetWallet", rpc: "GetBalance", service: "ApisBalanceAdminService",
 			method: http.MethodGet, path: "/api/wallet-accounts/take",
@@ -1225,7 +1135,7 @@ func apisRouteCases() []apisRouteCase {
 	}
 }
 
-// TestApisRoutesHTTP - 60 条商城路由逐条经 HTTP 假平台校验：
+// TestApisRoutesHTTP - 55 条商城路由逐条经 HTTP 假平台校验：
 // ① 请求打到登记表登记的「动词 + 路径」（未登记即 404，用例直接失败）；
 // ② query 按平台约定序列化（标量直写、数组 key[]=v 重复）；
 // ③ 写路径请求体字段与平台入参结构逐字对齐（含显式 false / 负数等不可省略的取值）；
@@ -1234,8 +1144,8 @@ func apisRouteCases() []apisRouteCase {
 func TestApisRoutesHTTP(t *testing.T) {
 
 	cases := apisRouteCases()
-	if len(cases) != 60 {
-		t.Fatalf("商城路由用例应为 60 条，实际 %d 条", len(cases))
+	if len(cases) != 55 {
+		t.Fatalf("商城路由用例应为 55 条，实际 %d 条", len(cases))
 	}
 
 	for _, one := range cases {
