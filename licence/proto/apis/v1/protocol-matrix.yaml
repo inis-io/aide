@@ -42,3 +42,14 @@ runtime:
   # 即 INVALID_ARGUMENT）。正文原样投递（不做模板替换、不自动追加验证码），全部收件人投递成功才算交付，
   # 任一失败即 UPSTREAM_ERROR（预扣全额释放、不收费）。INVALID_ARGUMENT 覆盖非法收件人/超长主题正文/上送超限。
   - [Client.Apis.MailSend, POST, /api/v1/apis/mail-send/send, licenhub.apis.v1.ApisRuntimeService/MailSend, activation-sign-v1, "", apis, write, normal, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN NO_ENTITLEMENT QUOTA_EXCEEDED INSUFFICIENT_BALANCE SPEND_LIMIT_EXCEEDED ACCOUNT_FROZEN CONCURRENCY_LIMITED RATE_LIMITED UPSTREAM_ERROR INTERNAL_ERROR", landed]
+# ────────────────────────────────────────────────────────────────────────────
+# 例外登记：llm-gateway（API 商城第三个能力，2026-11）
+# LLM 统一网关的运行面是行业标准协议兼容端点（一期 POST /v1/chat/completions，
+# OpenAI Chat Completions 原生语义 + SSE 流式），调用方是任意 OpenAI 兼容客户端
+# 而非 licence SDK，无法也不应进入「SDK 方法 ↔ HTTP ↔ gRPC」矩阵，故豁免双协议铁律：
+#   - 不提供 gRPC 适配（本文件无对应数据行，属有意 exempt，非遗漏）；
+#   - 认证为 sk- API Key（D15′ 例外），非 activation-sign-v1；
+#   - 不需要 protocol_matrix_test.go 协议一致性测试。
+# 依据：licen-hub docs/plan/apis/09-LLM统一网关设计方案.md §4.4（例外声明）
+#       与 04-HTTP与gRPC双协议设计.md §4（矩阵内例外注记）。
+# 商城既有能力（Invoke / IPLocate / Usage / MailSend）不受此例外影响。

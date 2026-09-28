@@ -364,6 +364,7 @@ licence/apis/
 │              #   Receipt / ParseEnvelope（唯一信封解析点）/ ResolveRequestID（幂等键助手）；只依赖标准库
 ├── iplocate/  # IP 定位能力：Resource{Query(ctx, ip, requestId…)} + Result 类型
 ├── email/     # 邮件代发能力：Resource{Send(ctx, input, requestId…)} + Input / Result 类型
+├── llm/       # LLM 网关独立轻客户端（不挂 lic.Apis：sk-key Bearer 认证，见 §7.5）
 ├── client.go  # 根 Client：挂载 IPLocate / Email 子资源 + 共享件 type alias re-export
 ├── invoke.go  # Invoke 通用兜底（跨能力，留根包）
 └── usage.go   # Usage 用量对账（跨能力，留根包）
@@ -428,6 +429,70 @@ type apis.Error struct {            // 业务拒绝（errors.As 断言；根包�
 - **未激活闸门**：无 activation token 或授权状态非放行态时本地返回 `apis.ErrNotActivated`（不发请求）。
 - **新增能力落点**：在 `licence/apis/` 下新增能力子包（Resource + 能力专属类型，共享件一律用 `apis/core`），
   由根 `Client` 挂载为 `lic.Apis.<能力名>`；施工步骤见 licen-hub `docs/plan/apis/08` 能力接入指南。
+
+### 7.5 LLM 网关调用（`apis/llm` 独立轻客户端）
+
+AI 大模型统一网关（OpenAI 兼容协议）的 typed 客户端。**形态与 §7.4 能力子包不同**：
+不挂 `lic.Apis`、不经 `core.Doer`——LLM 网关用商城 API 密钥（`sk-` 前缀，Bearer 认证）
+而非许可证签名头族，调用方也不一定持有许可证。本包只依赖标准库（HTTP-only，
+不做 gRPC），与 `licence.New(...)` 激活流程无关；两者扣同一份商城钱包/订阅/免费额度。
+
+```go
+import "github.com/inis-io/aide/licence/apis/llm"
+
+// 构造：baseURL 须含 /v1（末尾 / 自动裁剪，不自动补 /v1）；空 baseURL/apiKey 构造期 panic
+client := llm.NewClient("https://{平台域名}/v1", "sk-xxxx",
+    llm.WithTimeout(120*time.Second),  // 默认 120s；注入 WithHTTPClient 后不生效
+    llm.WithHTTPClient(custom),         // 可选：连接池/代理/熔断交给它
+    llm.WithHeader("X-Team", "pay"),    // 可选：自定义头（不可覆盖认证头）
+    llm.WithRequestID("req_xxx"),       // 可选：默认幂等键（单次调用参数优先）
+)
+
+type ChatRequest struct {
+    Model       string            // 模型 id（先 Models 对清单；未上架/未定价被拒）
+    Messages    []Message         // {Role, Content, Name?, ToolCallID?, ToolCalls?（RawMessage 透传）}
+    MaxTokens   int               // 0 = 不限制
+    Temperature *float64          // nil = 上游默认
+    Tools       json.RawMessage   // 原样透传，不建模
+    Stream      bool              // json:"-"，由 Chat/ChatStream 方法强制（Extra 偷渡被 typed 冲突集过滤）
+    Extra       map[string]any    // 厂商扩展字段并入顶层（与 typed 字段冲突时 typed 优先）
+}
+```
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `NewClient` | `func NewClient(baseURL, apiKey string, opts ...Option) *Client` | 构造客户端（Option：`WithHTTPClient` / `WithTimeout` / `WithHeader` / `WithRequestID`） |
+| `Chat` | `func (this *Client) Chat(ctx context.Context, input ChatRequest, requestId ...string) (*ChatResponse, error)` | 非流式对话补全（`POST /v1/chat/completions`，强制 `stream` 缺省=false）；`ChatResponse.RequestId` 取自 X-Request-Id 响应头 |
+| `ChatStream` | `func (this *Client) ChatStream(ctx context.Context, input ChatRequest, requestId ...string) (*Stream, error)` | 流式对话（同路径，强制 `stream:true`）；返回 SSE 迭代器，用完必须 `Close` |
+| `Stream.Recv` | `func (this *Stream) Recv() (ChatChunk, error)` | 逐帧返回增量；`[DONE]` 转 `io.EOF`；坏帧跳过不中断；未见 `[DONE]` 截断返回 `io.ErrUnexpectedEOF`；ctx 取消即断流 |
+| `Models` | `func (this *Client) Models(ctx context.Context, requestId ...string) ([]Model, error)` | 模型目录（`GET /v1/models`，list 信封解包） |
+| `Model` | `func (this *Client) Model(ctx context.Context, id string, requestId ...string) (*Model, error)` | 模型详情（`GET /v1/models/{id}`，id 做 PathEscape） |
+
+配套类型：`ChatResponse`（`Id/Object/Created/Model/Choices/Usage/RequestId`）、`Choice`（`Index/Message/FinishReason`）、
+`ChatChunk` + `ChunkChoice`（`Delta` 增量）、`Usage`（`prompt_tokens`/`completion_tokens`/`total_tokens` + 缓存命中/推理分项）、
+`Model`（`Id/Object/Created/OwnedBy`）。
+
+错误归一（与 §7.4 的 `apis.Error` 不同体系）：非 2xx 一律 `*llm.Error`（`errors.As` 断言）：
+
+```go
+type llm.Error struct {
+    HTTPStatus int    // 原始 HTTP 状态码
+    Type       string // error.type（authentication_error / invalid_request_error / rate_limit_exceeded / forbidden / api_error）
+    Code       string // error.code（ErrorCode* 常量：invalid_api_key / invalid_request_error / model_not_found /
+                      //   model_not_priced / forbidden / insufficient_balance / quota_exceeded / rate_limited /
+                      //   model_unavailable / upstream_error / server_error，与服务端 writeServiceError 映射逐字一致）
+    Message    string
+    RequestId  string // X-Request-Id 响应头回显（售后对账用）
+    RawError   string // 上游 4xx 透传体非平台格式时的原文摘录（截断 512 字符；平台格式为空）
+}
+```
+
+- `IsRetryable()` 仅对 `upstream_error` / `server_error` / `model_unavailable` 为 true；
+  **SDK 不做自动重试**（服务端已做渠道 failover；额度/余额类错误重试无意义；`rate_limited` 退避节奏由调用方自定）。
+- **幂等键**：缺省不携带（服务端生成 `req_` 前缀键并回显响应头）；`WithRequestID` 设默认值，
+  方法末参 `requestId ...string` 单次覆盖；重试必须复用同一值（同一 X-Request-Id 重放不重复扣费）。
+- **契约出处**：licen-hub `docs/plan/apis/10-LLM网关客户端接入与SDK封装设计方案.md`（错误码表 §3.3）；
+  服务端为 `backend/app/api/control/apis/runtime/llm-runtime.go`。
 
 ---
 

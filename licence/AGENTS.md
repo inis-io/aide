@@ -33,7 +33,8 @@ licence/
 ├── callback/         # 回调接收端 CallbackHandler + 事件订阅器 EventSubscriber
 ├── config/        # 配置定义与 RuleSet 校验引擎（licen-hub backend 共享复用的叶子包）
 ├── apis/             # API 商城 typed 方法包（按能力子包分类：core 共享件 + iplocate/email 能力子包；
-│                     #   根包 Client 挂载能力子资源并 re-export 共享件，Invoke/Usage 跨能力方法留根包）
+│                     #   根包 Client 挂载能力子资源并 re-export 共享件，Invoke/Usage 跨能力方法留根包；
+│                     #   llm/ 为 LLM 网关独立轻客户端——sk-key Bearer 认证不挂 lic.Apis，见下）
 └── proto/            # gRPC 权威契约与生成代码（禁手改）
 ```
 
@@ -45,7 +46,7 @@ licence/
 - `protocol` 为叶子包：不 import 模块内任何包（契约镜像语义唯一权威）；
 - `admin` / `updater` / `callback` → `runtime` + `protocol`（共享 `Transport`/`GRPCOptions`、
   验签纯函数、`ManifestArtifact`/`Upgrade*` 等运行面类型一律留 `runtime`）；
-- `apis/core` / `config` 为叶子包，不 import 根包与 `runtime`。apis 面向自声明的
+- `apis/core` / `config` / `apis/llm` 为叶子包，不 import 根包与 `runtime`。apis 面向自声明的
   `core.Doer` 窄接口编程，由 `runtime/apis.go` 的 `apisDoer` 适配器注入 `doRequest`
   （withSign=true）调用能力，未激活闸门返回 `apis.ErrNotActivated`；
   **apis 按能力子包分类**：共享核心件（`core.Doer`/`Error` + 17 业务码常量 + `ErrNotActivated`/
@@ -57,6 +58,11 @@ licence/
   `ErrNotActivated`/`HTTPStatusByCode` 引用零改动），能力专属类型不 re-export；
   跨能力语义（`Invoke` 通用兜底 / `Usage` 只读对账）留根包；新增能力的落点与子包施工步骤见
   licen-hub `docs/plan/apis/08` 能力接入指南；
+  **例外：`apis/llm`（LLM 统一网关客户端）不是能力子包、不挂 `lic.Apis`**——网关只认
+  sk-key Bearer 认证（≠ 许可证签名 Doer），且调用方可能无许可证；形态为独立轻客户端
+  `llm.NewClient(baseURL, apiKey, …)`（Chat/ChatStream/Models/Model + `*llm.Error` 错误归一），
+  只依赖标准库、HTTP-only（SSE 不经 protobuf 信封，属 protocol-matrix.yaml 登记的
+  双协议豁免行），设计依据 licen-hub `docs/plan/apis/10`；
   **API 商城四路径已双协议落地（阶段 4；MailSend 为阶段 5 T23）**：typed 方法
   `Client.Apis.{Invoke, IPLocate.Query, Email.Send, Usage}`
   （`apis/` 只处理 JSON 与业务码，信封解析是唯一错误归一入口），gRPC 侧绑定在

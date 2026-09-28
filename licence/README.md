@@ -32,6 +32,7 @@
 17. [运行面客户端 Client](#17-运行面客户端-client)
    - [装机自动申领与激活码兑换（包级函数）](#174-装机自动申领与激活码兑换包级函数)
    - [API 商城调用（`lic.Apis`）](#175-api-商城调用licapis)
+   - [LLM 网关调用（`apis/llm` 独立客户端）](#176-llm-网关调用apisllm-独立客户端)
 18. [在线更新模块](#18-在线更新模块)
 19. [SaaS 多租户接口](#19-saas-多租户接口)
 20. [管理面客户端 AdminClient](#20-管理面客户端-adminclient)
@@ -475,8 +476,9 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | 配置定义校验引擎 | `licence/config` | `config.ValidateConfigDefinition` / `ValidateConfigValue` / `ParseConfigRuleSet` | SDK 本地预校验与 licen-hub backend 共享的唯一实现（纯引擎叶子包） |
 | 管理面客户端 | `licence/admin` | `admin.NewAdmin(AdminOptions)` → `*admin.AdminClient` | 商户运维系统 / CI 自动化（登录态接口，勿随交付项目分发） |
 | API 商城 | `licence/apis` | 根包挂载 `client.Apis`（`*apis.Client`） | API 商城 typed 方法（`Invoke`/`Usage` 在根包，`IPLocate`/`Email` 按能力子包挂载 `lic.Apis.IPLocate.Query` / `lic.Apis.Email.Send`，见 §17.5；面向 `core.Doer` 窄接口、不 import runtime，HTTP/gRPC 双协议随根 Client） |
+| LLM 网关 | `licence/apis/llm` | `llm.NewClient(baseURL, apiKey, …)` → `*llm.Client` | AI 大模型统一网关（OpenAI 兼容，sk-key Bearer 认证，**独立于 `lic.Apis`**，见 §17.6；只依赖标准库，HTTP-only） |
 
-依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol` / `config` / `apis/core` 为叶子包。`apis` 根包 → `apis/core` + 各能力子包（`apis/iplocate` / `apis/email`），能力子包 → `apis/core`，互不反向依赖。
+依赖方向（编译期保证无环）：根包为纯门面（doc.go + facade.go 别名镜像）→ `runtime` / `protocol`；`runtime` → `protocol` / `config` / `apis`；`admin` / `updater` / `callback` → `runtime` + `protocol`；`proto/licence/v1` 为共享契约包，`protocol` / `config` / `apis/core` / `apis/llm` 为叶子包。`apis` 根包 → `apis/core` + 各能力子包（`apis/iplocate` / `apis/email`），能力子包 → `apis/core`，互不反向依赖。
 
 两类客户端的协议完全不同，互不通用：
 
@@ -873,6 +875,65 @@ fmt.Println(page.Count, page.Page, len(page.Records))
   `apis/core`），由根 `Client` 挂载为 `lic.Apis.<能力名>`；施工步骤见 licen-hub `docs/plan/apis/08` 能力接入指南。
 - **契约出处**：`proto/apis/v1/runtime.proto` + 同目录 `protocol-matrix.yaml`（协议矩阵）；
   服务端实现为 licen-hub `backend/app/api/control/apis-runtime.go` 与 `backend/grpc/apis/v1`。
+
+### 17.6 LLM 网关调用（`apis/llm` 独立客户端）
+
+AI 大模型统一网关（OpenAI 兼容协议）**不挂在 `lic.Apis` 上**：它用商城 API 密钥
+（`sk-` 前缀，Bearer 认证）而非许可证签名，调用方也不一定持有许可证。
+`apis/llm` 是独立轻客户端（只依赖标准库，与 `licence.New(...)` 激活流程无关），
+与 §17.5 的能力子包并存——两者扣的是同一份商城钱包/订阅/免费额度，只是凭证不同。
+
+```go
+import "github.com/inis-io/aide/licence/apis/llm"
+
+client := llm.NewClient("https://{平台域名}/v1", "sk-xxxx") // baseURL 须含 /v1，空 key 构造期 panic
+
+// 非流式
+resp, err := client.Chat(ctx, llm.ChatRequest{
+    Model:    "deepseek-chat",
+    Messages: []llm.Message{{Role: "user", Content: "你好"}},
+    // Extra: map[string]any{"reasoning_effort": "high"}, // 厂商扩展字段并入顶层（typed 字段优先）
+})
+
+// 流式（SSE；[DONE] 收尾转 io.EOF，坏帧跳过不中断，ctx 取消即断流）
+stream, err := client.ChatStream(ctx, llm.ChatRequest{Model: "deepseek-chat", Messages: msgs})
+defer stream.Close()
+for {
+    chunk, err := stream.Recv()
+    if errors.Is(err, io.EOF) { break }
+    // ...
+}
+
+// 模型目录（启动期校验模型可用性）
+models, _ := client.Models(ctx)              // GET /v1/models
+model, _  := client.Model(ctx, "deepseek-chat") // GET /v1/models/{id}
+```
+
+| 方法 | 签名 | HTTP |
+|---|---|---|
+| 非流式对话 | `client.Chat(ctx, llm.ChatRequest{…}, requestId…)` | `POST /v1/chat/completions` |
+| 流式对话 | `client.ChatStream(ctx, req, requestId…)` → `*llm.Stream` | `POST /v1/chat/completions`（SSE） |
+| 模型目录 | `client.Models(ctx, requestId…)` | `GET /v1/models` |
+| 模型详情 | `client.Model(ctx, id, requestId…)` | `GET /v1/models/{id}` |
+
+要点：
+
+- **认证**：每请求携带 `Authorization: Bearer sk-…`；`X-Request-Id` 为调用级幂等键
+  （缺省不携带，服务端生成 `req_` 前缀键并回显响应头，`ChatResponse.RequestId` /
+  `Stream.RequestId()` 可取；重试必须复用同一值）。
+- **错误归一**：非 2xx 一律 `*llm.Error{HTTPStatus, Type, Code, Message, RequestId}`
+  （`errors.As` 断言），code 常量 `llm.ErrorCode*`（`invalid_api_key` / `insufficient_balance` /
+  `quota_exceeded` / `rate_limited` / `model_not_found` / `model_not_priced` / `forbidden` /
+  `model_unavailable` / `upstream_error` / `server_error` 等）与码表逐字一致；
+  上游 4xx 透传体非平台格式时原文摘录在 `Error.RawError`（截断 512 字符）。
+  `IsRetryable()` 仅对 `upstream_error` / `server_error` / `model_unavailable` 为 true；
+  **SDK 不做自动重试**（服务端已做渠道 failover，额度/余额类错误重试无意义）。
+- **配置项**：`WithHTTPClient`（连接池/代理/熔断交给它）、`WithTimeout`（默认 120 秒，
+  仅内置客户端生效）、`WithHeader`（自定义头，不可覆盖认证头）、`WithRequestID`（默认幂等键）。
+- **明确不做**：gRPC 传输（HTTP-only，SSE 不经 protobuf 信封）、Responses/Anthropic 北向封装、
+  泛型 HTTP 框架、SDK 内计费查询。
+- **契约出处**：licen-hub `docs/plan/apis/10-LLM网关客户端接入与SDK封装设计方案.md`；
+  服务端为 `backend/app/api/control/apis/runtime/llm-runtime.go`。
 
 ## 18. 在线更新模块
 
