@@ -44,6 +44,9 @@ type ApisProduct struct {
 	TrialQuota int64 `json:"trialQuota"`
 	// CacheDiscount - 缓存命中折扣率（百分比 0~100，100=无折扣，0=缓存命中免费：订阅内累积折算额度，按量按折扣价结算）
 	CacheDiscount int `json:"cacheDiscount"`
+	// MeterUnit - 计量单位（call=次/token=token，默认 call；llm-gateway 固定 token，
+	// 产品免费三层、套餐明细四维 quota、流水 Quantity 对该产品一律按本单位解释）
+	MeterUnit string `json:"meterUnit"`
 	// MeteredPrice - 按量兜底单价（万分/次，0=不提供按量计费；订阅超量/无订阅时按钱包按量扣费）
 	MeteredPrice int64 `json:"meteredPrice"`
 	// MeteredConcurrencyLimit - 按量并发上限（0=平台默认）
@@ -988,4 +991,439 @@ type apisBillExportEnvelope struct {
 	FileName string `json:"fileName"`
 	// Content - xlsx 内容（base64 文本）
 	Content string `json:"content"`
+}
+
+// ============================= LLM 统一网关（apis-llm-channels / apis-llm-logs / apis-keys，18） =============================
+//
+// LLM 统一网关管理面（设计 09）：上游渠道（含模型映射明细）/ 调用观测明细 / sk- API Key 三组路由，
+// 另有人工调账目标用户选项 1 条并入钱包组（wallet-accounts/user-options）。
+// 输出结构对齐平台 models/basic/llm-gateway.go 各模型与 service/apis 的白名单视图
+// （LlmChannelView / LlmKeyView / LlmKeyCreated），输入对齐 service/apis 的 *Params / *Query。
+// 密钥红线：渠道 apiKey 任何读接口不回传（模型 json:"-" 之外的显式置空），sk-key 只存哈希、
+// 明文完整 key 仅创建响应返回一次。
+
+// ApisLlmChannel - LLM 上游渠道（平台 models/basic.LlmChannel）
+// 协议族决定适配器分派；apiKey 为机器绑定加密串，禁止出现在日志与接口响应（json:"-"）。
+type ApisLlmChannel struct {
+	// Id - 主键
+	Id int `json:"id"`
+	// Name - 渠道名
+	Name string `json:"name"`
+	// Protocol - 南向协议族（openai/openai-responses/anthropic/google-genai/vertex/ollama/cohere）
+	Protocol string `json:"protocol"`
+	// BaseURL - 上游端点地址（可配代理）
+	BaseURL string `json:"baseUrl"`
+	// PricingUrl - 官方定价文档地址（空=抓取时按内置厂商注册表识别）
+	PricingUrl string `json:"pricingUrl"`
+	// ApiKey - 渠道密钥（AES 加密串，平台任何读接口不回传，JSON 恒缺省）
+	ApiKey string `json:"-"`
+	// Priority - 调度优先级（小者优先）
+	Priority int `json:"priority"`
+	// Weight - 调度权重（同优先级加权随机）
+	Weight int `json:"weight"`
+	// QpsLimit - QPS 上限（渠道侧自我保护，0=不限）
+	QpsLimit int `json:"qpsLimit"`
+	// ConcurrencyLimit - 并发上限（渠道侧自我保护，0=不限）
+	ConcurrencyLimit int `json:"concurrencyLimit"`
+	// Status - 状态（enabled/disabled，启用受 usage 探测闸门约束）
+	Status string `json:"status"`
+	// HealthStatus - 健康状态（一期手动探测：up/down，空串=未探测）
+	HealthStatus string `json:"healthStatus"`
+	// HealthCheckedAt - 健康检查时间（毫秒，0=未检查）
+	HealthCheckedAt int64 `json:"healthCheckedAt"`
+	// UsageProbe - usage 探测结果（实测字段路径摘要+样本 JSON）
+	UsageProbe string `json:"usageProbe"`
+	// UsageVerifiedAt - usage 探测通过时间（毫秒，0=未通过）
+	UsageVerifiedAt int64 `json:"usageVerifiedAt"`
+	// TimeoutMs - 上游超时（毫秒，0=平台默认，长连接预扣占用硬钳）
+	TimeoutMs int `json:"timeoutMs"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// Uid - 创建人用户ID
+	Uid int `json:"uid"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// ApisLlmChannelModel - 渠道 × 模型映射（平台 models/basic.LlmChannelModel）
+// 统一模型按名直接挂载（独立模型目录已下线）；报价为对外报价（万分/百万 token，0=未定价按 D2 拒绝调用），
+// cost_* 为渠道成本价（同单位，0=未维护）；rate 为定价倍率（万分比，10500=105%，0=手工报价模式）。
+type ApisLlmChannelModel struct {
+	// Id - 主键
+	Id int `json:"id"`
+	// ChannelId - 渠道ID
+	ChannelId int `json:"channelId"`
+	// Model - 统一模型名（客户端按此名调用）
+	Model string `json:"model"`
+	// UpstreamModel - 渠道侧模型别名（空=与统一模型同名）
+	UpstreamModel string `json:"upstreamModel"`
+	// PriceInput - 报价输入价（非缓存命中部分，万分/百万 token，0=未定价按 D2 拒绝）
+	PriceInput int64 `json:"priceInput"`
+	// PriceOutput - 报价输出价（含推理 token，万分/百万 token，0=未定价按 D2 拒绝）
+	PriceOutput int64 `json:"priceOutput"`
+	// PriceCacheRead - 报价缓存命中输入价（万分/百万 token，0=未配置按 priceInput 计）
+	PriceCacheRead int64 `json:"priceCacheRead"`
+	// PriceReasoning - 报价推理 token 单独价（万分/百万 token，0=未配置并入 completion 按 priceOutput 计）
+	PriceReasoning int64 `json:"priceReasoning"`
+	// Rate - 定价倍率（万分比，10500=105%，0=手工报价模式；>0 时有效报价=成本价×倍率，成本价必填）
+	Rate int `json:"rate"`
+	// CostInput - 成本输入价（万分/百万 token，0=未维护）
+	CostInput int64 `json:"costInput"`
+	// CostOutput - 成本输出价（万分/百万 token，0=未维护）
+	CostOutput int64 `json:"costOutput"`
+	// CostCacheRead - 成本缓存命中价（万分/百万 token，0=未维护）
+	CostCacheRead int64 `json:"costCacheRead"`
+	// CostReasoning - 成本推理价（万分/百万 token，0=未维护）
+	CostReasoning int64 `json:"costReasoning"`
+	// ContextWindow - 上下文窗口（token，预扣估算与钳制依据，0=不钳制）
+	ContextWindow int `json:"contextWindow"`
+	// MaxOutputTokens - 最大输出 token（预扣估算与钳制依据，0=不限）
+	MaxOutputTokens int `json:"maxOutputTokens"`
+	// Status - 状态（enabled/disabled）
+	Status string `json:"status"`
+	// Priority - 调度优先级覆盖（0=跟随渠道默认）
+	Priority int `json:"priority"`
+	// Weight - 调度权重覆盖（0=跟随渠道默认）
+	Weight int `json:"weight"`
+	// Uid - 创建人用户ID
+	Uid int `json:"uid"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// ApisLlmChannelView - 渠道管理视图（平台 service/apis.LlmChannelView，含模型映射明细）
+// ApiKey 已置空，绝不回传；Items 恒为数组（平台无明细时回空数组）。
+type ApisLlmChannelView struct {
+	// ApisLlmChannel - 渠道主表字段（内嵌平铺）
+	ApisLlmChannel
+	// Items - 渠道模型映射明细
+	Items []ApisLlmChannelModel `json:"items"`
+}
+
+// ApisLlmModelOffer - 在售模型价格表行（平台 llmgateway.LlmModelRow 经处理器白名单投影：
+// 聚合口径「启用映射 × 启用渠道」，只回已定价模型；报价为有效报价，万分/百万 token）
+type ApisLlmModelOffer struct {
+	// Model - 统一模型名（客户端按此名调用）
+	Model string `json:"model"`
+	// ContextWindow - 上下文窗口（token，0=不钳制/不限）
+	ContextWindow int `json:"contextWindow"`
+	// MaxOutputTokens - 最大输出 token（0=不限）
+	MaxOutputTokens int `json:"maxOutputTokens"`
+	// PriceInput - 有效报价输入价（万分/百万 token，倍率模式已折算）
+	PriceInput int64 `json:"priceInput"`
+	// PriceOutput - 有效报价输出价（万分/百万 token）
+	PriceOutput int64 `json:"priceOutput"`
+	// PriceCacheRead - 有效报价缓存命中输入价（0=计费时回退输入价）
+	PriceCacheRead int64 `json:"priceCacheRead"`
+	// PriceReasoning - 有效报价推理 token 单独价（0=并入输出价）
+	PriceReasoning int64 `json:"priceReasoning"`
+}
+
+// ApisLlmChannelQuery - 渠道查询（平台 service/apis.LlmChannelQuery；平台管理列表）
+type ApisLlmChannelQuery struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// Order - 排序
+	Order string `json:"order,omitempty"`
+	// Status - enabled / disabled（空 = 不限）
+	Status string `json:"status,omitempty"`
+	// Protocol - 协议族过滤
+	Protocol string `json:"protocol,omitempty"`
+	// Keyword - 渠道名 / 端点模糊匹配
+	Keyword string `json:"keyword,omitempty"`
+}
+
+// ApisLlmChannelItemInput - 渠道模型映射明细入参（平台 service/apis.LlmChannelItemParams；
+// 随渠道整体提交，保存时全量替换）
+type ApisLlmChannelItemInput struct {
+	// Model - 统一模型名（按名直接挂载，同渠道内不重复）
+	Model string `json:"model"`
+	// UpstreamModel - 渠道侧模型别名（空 = 与统一模型同名）
+	UpstreamModel string `json:"upstreamModel"`
+	// PriceInput / PriceOutput / PriceCacheRead / PriceReasoning - 对外报价（万分/百万 token，0 = 未定价按 D2 拒绝调用）
+	PriceInput     int64 `json:"priceInput"`
+	PriceOutput    int64 `json:"priceOutput"`
+	PriceCacheRead int64 `json:"priceCacheRead"`
+	PriceReasoning int64 `json:"priceReasoning"`
+	// Rate - 定价倍率（万分比，10500 = 105%，0 = 手工报价模式；> 0 时有效报价 = 成本价 × 倍率）
+	Rate int `json:"rate"`
+	// CostInput / CostOutput / CostCacheRead / CostReasoning - 渠道成本价（万分/百万 token，0 = 未维护）
+	CostInput     int64 `json:"costInput"`
+	CostOutput    int64 `json:"costOutput"`
+	CostCacheRead int64 `json:"costCacheRead"`
+	CostReasoning int64 `json:"costReasoning"`
+	// ContextWindow / MaxOutputTokens - 预扣估算与钳制依据（0 = 不钳制/不限）
+	ContextWindow   int `json:"contextWindow"`
+	MaxOutputTokens int `json:"maxOutputTokens"`
+	// Status - enabled / disabled（默认 enabled）
+	Status string `json:"status"`
+	// Priority / Weight - 模型级调度覆盖（0 = 跟随渠道默认）
+	Priority int `json:"priority"`
+	Weight   int `json:"weight"`
+}
+
+// ApisLlmChannelInput - 渠道保存入参（平台 service/apis.LlmChannelParams；id = 0 新增，> 0 修改）
+// apiKey 留空 = 不变更（任何读接口不回传明文）；Items 为映射明细全量替换。
+type ApisLlmChannelInput struct {
+	// Id - 0=新增，>0=修改
+	Id int `json:"id"`
+	// Name - 渠道名
+	Name string `json:"name"`
+	// Protocol - 南向协议族
+	Protocol string `json:"protocol"`
+	// BaseUrl - 上游端点地址（可配代理）
+	BaseUrl string `json:"baseUrl"`
+	// PricingUrl - 官方定价文档地址（选填；留空时定价抓取按内置厂商注册表从 baseUrl 识别）
+	PricingUrl string `json:"pricingUrl"`
+	// ApiKey - 渠道密钥（留空 = 不变更；明文只存在于本次请求调用栈）
+	ApiKey string `json:"apiKey"`
+	// Priority / Weight - 调度：priority 小者优先，同优先级按 weight 加权随机
+	Priority int `json:"priority"`
+	Weight   int `json:"weight"`
+	// QpsLimit / ConcurrencyLimit - 渠道侧自我保护（0 = 不限）
+	QpsLimit         int `json:"qpsLimit"`
+	ConcurrencyLimit int `json:"concurrencyLimit"`
+	// Status - enabled / disabled（默认 disabled；启用受 usage 探测闸门约束）
+	Status string `json:"status"`
+	// TimeoutMs - 上游超时（毫秒，0 = 平台默认，长连接预扣占用硬钳）
+	TimeoutMs int `json:"timeoutMs"`
+	// Remark - 备注
+	Remark string `json:"remark"`
+	// Items - 渠道模型映射明细（全量替换）
+	Items []ApisLlmChannelItemInput `json:"items"`
+}
+
+// ApisLlmChannelVerifyInput - usage 探测 / 上游模型列表入参（平台 service/apis.LlmChannelVerifyParams；
+// verify-usage 与 models 两路由共用；id > 0 时各字段留空取渠道已存值）
+type ApisLlmChannelVerifyInput struct {
+	// Id - 目标渠道（0 = 纯候选探测，结果不落库——渠道接入保存前的强制探测场景）
+	Id int `json:"id"`
+	// BaseUrl - 候选端点（留空取渠道已存值）
+	BaseUrl string `json:"baseUrl"`
+	// ApiKey - 候选密钥（留空取渠道已存密钥解密值；解密失败需显式传值）
+	ApiKey string `json:"apiKey"`
+	// Protocol - 协议族（留空取渠道已存值；一期仅 openai 支持探测）
+	Protocol string `json:"protocol"`
+	// Model - 探测模型：渠道侧模型名（留空取渠道首条启用映射的模型别名）
+	Model string `json:"model"`
+	// TimeoutMs - 单次调用超时（0 = 探测默认 30s）
+	TimeoutMs int `json:"timeoutMs"`
+}
+
+// ApisLlmPricingScanInput - 官方定价抓取入参（平台 service/apis.LlmPricingScanParams；Id = 0 为候选渠道场景）
+type ApisLlmPricingScanInput struct {
+	// Id - 渠道 ID（> 0 时 pricingUrl/baseUrl 留空取渠道已存值）
+	Id int `json:"id"`
+	// PricingUrl - 定价文档地址（留空 = 渠道已存 / 注册表按 baseUrl 识别）
+	PricingUrl string `json:"pricingUrl"`
+	// BaseUrl - 渠道端点（注册表识别依据；留空取渠道已存值）
+	BaseUrl string `json:"baseUrl"`
+	// ExchangeRate - 外币折算人民币汇率（0 = 默认 7.2，仅页面为外币定价时传入提取提示词）
+	ExchangeRate float64 `json:"exchangeRate"`
+	// Refresh - 跳过缓存强制重新抓取与提取
+	Refresh bool `json:"refresh"`
+}
+
+// ApisLlmPricingScanItem - 定价抓取的单模型定价（平台 service/apis.LlmPricingScanItem；
+// 价格为万分/百万 token，与映射行成本价同单位，0 = 文档未提供）
+type ApisLlmPricingScanItem struct {
+	// Model - 模型 ID（文档中 API 调用名）
+	Model string `json:"model"`
+	// Input / Output / CacheRead / Reasoning - 成本价（万分/百万 token，0 = 文档未提供）
+	Input     int64 `json:"input"`
+	Output    int64 `json:"output"`
+	CacheRead int64 `json:"cacheRead"`
+	Reasoning int64 `json:"reasoning"`
+	// ContextWindow / MaxOutputTokens - 规格（0 = 文档未提供）
+	ContextWindow   int `json:"contextWindow"`
+	MaxOutputTokens int `json:"maxOutputTokens"`
+}
+
+// ApisLlmPricingScanResult - 定价抓取结果（平台 service/apis.LlmPricingScanResult；
+// 结果不落库，回显由运营勾选回填；cached = 命中 24h 缓存）
+type ApisLlmPricingScanResult struct {
+	// Url - 实际抓取的定价页地址
+	Url string `json:"url"`
+	// Provider - 抓取提供方（http/jina/cdp）
+	Provider string `json:"provider"`
+	// Cached - 是否命中缓存（未重新抓取与提取）
+	Cached bool `json:"cached"`
+	// Truncated - 抓取正文是否被截断（截断可能导致尾部模型缺失，运营确认时注意）
+	Truncated bool `json:"truncated"`
+	// Items - 提取出的模型定价清单
+	Items []ApisLlmPricingScanItem `json:"items"`
+}
+
+// ApisLlmLog - LLM 调用观测明细（平台 models/basic.LlmUsageDetail，只追加）
+// 数据范围：平台观测表，member 不可见；token 分项全量留痕，cached 为 prompt 子集禁止重复相加。
+type ApisLlmLog struct {
+	// Id - 主键
+	Id int `json:"id"`
+	// RequestId - 调用级幂等键（关联 apis_usage_records.request_id）
+	RequestId string `json:"requestId"`
+	// UserId - 归属用户ID
+	UserId int `json:"userId"`
+	// KeyId - apis_keys.id（0=无）
+	KeyId int `json:"keyId"`
+	// Model - 统一模型名
+	Model string `json:"model"`
+	// ChannelId - 路由渠道ID（0=未路由出去）
+	ChannelId int `json:"channelId"`
+	// ProtocolIn - 北向协议族
+	ProtocolIn string `json:"protocolIn"`
+	// ProtocolOut - 南向协议族
+	ProtocolOut string `json:"protocolOut"`
+	// Converted - 是否跨协议转换（同协议直通=0）
+	Converted bool `json:"converted"`
+	// Stream - 是否 SSE 流式
+	Stream bool `json:"stream"`
+	// PromptTokens - 输入 token（全量，含缓存命中部分）
+	PromptTokens int64 `json:"promptTokens"`
+	// CompletionTokens - 输出 token（含推理 token）
+	CompletionTokens int64 `json:"completionTokens"`
+	// CachedTokens - 缓存命中输入 token（prompt 子集，禁止重复相加）
+	CachedTokens int64 `json:"cachedTokens"`
+	// ReasoningTokens - 推理 token 分项（取不到按 0 计，不可用其反推 completion）
+	ReasoningTokens int64 `json:"reasoningTokens"`
+	// Estimated - usage 缺失按字符估算兜底标记（fail-closed 不免费）
+	Estimated bool `json:"estimated"`
+	// TtftMs - 首 token 延迟（毫秒，0=未记录）
+	TtftMs int64 `json:"ttftMs"`
+	// DurationMs - 整次耗时（毫秒，0=未记录）
+	DurationMs int64 `json:"durationMs"`
+	// UpstreamStatus - 上游 HTTP 状态码（最终渠道结果）
+	UpstreamStatus int `json:"upstreamStatus"`
+	// ErrorType - 错误类型（failover 多段尝试以 JSON 数组留痕）
+	ErrorType string `json:"errorType"`
+	// Amount - 报价金额（分，按调度序第一名渠道映射行的报价结算）
+	Amount int64 `json:"amount"`
+	// CostAmount - 渠道成本（分，null=未核算，0=渠道免费）
+	CostAmount *int64 `json:"costAmount"`
+	// CreateAt - 调用时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+}
+
+// ApisLlmLogQuery - 调用观测明细分页查询（平台 service/apis.LlmLogQuery；平台观测视图）
+type ApisLlmLogQuery struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// Order - 排序
+	Order string `json:"order,omitempty"`
+	// RequestId - 调用级幂等键（精确匹配，排障定位）
+	RequestId string `json:"requestId,omitempty"`
+	// Model - 统一模型名（精确匹配）
+	Model string `json:"model,omitempty"`
+	// ChannelId / KeyId - 渠道 / sk-key 过滤
+	ChannelId int `json:"channelId,omitempty"`
+	KeyId     int `json:"keyId,omitempty"`
+	// UserId - 平台侧按归属用户筛选；member 侧只能为本人或 0
+	UserId int `json:"userId,omitempty"`
+	// ProtocolIn / ProtocolOut - 北向 / 南向协议族过滤
+	ProtocolIn  string `json:"protocolIn,omitempty"`
+	ProtocolOut string `json:"protocolOut,omitempty"`
+	// Stream - 三态字符串："" 不限 / "true" 仅流式 / "false" 仅非流式
+	Stream string `json:"stream,omitempty"`
+	// ErrorType - 错误类型模糊匹配
+	ErrorType string `json:"errorType,omitempty"`
+	// CreateAt - 调用时间区间 [起, 止]（毫秒戳；只传一侧或 0 均按不限处理）
+	CreateAt []int64 `json:"createAt,omitempty"`
+}
+
+// ApisKey - sk- API Key 读视图（平台 service/apis.LlmKeyView，白名单投影：key_hash 绝不外泄）
+// 形态 sk- + 48 位随机 hex；库中只存 SHA-256 哈希与展示前缀。
+type ApisKey struct {
+	// Id - 主键
+	Id int `json:"id"`
+	// KeyNo - 密钥编号（KEY-{年}-%06d）
+	KeyNo string `json:"keyNo"`
+	// UserId - 归属用户ID
+	UserId int `json:"userId"`
+	// ProductId - 归属产品ID（固定 llm-gateway 产品）
+	ProductId int `json:"productId"`
+	// Name - 备注名
+	Name string `json:"name"`
+	// Prefix - 展示前缀（sk-ab12…，日志脱敏用）
+	Prefix string `json:"prefix"`
+	// AllowedModels - 模型白名单（空 = 不限）
+	AllowedModels []string `json:"allowedModels"`
+	// MonthlySpendLimit - 月度消费限额（分，0 = 不限）
+	MonthlySpendLimit int64 `json:"monthlySpendLimit"`
+	// ExpiresAt - 过期时间（毫秒戳，0 = 永不过期）
+	ExpiresAt int64 `json:"expiresAt"`
+	// Status - 状态（active/revoked）
+	Status string `json:"status"`
+	// LastUsedAt - 最近使用时间（毫秒，0=未使用）
+	LastUsedAt int64 `json:"lastUsedAt"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+}
+
+// ApisKeyCreated - sk-key 创建响应（平台 service/apis.LlmKeyCreated）
+// Key 为明文完整 sk-key，仅本次响应返回一次，绝不落库/再回显，调用方须立即保存。
+type ApisKeyCreated struct {
+	// ApisKey - 读视图字段（内嵌平铺）
+	ApisKey
+	// Key - 明文完整 sk-key（sk- + 48 位随机 hex）
+	Key string `json:"key"`
+}
+
+// ApisKeyInput - sk-key 新建入参（平台 service/apis.LlmKeyParams；member 自助签发）
+type ApisKeyInput struct {
+	// Name - 备注名（如「本地开发」）
+	Name string `json:"name"`
+	// AllowedModels - 模型白名单（空 = 不限；创建时校验全部存在于模型目录）
+	AllowedModels []string `json:"allowedModels"`
+	// MonthlySpendLimit - 月度消费限额（分，0 = 不限）
+	MonthlySpendLimit int64 `json:"monthlySpendLimit"`
+	// ExpiresAt - 过期时间（毫秒戳，0 = 永不过期）
+	ExpiresAt int64 `json:"expiresAt"`
+}
+
+// ApisKeyQuery - sk-key 查询（平台 service/apis.LlmKeyQuery；member 强制本人；平台侧可按 userId 筛选）
+type ApisKeyQuery struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// Order - 排序
+	Order string `json:"order,omitempty"`
+	// Status - active / revoked（空 = 不限）
+	Status string `json:"status,omitempty"`
+	// Keyword - 备注名 / 密钥编号 / 前缀模糊匹配
+	Keyword string `json:"keyword,omitempty"`
+	// UserId - 平台侧按归属用户筛选；member 侧只能为本人或 0（取登录态）
+	UserId int `json:"userId,omitempty"`
+}
+
+// WalletAdjustUserQuery - 人工调账目标用户选项查询（平台 service/apis.AdjustUserOptionQuery）
+type WalletAdjustUserQuery struct {
+	// Keyword - 关键词（按 UID 精确 / 账号 / 邮箱 / 手机号 / 昵称模糊匹配）
+	Keyword string `json:"keyword"`
+	// Limit - 返回条数（平台默认 20，上限 50）
+	Limit int `json:"limit"`
+}
+
+// WalletAdjustUserOption - 人工调账目标用户选项（平台 service/apis.AdjustUserOption；
+// 仅暴露选择器所需字段，手机号/邮箱只参与匹配、不下发）
+type WalletAdjustUserOption struct {
+	// Id - 用户ID
+	Id int `json:"id"`
+	// Account - 账号
+	Account string `json:"account"`
+	// Nickname - 昵称
+	Nickname string `json:"nickname"`
+	// Avatar - 头像
+	Avatar string `json:"avatar"`
 }

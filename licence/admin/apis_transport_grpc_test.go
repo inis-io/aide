@@ -42,7 +42,7 @@ type apisGRPCServer struct {
 	byMethod map[string]apisRouteCase
 }
 
-// newApisGRPCServer - 按用例表装配 7 个 proto-less 服务
+// newApisGRPCServer - 按用例表装配 10 个 proto-less 服务
 func newApisGRPCServer(t *testing.T, cases []apisRouteCase) (*apisGRPCServer, *grpc.Server) {
 
 	t.Helper()
@@ -131,7 +131,7 @@ func (this *apisGRPCServer) hitMethods() []string {
 	return methods
 }
 
-// TestApisRoutesGRPC - 55 条商城路由逐条经真实 gRPC 调用（bufconn）校验
+// TestApisRoutesGRPC - 73 条商城路由逐条经真实 gRPC 调用（bufconn）校验
 func TestApisRoutesGRPC(t *testing.T) {
 
 	cases := apisRouteCases()

@@ -48,8 +48,8 @@ const (
 	// apisServerPackage - 平台 proto-less 服务的权威包名（曾出现 lichenhub 笔误，此处回归守护）
 	apisServerPackage = "licenhub.licence.v1"
 	// apisRouteCount - 商城管理面受控路由条数（与平台登记表条数互为断言；
-	// 充值申请/充值审核 5 条路由随功能下线删除后 60 → 55）
-	apisRouteCount = 55
+	// 充值申请/充值审核 5 条路由随功能下线删除后 60 → 55；LLM 统一网关 18 条落地后 55 → 73）
+	apisRouteCount = 73
 )
 
 var (
@@ -123,7 +123,30 @@ var (
 		"UpstreamCacheParams":    "ApisUpstreamCacheInput",
 		"UpstreamOptionsParams":  "ApisUpstreamOptionsInput",
 		"apisIdEnvelope":         "IdResult", "apisSpentEnvelope": "WalletSpentResult",
-		"soft_delete.DeletedAt": "int64",
+		// LLM 统一网关（设计 09）：渠道/映射/观测/sk-key 的平台类型名 → SDK 命名；
+		// LlmChannelProbePlan 为服务层内部凭据归一结构，verify-usage 与 models 两路由的回显
+		// 是平台动态装配的 map（llmProbeEnvelope / {models:[...]}），SDK 侧按 map[string]any 透出。
+		"LlmChannel":             "ApisLlmChannel",
+		"LlmChannelModel":        "ApisLlmChannelModel",
+		"LlmChannelView":         "ApisLlmChannelView",
+		"LlmChannelParams":       "ApisLlmChannelInput",
+		"LlmChannelItemParams":   "ApisLlmChannelItemInput",
+		"LlmChannelQuery":        "ApisLlmChannelQuery",
+		"LlmChannelVerifyParams": "ApisLlmChannelVerifyInput",
+		"LlmChannelProbePlan":    "map[string]any",
+		"LlmUsageDetail":         "ApisLlmLog",
+		"LlmLogQuery":            "ApisLlmLogQuery",
+		"LlmKeyView":             "ApisKey",
+		"LlmKeyCreated":          "ApisKeyCreated",
+		"LlmKeyParams":           "ApisKeyInput",
+		"LlmKeyQuery":            "ApisKeyQuery",
+		"LlmPricingScanParams":   "ApisLlmPricingScanInput",
+		"LlmPricingScanResult":   "ApisLlmPricingScanResult",
+		"LlmPricingScanItem":     "ApisLlmPricingScanItem",
+		"LlmModelRow":            "ApisLlmModelOffer",
+		"AdjustUserOption":       "WalletAdjustUserOption",
+		"AdjustUserOptionQuery":  "WalletAdjustUserQuery",
+		"soft_delete.DeletedAt":  "int64",
 	}
 	// apisWalletRPCNames - 钱包组 SDK 方法名 → gRPC 方法名：平台级钱包升级后 SDK 方法名破坏性改名，
 	// 而 gRPC 传输层内部标识（服务名/方法名）按双协议纪律保持不变，两者仅这 8 条不再逐字一致
@@ -385,7 +408,7 @@ func apisRequireSiblingRepo(t *testing.T) {
 }
 
 // TestApisReconcileSDKSourceTransportAndCases - SDK 资源层 ↔ 传输层 ↔ 用例表三向一致
-// （不依赖兄弟仓库；约束不变式：typed 方法数 = 传输 case 数 = 用例表条数 = 55）
+// （不依赖兄弟仓库；约束不变式：typed 方法数 = 传输 case 数 = 用例表条数 = 73）
 func TestApisReconcileSDKSourceTransportAndCases(t *testing.T) {
 
 	routes := loadApisSDKRoutes(t)
@@ -654,6 +677,28 @@ var apisShapeFiles = []apisShapeFile{
 	{sdkType: "ApisUsageRecordQuery", serverType: "UsageRecordQuery", serverFile: "backend/app/service/apis/usage.go"},
 	{sdkType: "ApisUsageDailyQuery", serverType: "UsageDailyQuery", serverFile: "backend/app/service/apis/usage.go"},
 	{sdkType: "ApisUsageDailySummaryQuery", serverType: "UsageDailySummaryQuery", serverFile: "backend/app/service/apis/usage-summary.go"},
+
+	// 输出：LLM 统一网关（渠道/映射/观测/sk-key，设计 09）
+	{sdkType: "ApisLlmChannel", serverType: "LlmChannel", serverFile: "backend/app/models/basic/llm-gateway.go"},
+	{sdkType: "ApisLlmChannelModel", serverType: "LlmChannelModel", serverFile: "backend/app/models/basic/llm-gateway.go"},
+	{sdkType: "ApisLlmChannelView", serverType: "LlmChannelView", serverFile: "backend/app/service/apis/llm-channel.go"},
+	{sdkType: "ApisLlmLog", serverType: "LlmUsageDetail", serverFile: "backend/app/models/basic/llm-gateway.go"},
+	{sdkType: "ApisKey", serverType: "LlmKeyView", serverFile: "backend/app/service/apis/llm-key.go"},
+	{sdkType: "ApisKeyCreated", serverType: "LlmKeyCreated", serverFile: "backend/app/service/apis/llm-key.go"},
+	{sdkType: "ApisLlmPricingScanResult", serverType: "LlmPricingScanResult", serverFile: "backend/app/service/apis/llm-pricing-scan.go"},
+	{sdkType: "ApisLlmPricingScanItem", serverType: "LlmPricingScanItem", serverFile: "backend/app/service/apis/llm-pricing-scan.go"},
+	{sdkType: "WalletAdjustUserOption", serverType: "AdjustUserOption", serverFile: "backend/app/service/apis/balance.go"},
+
+	// 输入：LLM 统一网关写路径与读路径筛选
+	{sdkType: "ApisLlmChannelInput", serverType: "LlmChannelParams", serverFile: "backend/app/service/apis/llm-channel.go"},
+	{sdkType: "ApisLlmChannelItemInput", serverType: "LlmChannelItemParams", serverFile: "backend/app/service/apis/llm-channel.go"},
+	{sdkType: "ApisLlmChannelVerifyInput", serverType: "LlmChannelVerifyParams", serverFile: "backend/app/service/apis/llm-channel.go"},
+	{sdkType: "ApisLlmChannelQuery", serverType: "LlmChannelQuery", serverFile: "backend/app/service/apis/llm-channel.go"},
+	{sdkType: "ApisLlmPricingScanInput", serverType: "LlmPricingScanParams", serverFile: "backend/app/service/apis/llm-pricing-scan.go"},
+	{sdkType: "ApisLlmLogQuery", serverType: "LlmLogQuery", serverFile: "backend/app/service/apis/llm-log.go"},
+	{sdkType: "ApisKeyInput", serverType: "LlmKeyParams", serverFile: "backend/app/service/apis/llm-key.go"},
+	{sdkType: "ApisKeyQuery", serverType: "LlmKeyQuery", serverFile: "backend/app/service/apis/llm-key.go"},
+	{sdkType: "WalletAdjustUserQuery", serverType: "AdjustUserOptionQuery", serverFile: "backend/app/service/apis/balance.go"},
 }
 
 // apisNormalizeType - 归一 Go 类型用于跨仓库比对：去指针/切片修饰前缀、去 `BasicModel.` 包限定、
@@ -731,7 +776,10 @@ func loadApisSDKResults(t *testing.T) map[string]apisSDKResult {
 			returns = matched[3]
 		}
 		kind, element := apisSDKResultKind(returns)
-		results[name] = apisSDKResult{kind: kind, element: element}
+		// SDK 侧元素名归一（与平台侧 apisServiceElement 的 apisNormalizeElementType 同口径）：
+		// 平台服务层签名的 []T 列表返回在推导时已剥离 [] 修饰，SDK 的 *[]T 列表返回同样剥落后比对——
+		// kind 与元素名仍逐条校验，仅修饰符对齐（防 rows 类全量列表路由的结构性误判，非放宽断言）
+		results[name] = apisSDKResult{kind: kind, element: apisNormalizeElementType(element)}
 	}
 	return results
 }
@@ -820,6 +868,12 @@ func apisPlatformPayload(t *testing.T, body string, spec apisServerSpec, returns
 			return "export", matched[1]
 		}
 		return "one", apisNormalizeType(matched[1])
+	}
+	// 处理器内联装配载荷（无 apis.Instance 服务层调用）：在售模型价格表直接由 llmgateway 目录聚合
+	// （llmgateway.ListOnSaleModels → []LlmModelRow，处理器白名单投影 model/contextWindow/maxOutputTokens/
+	// priceInput/priceOutput/priceCacheRead/priceReasoning），元素类型取目录行类型（归一后按映射表对到 SDK 命名）
+	if strings.Contains(body, "llmgateway.ListOnSaleModels()") {
+		return "one", apisNormalizeElementType("[]LlmModelRow")
 	}
 	element := apisServiceElement(t, body, spec, returns)
 	if strings.Contains(body, "apisOK(apisPage(") {

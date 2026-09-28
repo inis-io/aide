@@ -497,6 +497,8 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.invokeApis(callCtx, apisFindManageBalancesFullMethod, request)
 	case http.MethodGet + " /api/wallet-accounts/manage/take":
 		response, err = this.invokeApis(callCtx, apisGetManageBalanceFullMethod, request)
+	case http.MethodGet + " /api/wallet-accounts/user-options":
+		response, err = this.invokeApis(callCtx, apisFindAdjustUserOptionsFullMethod, request)
 
 	case http.MethodGet + " /api/apis-bills/find":
 		response, err = this.invokeApis(callCtx, apisFindBillsFullMethod, request)
@@ -525,6 +527,43 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.invokeApis(callCtx, apisFindMonitorUsageDailyFullMethod, request)
 	case http.MethodGet + " /api/apis-monitor/usage/summary":
 		response, err = this.invokeApis(callCtx, apisGetMonitorUsageSummaryFullMethod, request)
+
+	case http.MethodGet + " /api/apis-llm-channels/find":
+		response, err = this.invokeApis(callCtx, apisFindLlmChannelsFullMethod, request)
+	case http.MethodGet + " /api/apis-llm-channels/take":
+		response, err = this.invokeApis(callCtx, apisGetLlmChannelFullMethod, request)
+	case http.MethodGet + " /api/apis-llm-channels/rows":
+		response, err = this.invokeApis(callCtx, apisRowsLlmChannelsFullMethod, request)
+	case http.MethodGet + " /api/apis-llm-channels/market-models":
+		response, err = this.invokeApis(callCtx, apisMarketLlmModelsFullMethod, request)
+	case http.MethodPost + " /api/apis-llm-channels/save":
+		response, err = this.invokeApis(callCtx, apisSaveLlmChannelFullMethod, request)
+	case http.MethodPost + " /api/apis-llm-channels/verify-usage":
+		response, err = this.invokeApis(callCtx, apisVerifyLlmChannelUsageFullMethod, request)
+	case http.MethodPost + " /api/apis-llm-channels/models":
+		response, err = this.invokeApis(callCtx, apisFetchLlmChannelModelsFullMethod, request)
+	case http.MethodPost + " /api/apis-llm-channels/pricing-scan":
+		response, err = this.invokeApis(callCtx, apisScanLlmChannelPricingFullMethod, request)
+	case http.MethodDelete + " /api/apis-llm-channels/remove":
+		response, err = this.invokeApis(callCtx, apisRemoveLlmChannelFullMethod, request)
+
+	case http.MethodGet + " /api/apis-llm-logs/find":
+		response, err = this.invokeApis(callCtx, apisFindLlmLogsFullMethod, request)
+	case http.MethodGet + " /api/apis-llm-logs/take":
+		response, err = this.invokeApis(callCtx, apisGetLlmLogFullMethod, request)
+	case http.MethodGet + " /api/apis-llm-logs/export":
+		response, err = this.invokeApis(callCtx, apisExportLlmLogsFullMethod, request)
+
+	case http.MethodGet + " /api/apis-keys/find":
+		response, err = this.invokeApis(callCtx, apisFindApisKeysFullMethod, request)
+	case http.MethodGet + " /api/apis-keys/take":
+		response, err = this.invokeApis(callCtx, apisGetApisKeyFullMethod, request)
+	case http.MethodPost + " /api/apis-keys/create":
+		response, err = this.invokeApis(callCtx, apisCreateApisKeyFullMethod, request)
+	case http.MethodPut + " /api/apis-keys/revoke":
+		response, err = this.invokeApis(callCtx, apisRevokeApisKeyFullMethod, request)
+	case http.MethodDelete + " /api/apis-keys/remove":
+		response, err = this.invokeApis(callCtx, apisRemoveApisKeyFullMethod, request)
 	default:
 		return nil, errors.New("licence: gRPC 管理面未声明该操作：" + call.Method + " " + call.Path)
 	}
@@ -535,7 +574,7 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 }
 
 // invokeApis - API 商城管理面（proto-less 服务）的统一调用出口：
-// 平台侧 7 个 ApisXxxAdminService 由 ApisSpecs 登记表装配 ServiceDesc，SDK 无生成 stub，
+// 平台侧 10 个 ApisXxxAdminService 由 ApisSpecs 登记表装配 ServiceDesc，SDK 无生成 stub，
 // 因此直接用 conn.Invoke(fullMethod) 调用并复用既有 licencev1.AdminRequest/AdminResponse 信封
 // （业务错误仍是 code != 200 的成功响应，由 adminData 还原为 *APIError；传输层失败由 adminGRPCError 映射）。
 func (this *grpcAdminTransport) invokeApis(ctx context.Context, fullMethod string, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {

@@ -12,9 +12,10 @@ import (
 
 // ApisResource - API 商城资源（`/api/apis-market/*`、`/api/apis-products/*`（含能力上游管理
 // upstream*）、`/api/apis-plans/*`、`/api/apis-orders/*`、`/api/apis-subscriptions/*`、
-// `/api/wallet-accounts/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、`/api/apis-monitor/*`）。
+// `/api/wallet-accounts/*`、`/api/apis-bills/*`、`/api/apis-usage/*`、`/api/apis-monitor/*`、
+// `/api/apis-llm-channels/*`、`/api/apis-llm-logs/*`、`/api/apis-keys/*`）。
 //
-// 覆盖范围：licen-hub 商城管理面 **55 条受控路由**（7 个 gRPC 服务），方法名与平台登记表
+// 覆盖范围：licen-hub 商城管理面 **73 条受控路由**（10 个 gRPC 服务），方法名与平台登记表
 // `backend/grpc/admin/v1/apis.go` 的 `ApisSpecs().Method` 逐字一致，便于协议矩阵式对账；
 // 三向一致性（SDK 方法 ↔ 传输层 case ↔ 平台登记表）由 `apis_reconcile_test.go` 强制守护。
 //
@@ -27,7 +28,10 @@ import (
 //     商城浏览以套餐为中心（ApisOfferPlan.Items 携带全部产品明细）；
 //   - 能力上游管理（upstream* 9 条）：密钥只进不出（响应只给掩码），数据文件上传 HTTP 走 multipart、
 //     gRPC 走 JSON base64（由传输层各自适配，方法签名一致）；
-//   - `Export*` 两条导出方法返回 (fileName, xlsx 原始字节, error)，base64 在方法内解码（与平台 HTTP/gRPC
+//   - LLM 统一网关（llm-channels 9 / llm-logs 3 / apis-keys 5）：渠道 apiKey 与 sk-key 明文只进不出
+//     （读视图绝不回传，sk-key 明文完整 key 仅创建响应返回一次）；usage 探测与上游模型列表的回显
+//     为平台动态装配（map[string]any），typed 方法原样透出；
+//   - `Export*` 三条导出方法返回 (fileName, xlsx 原始字节, error)，base64 在方法内解码（与平台 HTTP/gRPC
 //     两协议同形的 `{fileName, content}` 信封一一对应，消费方无需关心编码）。
 type ApisResource struct {
 	// client - 所属客户端
@@ -38,7 +42,7 @@ type ApisResource struct {
 
 // 商城管理面的传输差异（对调用方透明）：
 //   - HTTP：`{code,msg,data}` 信封 + 平台参数中间件（GET 走 query、写路径走 JSON body）；
-//   - gRPC：7 个 **proto-less** 服务（平台按 `ApisSpecs` 登记表装配 ServiceDesc，复用既有
+//   - gRPC：10 个 **proto-less** 服务（平台按 `ApisSpecs` 登记表装配 ServiceDesc，复用既有
 //     licencev1.AdminRequest/AdminResponse 信封），SDK 侧经 conn.Invoke + fullMethod 常量调用，
 //     无生成 stub；GET 的 query 由传输层统一折叠为 JSON 请求体（见 admin-transport-grpc.go 的 queryJSON）。
 //
@@ -54,13 +58,19 @@ const (
 	apisOrderService = "licenhub.licence.v1.ApisOrderAdminService"
 	// apisSubscriptionService - 订阅（我的订阅与自助动作）
 	apisSubscriptionService = "licenhub.licence.v1.ApisSubscriptionAdminService"
-	// apisBalanceService - 钱包账户（自助 + 平台运营；gRPC 传输层内部标识，
+	// apisBalanceService - 钱包账户（自助 + 平台运营 + 调账用户选项；gRPC 传输层内部标识，
 	// 不随 SDK 钱包改名而变化——服务名与 full method 保持原值）
 	apisBalanceService = "licenhub.licence.v1.ApisBalanceAdminService"
 	// apisUsageService - 账务与用量只读视图（我的账单/用量）
 	apisUsageService = "licenhub.licence.v1.ApisUsageAdminService"
 	// apisMonitorService - 监控只读视图（平台全量账单/流水/用量）
 	apisMonitorService = "licenhub.licence.v1.ApisMonitorAdminService"
+	// apisLlmChannelService - LLM 统一网关上游渠道（管理视图 + usage 探测 + 模型列表 + 定价抓取）
+	apisLlmChannelService = "licenhub.licence.v1.ApisLlmChannelAdminService"
+	// apisLlmLogService - LLM 调用观测明细（只读 + 导出）
+	apisLlmLogService = "licenhub.licence.v1.ApisLlmLogAdminService"
+	// apisKeyService - sk- API Key 生命周期（分页/详情/签发/吊销/删除）
+	apisKeyService = "licenhub.licence.v1.ApisKeyAdminService"
 )
 
 const (
@@ -109,14 +119,15 @@ const (
 	apisSetSubscriptionAutoRenewFullMethod = "/" + apisSubscriptionService + "/SetSubscriptionAutoRenew"
 
 	// ---------- ApisBalanceAdminService ----------
-	apisGetBalanceFullMethod         = "/" + apisBalanceService + "/GetBalance"
-	apisGetBalanceSpentFullMethod    = "/" + apisBalanceService + "/GetBalanceSpent"
-	apisFindBalanceLogsFullMethod    = "/" + apisBalanceService + "/FindBalanceLogs"
-	apisSetBalanceLimitFullMethod    = "/" + apisBalanceService + "/SetBalanceLimit"
-	apisAdjustBalanceFullMethod      = "/" + apisBalanceService + "/AdjustBalance"
-	apisSetBalanceStatusFullMethod   = "/" + apisBalanceService + "/SetBalanceStatus"
-	apisFindManageBalancesFullMethod = "/" + apisBalanceService + "/FindManageBalances"
-	apisGetManageBalanceFullMethod   = "/" + apisBalanceService + "/GetManageBalance"
+	apisGetBalanceFullMethod            = "/" + apisBalanceService + "/GetBalance"
+	apisGetBalanceSpentFullMethod       = "/" + apisBalanceService + "/GetBalanceSpent"
+	apisFindBalanceLogsFullMethod       = "/" + apisBalanceService + "/FindBalanceLogs"
+	apisSetBalanceLimitFullMethod       = "/" + apisBalanceService + "/SetBalanceLimit"
+	apisAdjustBalanceFullMethod         = "/" + apisBalanceService + "/AdjustBalance"
+	apisSetBalanceStatusFullMethod      = "/" + apisBalanceService + "/SetBalanceStatus"
+	apisFindManageBalancesFullMethod    = "/" + apisBalanceService + "/FindManageBalances"
+	apisGetManageBalanceFullMethod      = "/" + apisBalanceService + "/GetManageBalance"
+	apisFindAdjustUserOptionsFullMethod = "/" + apisBalanceService + "/FindAdjustUserOptions"
 
 	// ---------- ApisUsageAdminService ----------
 	apisFindBillsFullMethod            = "/" + apisUsageService + "/FindBills"
@@ -134,6 +145,29 @@ const (
 	apisFindMonitorUsageRecordsFullMethod = "/" + apisMonitorService + "/FindMonitorUsageRecords"
 	apisFindMonitorUsageDailyFullMethod   = "/" + apisMonitorService + "/FindMonitorUsageDaily"
 	apisGetMonitorUsageSummaryFullMethod  = "/" + apisMonitorService + "/GetMonitorUsageSummary"
+
+	// ---------- ApisLlmChannelAdminService ----------
+	apisFindLlmChannelsFullMethod       = "/" + apisLlmChannelService + "/FindLlmChannels"
+	apisGetLlmChannelFullMethod         = "/" + apisLlmChannelService + "/GetLlmChannel"
+	apisRowsLlmChannelsFullMethod       = "/" + apisLlmChannelService + "/RowsLlmChannels"
+	apisMarketLlmModelsFullMethod       = "/" + apisLlmChannelService + "/MarketLlmModels"
+	apisSaveLlmChannelFullMethod        = "/" + apisLlmChannelService + "/SaveLlmChannel"
+	apisVerifyLlmChannelUsageFullMethod = "/" + apisLlmChannelService + "/VerifyLlmChannelUsage"
+	apisFetchLlmChannelModelsFullMethod = "/" + apisLlmChannelService + "/FetchLlmChannelModels"
+	apisScanLlmChannelPricingFullMethod = "/" + apisLlmChannelService + "/ScanLlmChannelPricing"
+	apisRemoveLlmChannelFullMethod      = "/" + apisLlmChannelService + "/RemoveLlmChannel"
+
+	// ---------- ApisLlmLogAdminService ----------
+	apisFindLlmLogsFullMethod   = "/" + apisLlmLogService + "/FindLlmLogs"
+	apisGetLlmLogFullMethod     = "/" + apisLlmLogService + "/GetLlmLog"
+	apisExportLlmLogsFullMethod = "/" + apisLlmLogService + "/ExportLlmLogs"
+
+	// ---------- ApisKeyAdminService ----------
+	apisFindApisKeysFullMethod  = "/" + apisKeyService + "/FindApisKeys"
+	apisGetApisKeyFullMethod    = "/" + apisKeyService + "/GetApisKey"
+	apisCreateApisKeyFullMethod = "/" + apisKeyService + "/CreateApisKey"
+	apisRevokeApisKeyFullMethod = "/" + apisKeyService + "/RevokeApisKey"
+	apisRemoveApisKeyFullMethod = "/" + apisKeyService + "/RemoveApisKey"
 )
 
 // ============================= 商品浏览（apis-market，2） =============================
@@ -530,7 +564,7 @@ func (this *ApisResource) SetSubscriptionAutoRenew(ctx context.Context, id int, 
 	return &result, nil
 }
 
-// ============================= 平台钱包（wallet-accounts，8） =============================
+// ============================= 平台钱包（wallet-accounts，9） =============================
 // 充值申请/充值审核已整体下线（平台 wallet_recharges 表删除），只保留管理员人工调账 adjust：
 // 账户余额只经 AdjustWallet 变更并记钱包流水（txType=adjust）。
 
@@ -620,6 +654,19 @@ func (this *ApisResource) GetManageWallet(ctx context.Context, userId int) (*Wal
 
 	var result WalletAccount
 	if err := this.client.get(ctx, "/api/wallet-accounts/manage/take", map[string]any{"userId": userId}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// FindAdjustUserOptions - 人工调账目标用户选项（钱包账户控制器 user-options，调账弹窗用户搜索选择器）：
+// GET /api/wallet-accounts/user-options
+// 权限码 wallet.account.manage；仅返回有钱包账户的正常用户（未开户用户无法调账，选项阶段即过滤），
+// 关键词按 UID（数值精确）/账号/邮箱/手机号/昵称模糊匹配；SDK 方法名与 gRPC 方法名逐字一致。
+func (this *ApisResource) FindAdjustUserOptions(ctx context.Context, params *WalletAdjustUserQuery) (*[]WalletAdjustUserOption, error) {
+
+	var result []WalletAdjustUserOption
+	if err := this.client.get(ctx, "/api/wallet-accounts/user-options", params, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -772,6 +819,213 @@ func (this *ApisResource) GetMonitorUsageSummary(ctx context.Context, params *Ap
 	return &result, nil
 }
 
+// ============================= LLM 渠道（apis-llm-channels，9） =============================
+//
+// LLM 统一网关上游渠道（设计 09 §6.3）：主表 + llm_channel_models 映射明细（保存时全量替换，
+// 照套餐 plan_items 事务模式）；模型按名直接挂在映射行（独立模型目录已下线），报价/上下文/
+// 输出上限随明细维护。密钥红线：apiKey 任何读接口不回传（apisOK 出口前显式置空 + 模型 json:"-"）。
+
+// FindLlmChannels - 上游渠道分页（平台管理视图，含映射明细）：GET /api/apis-llm-channels/find
+// 权限码 apis.llmChannel.read；ApiKey 已置空绝不回传。
+func (this *ApisResource) FindLlmChannels(ctx context.Context, params *ApisLlmChannelQuery) (*Page[ApisLlmChannelView], error) {
+
+	var result Page[ApisLlmChannelView]
+	if err := this.client.get(ctx, "/api/apis-llm-channels/find", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetLlmChannel - 上游渠道详情（含映射明细；不回传 apiKey 明文）：GET /api/apis-llm-channels/take?id=N
+// 权限码 apis.llmChannel.read。
+func (this *ApisResource) GetLlmChannel(ctx context.Context, id int) (*ApisLlmChannelView, error) {
+
+	var result ApisLlmChannelView
+	if err := this.client.getWithQuery(ctx, "/api/apis-llm-channels/take", idQuery(id), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RowsLlmChannels - 上游渠道全量（平台管理视图；不分页，口径同 find）：GET /api/apis-llm-channels/rows
+// 权限码 apis.llmChannel.read。
+func (this *ApisResource) RowsLlmChannels(ctx context.Context, params *ApisLlmChannelQuery) (*[]ApisLlmChannelView, error) {
+
+	var result []ApisLlmChannelView
+	if err := this.client.get(ctx, "/api/apis-llm-channels/rows", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// MarketLlmModels - 在售模型价格表（member 选购页/sk-key 白名单选项：聚合口径，只回已定价模型）：
+// GET /api/apis-llm-channels/market-models
+// 权限码 apis.market.read；平台经「启用映射 × 启用渠道」目录聚合（ListOnSaleModels）内联装配。
+func (this *ApisResource) MarketLlmModels(ctx context.Context) (*[]ApisLlmModelOffer, error) {
+
+	var result []ApisLlmModelOffer
+	if err := this.client.get(ctx, "/api/apis-llm-channels/market-models", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SaveLlmChannel - 保存渠道（主表 + 明细全量替换；apiKey 留空 = 不变更；启用受探测闸门约束）：
+// POST /api/apis-llm-channels/save
+// 权限码 apis.llmChannel.update；端点/协议族/密钥变更会使既有 usage 探测结论失效，需重新探测后方可启用。
+func (this *ApisResource) SaveLlmChannel(ctx context.Context, input ApisLlmChannelInput) (*ApisLlmChannelView, error) {
+
+	var result ApisLlmChannelView
+	if err := this.client.post(ctx, "/api/apis-llm-channels/save", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// VerifyLlmChannelUsage - usage 探测（真实调用上游，结果落 usage_probe / usage_verified_at）：
+// POST /api/apis-llm-channels/verify-usage
+// 权限码 apis.llmChannel.update；纯候选探测（id = 0，保存前强制场景）不落库、结果原样回显。
+// 平台回显为动态装配信封（ok/detail/sample/inputTokens/outputTokens/streamOk[/id][/channel]），
+// typed 方法原样透出（与 SetUpstreamOptions 的 map 形态同口径）。
+func (this *ApisResource) VerifyLlmChannelUsage(ctx context.Context, input ApisLlmChannelVerifyInput) (map[string]any, error) {
+
+	var result map[string]any
+	if err := this.client.post(ctx, "/api/apis-llm-channels/verify-usage", input, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// FetchLlmChannelModels - 上游模型列表（平台侧）：POST /api/apis-llm-channels/models
+// 权限码 apis.llmChannel.update；凭据解析与 usage 探测同源（apiKey 留空取库中已存密钥解密值）；
+// ollama/cohere 协议族无清单端点，平台拒绝。回显 {models:[{model,displayName}]}，typed 方法原样透出。
+func (this *ApisResource) FetchLlmChannelModels(ctx context.Context, input ApisLlmChannelVerifyInput) (map[string]any, error) {
+
+	var result map[string]any
+	if err := this.client.post(ctx, "/api/apis-llm-channels/models", input, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ScanLlmChannelPricing - 官方定价抓取（平台侧）：POST /api/apis-llm-channels/pricing-scan
+// 权限码 apis.llmChannel.update；服务层统一编排（定价页解析 → 网页抓取管道 → 托管模型提取 → 24h 缓存），
+// 结果不落库，回显由运营勾选回填。
+func (this *ApisResource) ScanLlmChannelPricing(ctx context.Context, input ApisLlmPricingScanInput) (*ApisLlmPricingScanResult, error) {
+
+	var result ApisLlmPricingScanResult
+	if err := this.client.post(ctx, "/api/apis-llm-channels/pricing-scan", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RemoveLlmChannel - 删除渠道（软删，明细随同软删）：DELETE /api/apis-llm-channels/remove
+// 权限码 apis.llmChannel.delete（风险级别 high，平台写审计）。
+func (this *ApisResource) RemoveLlmChannel(ctx context.Context, id int) (*IdResult, error) {
+
+	var result IdResult
+	if err := this.client.del(ctx, "/api/apis-llm-channels/remove", map[string]any{"id": id}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================= LLM 调用观测（apis-llm-logs，3） =============================
+//
+// LLM 调用观测明细（设计 09 §6.5，只追加）：take/find/export 只读，不提供写接口；
+// 平台观测表（member 不可见），导出与 find 同口径（操作口径取 apis 域 export）。
+
+// FindLlmLogs - 调用观测明细分页（平台观测视图）：GET /api/apis-llm-logs/find
+// 权限码 apis.llmLog.read。
+func (this *ApisResource) FindLlmLogs(ctx context.Context, params *ApisLlmLogQuery) (*Page[ApisLlmLog], error) {
+
+	var result Page[ApisLlmLog]
+	if err := this.client.get(ctx, "/api/apis-llm-logs/find", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetLlmLog - 观测明细详情：GET /api/apis-llm-logs/take?id=N
+// 权限码 apis.llmLog.read。
+func (this *ApisResource) GetLlmLog(ctx context.Context, id int) (*ApisLlmLog, error) {
+
+	var result ApisLlmLog
+	if err := this.client.getWithQuery(ctx, "/api/apis-llm-logs/take", idQuery(id), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ExportLlmLogs - 观测明细导出（xlsx 字节流以 base64 随信封返回）：GET /api/apis-llm-logs/export
+// 权限码 apis.llmLog.export；筛选口径与 FindLlmLogs 一致并忽略分页（单次导出上限由平台把关）。
+// 返回文件名与 xlsx 原始字节（base64 在方法内解码，与 ExportBills 同口径）。
+func (this *ApisResource) ExportLlmLogs(ctx context.Context, params *ApisLlmLogQuery) (string, []byte, error) {
+
+	return this.exportBills(ctx, "/api/apis-llm-logs/export", params)
+}
+
+// ============================= sk- API Key（apis-keys，5） =============================
+//
+// sk- API Key 生命周期（设计 09 §5.2/§6.4）：member 自助签发/吊销/删除，明文完整 key 仅创建响应返回一次，
+// key_hash 绝不出现在任何读响应；吊销/删除后平台使 sk-key 认证缓存立即失效。
+
+// FindApisKeys - sk-key 分页（member 强制本人；平台侧按 apis 域读范围）：GET /api/apis-keys/find
+// 权限码 apis.key.read。
+func (this *ApisResource) FindApisKeys(ctx context.Context, params *ApisKeyQuery) (*Page[ApisKey], error) {
+
+	var result Page[ApisKey]
+	if err := this.client.get(ctx, "/api/apis-keys/find", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetApisKey - sk-key 详情（白名单投影，key_hash 绝不外泄）：GET /api/apis-keys/take?id=N
+// 权限码 apis.key.read；member 硬边界：他人 key 归一为 404，不泄露存在性。
+func (this *ApisResource) GetApisKey(ctx context.Context, id int) (*ApisKey, error) {
+
+	var result ApisKey
+	if err := this.client.getWithQuery(ctx, "/api/apis-keys/take", idQuery(id), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CreateApisKey - 签发 sk-key（明文完整 key 仅本次响应返回一次）：POST /api/apis-keys/create
+// 权限码 apis.key.create；AllowedModels 全部须已接入（存在于渠道映射），MonthlySpendLimit 不能为负。
+func (this *ApisResource) CreateApisKey(ctx context.Context, input ApisKeyInput) (*ApisKeyCreated, error) {
+
+	var result ApisKeyCreated
+	if err := this.client.post(ctx, "/api/apis-keys/create", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RevokeApisKey - 吊销 sk-key（status → revoked，行保留可审计；即时生效）：PUT /api/apis-keys/revoke
+// 权限码 apis.key.revoke；member 只能吊销本人 key，重复吊销平台返回 409。
+func (this *ApisResource) RevokeApisKey(ctx context.Context, id int) (*ApisKey, error) {
+
+	var result ApisKey
+	if err := this.client.put(ctx, "/api/apis-keys/revoke", map[string]any{"id": id}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RemoveApisKey - 删除 sk-key（软删进回收站）：DELETE /api/apis-keys/remove
+// 权限码 apis.key.revoke；member 只能删除本人 key，删除即时生效。
+func (this *ApisResource) RemoveApisKey(ctx context.Context, id int) (*IdResult, error) {
+
+	var result IdResult
+	if err := this.client.del(ctx, "/api/apis-keys/remove", map[string]any{"id": id}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // ============================= 资源层内部助手 =============================
 
 // apisTargetQuery - 「id 与单号二选一」的查询参数（空值不上送，与平台 apisNeedTarget 口径一致）。
@@ -787,9 +1041,9 @@ func apisTargetQuery(id int, key string, no string) url.Values {
 	return query
 }
 
-// exportBills - 两条账单导出路由的共用实现（我的账单 / 监控账单）：
+// exportBills - 三条导出路由的共用实现（我的账单 / 监控账单 / 观测明细）：
 // 平台返回 {fileName, content(base64)} 信封，此处解码 base64 并把解码失败包装为可定位的错误。
-func (this *ApisResource) exportBills(ctx context.Context, path string, params *ApisBillQuery) (string, []byte, error) {
+func (this *ApisResource) exportBills(ctx context.Context, path string, params any) (string, []byte, error) {
 
 	var envelope apisBillExportEnvelope
 	if err := this.client.get(ctx, path, params, &envelope); err != nil {

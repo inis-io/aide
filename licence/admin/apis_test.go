@@ -138,7 +138,79 @@ func apisPlanViewRow() map[string]any {
 	}
 }
 
-// apisRouteCases - 55 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
+// apisLlmChannelItemRow - 渠道模型映射明细行（ApisLlmChannelModel 全量 json tag，LlmChannelView.Items 元素）
+func apisLlmChannelItemRow() map[string]any {
+	return map[string]any{
+		"id": 61, "channelId": 12, "model": "gpt-5", "upstreamModel": "gpt-5-2026",
+		"priceInput": 3000, "priceOutput": 12000, "priceCacheRead": 1500, "priceReasoning": 0,
+		"rate": 0, "costInput": 2000, "costOutput": 8000, "costCacheRead": 1000, "costReasoning": 0,
+		"contextWindow": 256000, "maxOutputTokens": 8192, "status": "enabled",
+		"priority": 0, "weight": 0, "uid": 1,
+		"createAt": 1780000000000, "updateAt": 1780000000000, "deleteAt": 0,
+	}
+}
+
+// apisLlmChannelRow - 渠道管理视图行（ApisLlmChannelView = 渠道主表字段平铺 + items 明细；
+// apiKey 平台任何读接口不回传，json:"-" 恒缺省，用例行不含该键）
+func apisLlmChannelRow() map[string]any {
+	return map[string]any{
+		"id": 12, "name": "官方中转", "protocol": "openai", "baseUrl": "https://api.example.com/v1",
+		"pricingUrl": "https://example.com/pricing", "priority": 10, "weight": 5,
+		"qpsLimit": 0, "concurrencyLimit": 0, "status": "enabled", "healthStatus": "up",
+		"healthCheckedAt": 1780000000000, "usageProbe": `{"ok":true}`, "usageVerifiedAt": 1780000000000,
+		"timeoutMs": 60000, "remark": "主力渠道", "uid": 1,
+		"createAt": 1780000000000, "updateAt": 1780000000000, "deleteAt": 0,
+		"items": []any{apisLlmChannelItemRow()},
+	}
+}
+
+// apisLlmModelOfferRow - 在售模型价格表行（ApisLlmModelOffer 7 个白名单键：
+// 平台 llmgateway.ListOnSaleModels 聚合 + 处理器白名单投影，只回已定价模型）
+func apisLlmModelOfferRow() map[string]any {
+	return map[string]any{
+		"model": "gpt-5", "contextWindow": 256000, "maxOutputTokens": 8192,
+		"priceInput": 3000, "priceOutput": 12000, "priceCacheRead": 1500, "priceReasoning": 0,
+	}
+}
+
+// apisLlmLogRow - 调用观测明细行（ApisLlmLog 全量 json tag，平台 models/basic.LlmUsageDetail）
+func apisLlmLogRow() map[string]any {
+	return map[string]any{
+		"id": 501, "requestId": "llm-req-501", "userId": 7, "keyId": 21, "model": "gpt-5",
+		"channelId": 12, "protocolIn": "openai", "protocolOut": "openai", "converted": false, "stream": true,
+		"promptTokens": 1200, "completionTokens": 300, "cachedTokens": 200, "reasoningTokens": 0,
+		"estimated": false, "ttftMs": 320, "durationMs": 2100, "upstreamStatus": 200,
+		"errorType": "", "amount": 72, "costAmount": 48, "createAt": 1780000005000,
+	}
+}
+
+// apisKeyRow - sk-key 读视图行（ApisKey 全量 json tag，平台 service/apis.LlmKeyView 白名单投影；
+// key_hash 绝不外泄，用例行不含该键）
+func apisKeyRow() map[string]any {
+	return map[string]any{
+		"id": 21, "keyNo": "KEY-2026-000021", "userId": 7, "productId": 5, "name": "本地开发",
+		"prefix": "sk-ab12cd3", "allowedModels": []any{"gpt-5"}, "monthlySpendLimit": 10000,
+		"expiresAt": 0, "status": "active", "lastUsedAt": 1780000000000, "createAt": 1780000000000,
+	}
+}
+
+// apisPricingScanData - 定价抓取结果 data（ApisLlmPricingScanResult：url/provider/cached/truncated + items）
+func apisPricingScanData() map[string]any {
+	return map[string]any{
+		"url": "https://example.com/pricing", "provider": "http", "cached": false, "truncated": false,
+		"items": []any{map[string]any{
+			"model": "gpt-5", "input": 2000, "output": 8000, "cacheRead": 1000, "reasoning": 0,
+			"contextWindow": 256000, "maxOutputTokens": 8192,
+		}},
+	}
+}
+
+// apisAdjustUserOptionRow - 人工调账目标用户选项行（WalletAdjustUserOption：仅选择器所需字段）
+func apisAdjustUserOptionRow() map[string]any {
+	return map[string]any{"id": 7, "account": "member", "nickname": "兔子", "avatar": "/avatar.png"}
+}
+
+// apisRouteCases - 73 条路由用例（顺序与平台 ApisSpecs 登记顺序一致，便于逐行对读）
 func apisRouteCases() []apisRouteCase {
 	autoRenew := false
 	return []apisRouteCase{
@@ -733,8 +805,8 @@ func apisRouteCases() []apisRouteCase {
 			wantBody: []string{`"id":3`, `"autoRenew":false`},
 		},
 
-		// ---------- ApisBalanceAdminService（8；平台级钱包，API 商城为首个消费方；
-		// 充值申请/充值审核已整体下线，只保留管理员人工调账 adjust） ----------
+		// ---------- ApisBalanceAdminService（9；平台级钱包，API 商城为首个消费方；
+		// 充值申请/充值审核已整体下线，只保留管理员人工调账 adjust 与调账用户选项） ----------
 		{
 			name: "GetWallet", rpc: "GetBalance", service: "ApisBalanceAdminService",
 			method: http.MethodGet, path: "/api/wallet-accounts/take",
@@ -864,6 +936,22 @@ func apisRouteCases() []apisRouteCase {
 				}
 			},
 			wantQuery: map[string]string{"userId": "7"},
+		},
+		{
+			// 人工调账用户搜索选择器：SDK 方法名与 gRPC 方法名逐字一致（不经钱包组 rpc 改名映射）
+			name: "FindAdjustUserOptions", service: "ApisBalanceAdminService",
+			method: http.MethodGet, path: "/api/wallet-accounts/user-options",
+			data: []any{apisAdjustUserOptionRow()},
+			invoke: func(t *testing.T, client *AdminClient) {
+				rows, err := client.Apis.FindAdjustUserOptions(context.Background(), &WalletAdjustUserQuery{Keyword: "兔子", Limit: 20})
+				if err != nil {
+					t.Fatalf("调账用户选项失败: %v", err)
+				}
+				if rows == nil || len(*rows) != 1 || (*rows)[0].Id != 7 || (*rows)[0].Account != "member" {
+					t.Fatalf("调账用户选项解析不符: %+v", rows)
+				}
+			},
+			wantQuery: map[string]string{"keyword": "兔子", "limit": "20"},
 		},
 
 		// ---------- ApisUsageAdminService（6） ----------
@@ -1132,10 +1220,334 @@ func apisRouteCases() []apisRouteCase {
 			wantQuery:      map[string]string{"userId": "7"},
 			wantMultiQuery: map[string][]string{"statDate[]": {"2026-08-01", "2026-08-17"}},
 		},
+
+		// ---------- ApisLlmChannelAdminService（9；LLM 统一网关上游渠道，设计 09 §6.3） ----------
+		{
+			name: "FindLlmChannels", service: "ApisLlmChannelAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-channels/find",
+			// 页元素是渠道管理视图（主表字段平铺 + items 映射明细），apiKey 恒缺省
+			data: apisPageData([]any{apisLlmChannelRow()}, 1, 1),
+			invoke: func(t *testing.T, client *AdminClient) {
+				page, err := client.Apis.FindLlmChannels(context.Background(), &ApisLlmChannelQuery{
+					Page: 1, Status: "enabled", Protocol: "openai", Keyword: "中转",
+				})
+				if err != nil {
+					t.Fatalf("渠道分页失败: %v", err)
+				}
+				if page.Count != 1 || len(page.Data) != 1 || page.Data[0].Id != 12 || page.Data[0].Protocol != "openai" {
+					t.Fatalf("渠道分页解析不符: %+v", page.Data)
+				}
+				if page.Data[0].ApiKey != "" || len(page.Data[0].Items) != 1 || page.Data[0].Items[0].Model != "gpt-5" {
+					t.Fatalf("渠道明细解析不符: %+v", page.Data[0])
+				}
+			},
+			wantQuery: map[string]string{"page": "1", "status": "enabled", "protocol": "openai", "keyword": "中转"},
+		},
+		{
+			name: "GetLlmChannel", service: "ApisLlmChannelAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-channels/take",
+			data: apisLlmChannelRow(),
+			invoke: func(t *testing.T, client *AdminClient) {
+				row, err := client.Apis.GetLlmChannel(context.Background(), 12)
+				if err != nil {
+					t.Fatalf("渠道详情失败: %v", err)
+				}
+				if row.Id != 12 || row.Name != "官方中转" || row.UsageVerifiedAt != 1780000000000 {
+					t.Fatalf("渠道详情解析不符: %+v", row)
+				}
+				if len(row.Items) != 1 || row.Items[0].PriceOutput != 12000 || row.Items[0].Rate != 0 {
+					t.Fatalf("渠道映射明细解析不符: %+v", row.Items)
+				}
+			},
+			wantQuery: map[string]string{"id": "12"},
+		},
+		{
+			name: "RowsLlmChannels", service: "ApisLlmChannelAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-channels/rows",
+			// 全量列表（不分页，data 为数组）
+			data: []any{apisLlmChannelRow()},
+			invoke: func(t *testing.T, client *AdminClient) {
+				rows, err := client.Apis.RowsLlmChannels(context.Background(), &ApisLlmChannelQuery{Status: "enabled"})
+				if err != nil {
+					t.Fatalf("渠道全量失败: %v", err)
+				}
+				if rows == nil || len(*rows) != 1 || (*rows)[0].Id != 12 || len((*rows)[0].Items) != 1 {
+					t.Fatalf("渠道全量解析不符: %+v", rows)
+				}
+			},
+			wantQuery: map[string]string{"status": "enabled"},
+		},
+		{
+			name: "MarketLlmModels", service: "ApisLlmChannelAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-channels/market-models",
+			// 在售模型价格表：白名单投影（model/报价/规格），无入参
+			data: []any{apisLlmModelOfferRow()},
+			invoke: func(t *testing.T, client *AdminClient) {
+				offers, err := client.Apis.MarketLlmModels(context.Background())
+				if err != nil {
+					t.Fatalf("在售模型价格表失败: %v", err)
+				}
+				if offers == nil || len(*offers) != 1 || (*offers)[0].Model != "gpt-5" || (*offers)[0].PriceOutput != 12000 {
+					t.Fatalf("在售模型价格表解析不符: %+v", offers)
+				}
+			},
+		},
+		{
+			name: "SaveLlmChannel", service: "ApisLlmChannelAdminService",
+			method: http.MethodPost, path: "/api/apis-llm-channels/save",
+			data: apisLlmChannelRow(),
+			invoke: func(t *testing.T, client *AdminClient) {
+				row, err := client.Apis.SaveLlmChannel(context.Background(), ApisLlmChannelInput{
+					Id: 12, Name: "官方中转", Protocol: "openai", BaseUrl: "https://api.example.com/v1",
+					ApiKey: "", Status: "enabled", TimeoutMs: 60000,
+					Items: []ApisLlmChannelItemInput{{
+						Model: "gpt-5", UpstreamModel: "gpt-5-2026",
+						PriceInput: 3000, PriceOutput: 12000, PriceCacheRead: 1500,
+						ContextWindow: 256000, MaxOutputTokens: 8192, Status: "enabled",
+					}},
+				})
+				if err != nil {
+					t.Fatalf("保存渠道失败: %v", err)
+				}
+				if row.Id != 12 || row.Status != "enabled" || len(row.Items) != 1 {
+					t.Fatalf("保存渠道解析不符: %+v", row)
+				}
+			},
+			// apiKey 留空 = 不变更（上送空串）；明细随渠道全量替换
+			wantBody: []string{
+				`"id":12`, `"name":"官方中转"`, `"protocol":"openai"`, `"baseUrl":"https://api.example.com/v1"`,
+				`"apiKey":""`, `"status":"enabled"`, `"timeoutMs":60000`,
+				`"items":[{`, `"model":"gpt-5"`, `"upstreamModel":"gpt-5-2026"`, `"priceInput":3000`, `"rate":0`,
+			},
+		},
+		{
+			name: "VerifyLlmChannelUsage", service: "ApisLlmChannelAdminService",
+			method: http.MethodPost, path: "/api/apis-llm-channels/verify-usage",
+			// 探测回显为平台动态装配信封（纯候选探测无 id/channel）
+			data: map[string]any{"ok": true, "detail": "usage 实测通过", "sample": `{"total_tokens":1500}`, "inputTokens": 1200, "outputTokens": 300, "streamOk": true},
+			invoke: func(t *testing.T, client *AdminClient) {
+				result, err := client.Apis.VerifyLlmChannelUsage(context.Background(), ApisLlmChannelVerifyInput{
+					Id: 0, BaseUrl: "https://api.example.com/v1", ApiKey: "ak-candidate", Model: "gpt-5",
+				})
+				if err != nil {
+					t.Fatalf("usage 探测失败: %v", err)
+				}
+				if result["ok"] != true || result["inputTokens"] != float64(1200) || result["streamOk"] != true {
+					t.Fatalf("探测回显解析不符: %+v", result)
+				}
+			},
+			wantBody: []string{`"id":0`, `"baseUrl":"https://api.example.com/v1"`, `"apiKey":"ak-candidate"`, `"model":"gpt-5"`},
+		},
+		{
+			name: "FetchLlmChannelModels", service: "ApisLlmChannelAdminService",
+			method: http.MethodPost, path: "/api/apis-llm-channels/models",
+			data: map[string]any{"models": []any{map[string]any{"model": "gpt-5", "displayName": "GPT-5"}}},
+			invoke: func(t *testing.T, client *AdminClient) {
+				result, err := client.Apis.FetchLlmChannelModels(context.Background(), ApisLlmChannelVerifyInput{Id: 12})
+				if err != nil {
+					t.Fatalf("上游模型列表失败: %v", err)
+				}
+				models, ok := result["models"].([]any)
+				if !ok || len(models) != 1 {
+					t.Fatalf("模型列表解析不符: %+v", result)
+				}
+				item := models[0].(map[string]any)
+				if item["model"] != "gpt-5" || item["displayName"] != "GPT-5" {
+					t.Fatalf("模型列表元素解析不符: %+v", item)
+				}
+			},
+			// id > 0 时其余字段留空取渠道已存值
+			wantBody: []string{`"id":12`, `"baseUrl":""`, `"apiKey":""`},
+		},
+		{
+			name: "ScanLlmChannelPricing", service: "ApisLlmChannelAdminService",
+			method: http.MethodPost, path: "/api/apis-llm-channels/pricing-scan",
+			data: apisPricingScanData(),
+			invoke: func(t *testing.T, client *AdminClient) {
+				result, err := client.Apis.ScanLlmChannelPricing(context.Background(), ApisLlmPricingScanInput{
+					Id: 12, Refresh: true, ExchangeRate: 7.2,
+				})
+				if err != nil {
+					t.Fatalf("定价抓取失败: %v", err)
+				}
+				if result.Url != "https://example.com/pricing" || result.Provider != "http" || result.Cached {
+					t.Fatalf("定价抓取解析不符: %+v", result)
+				}
+				if len(result.Items) != 1 || result.Items[0].Model != "gpt-5" || result.Items[0].Output != 8000 {
+					t.Fatalf("定价条目解析不符: %+v", result.Items)
+				}
+			},
+			wantBody: []string{`"id":12`, `"refresh":true`, `"exchangeRate":7.2`},
+		},
+		{
+			name: "RemoveLlmChannel", service: "ApisLlmChannelAdminService",
+			method: http.MethodDelete, path: "/api/apis-llm-channels/remove",
+			data: map[string]any{"id": 12},
+			invoke: func(t *testing.T, client *AdminClient) {
+				result, err := client.Apis.RemoveLlmChannel(context.Background(), 12)
+				if err != nil {
+					t.Fatalf("删除渠道失败: %v", err)
+				}
+				if result.Id != 12 {
+					t.Fatalf("删除渠道结果解析不符: %+v", result)
+				}
+			},
+			wantBody: []string{`"id":12`},
+		},
+
+		// ---------- ApisLlmLogAdminService（3；LLM 调用观测明细，只读 + 导出） ----------
+		{
+			name: "FindLlmLogs", service: "ApisLlmLogAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-logs/find",
+			data: apisPageData([]any{apisLlmLogRow()}, 1, 1),
+			invoke: func(t *testing.T, client *AdminClient) {
+				page, err := client.Apis.FindLlmLogs(context.Background(), &ApisLlmLogQuery{
+					Page: 1, Model: "gpt-5", ChannelId: 12, Stream: "true",
+				})
+				if err != nil {
+					t.Fatalf("观测明细分页失败: %v", err)
+				}
+				if page.Count != 1 || len(page.Data) != 1 || page.Data[0].RequestId != "llm-req-501" {
+					t.Fatalf("观测明细分页解析不符: %+v", page.Data)
+				}
+				if page.Data[0].CostAmount == nil || *page.Data[0].CostAmount != 48 || page.Data[0].CachedTokens != 200 {
+					t.Fatalf("观测明细 token 分项解析不符: %+v", page.Data[0])
+				}
+			},
+			wantQuery: map[string]string{"page": "1", "model": "gpt-5", "channelId": "12", "stream": "true"},
+		},
+		{
+			name: "GetLlmLog", service: "ApisLlmLogAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-logs/take",
+			data: apisLlmLogRow(),
+			invoke: func(t *testing.T, client *AdminClient) {
+				row, err := client.Apis.GetLlmLog(context.Background(), 501)
+				if err != nil {
+					t.Fatalf("观测明细详情失败: %v", err)
+				}
+				if row.Id != 501 || row.Amount != 72 || row.UpstreamStatus != 200 {
+					t.Fatalf("观测明细详情解析不符: %+v", row)
+				}
+			},
+			wantQuery: map[string]string{"id": "501"},
+		},
+		{
+			name: "ExportLlmLogs", service: "ApisLlmLogAdminService",
+			method: http.MethodGet, path: "/api/apis-llm-logs/export",
+			// 与账单导出同信封：{fileName, content(base64)}，typed 方法内解码
+			data: apisBillExportData("llm-logs-202608.xlsx"),
+			invoke: func(t *testing.T, client *AdminClient) {
+				fileName, content, err := client.Apis.ExportLlmLogs(context.Background(), &ApisLlmLogQuery{Model: "gpt-5"})
+				if err != nil {
+					t.Fatalf("观测明细导出失败: %v", err)
+				}
+				if fileName != "llm-logs-202608.xlsx" || string(content) != "xlsx-bytes" {
+					t.Fatalf("观测明细导出结果不符: %s / %q", fileName, content)
+				}
+			},
+			wantQuery: map[string]string{"model": "gpt-5"},
+		},
+
+		// ---------- ApisKeyAdminService（5；sk- API Key 生命周期，设计 09 §5.2/§6.4） ----------
+		{
+			name: "FindApisKeys", service: "ApisKeyAdminService",
+			method: http.MethodGet, path: "/api/apis-keys/find",
+			data: apisPageData([]any{apisKeyRow()}, 1, 1),
+			invoke: func(t *testing.T, client *AdminClient) {
+				page, err := client.Apis.FindApisKeys(context.Background(), &ApisKeyQuery{
+					Page: 1, Status: "active", Keyword: "本地",
+				})
+				if err != nil {
+					t.Fatalf("sk-key 分页失败: %v", err)
+				}
+				if page.Count != 1 || len(page.Data) != 1 || page.Data[0].KeyNo != "KEY-2026-000021" {
+					t.Fatalf("sk-key 分页解析不符: %+v", page.Data)
+				}
+				if len(page.Data[0].AllowedModels) != 1 || page.Data[0].AllowedModels[0] != "gpt-5" || page.Data[0].MonthlySpendLimit != 10000 {
+					t.Fatalf("sk-key 白名单解析不符: %+v", page.Data[0])
+				}
+			},
+			wantQuery: map[string]string{"page": "1", "status": "active", "keyword": "本地"},
+		},
+		{
+			name: "GetApisKey", service: "ApisKeyAdminService",
+			method: http.MethodGet, path: "/api/apis-keys/take",
+			data: apisKeyRow(),
+			invoke: func(t *testing.T, client *AdminClient) {
+				row, err := client.Apis.GetApisKey(context.Background(), 21)
+				if err != nil {
+					t.Fatalf("sk-key 详情失败: %v", err)
+				}
+				if row.Id != 21 || row.Prefix != "sk-ab12cd3" || row.Status != "active" {
+					t.Fatalf("sk-key 详情解析不符: %+v", row)
+				}
+			},
+			wantQuery: map[string]string{"id": "21"},
+		},
+		{
+			name: "CreateApisKey", service: "ApisKeyAdminService",
+			method: http.MethodPost, path: "/api/apis-keys/create",
+			// 明文完整 key 仅创建响应返回一次（内嵌读视图 + key）
+			data: map[string]any{
+				"id": 22, "keyNo": "KEY-2026-000022", "userId": 7, "productId": 5, "name": "CI 流水线",
+				"prefix": "sk-ef45gh6", "allowedModels": []any{}, "monthlySpendLimit": 0,
+				"expiresAt": 1783000000000, "status": "active", "lastUsedAt": 0, "createAt": 1780000000000,
+				"key": "sk-ef45gh6789abcdef0123456789abcdef0123456789abcd",
+			},
+			invoke: func(t *testing.T, client *AdminClient) {
+				created, err := client.Apis.CreateApisKey(context.Background(), ApisKeyInput{
+					Name: "CI 流水线", AllowedModels: []string{}, ExpiresAt: 1783000000000,
+				})
+				if err != nil {
+					t.Fatalf("签发 sk-key 失败: %v", err)
+				}
+				if created.Id != 22 || created.Key != "sk-ef45gh6789abcdef0123456789abcdef0123456789abcd" {
+					t.Fatalf("签发结果解析不符: %+v", created)
+				}
+				if created.Status != "active" || created.ProductId != 5 {
+					t.Fatalf("签发读视图解析不符: %+v", created.ApisKey)
+				}
+			},
+			wantBody: []string{`"name":"CI 流水线"`, `"allowedModels":[]`, `"monthlySpendLimit":0`, `"expiresAt":1783000000000`},
+		},
+		{
+			name: "RevokeApisKey", service: "ApisKeyAdminService",
+			method: http.MethodPut, path: "/api/apis-keys/revoke",
+			data: map[string]any{
+				"id": 21, "keyNo": "KEY-2026-000021", "userId": 7, "productId": 5, "name": "本地开发",
+				"prefix": "sk-ab12cd3", "allowedModels": []any{"gpt-5"}, "monthlySpendLimit": 10000,
+				"expiresAt": 0, "status": "revoked", "lastUsedAt": 1780000000000, "createAt": 1780000000000,
+			},
+			invoke: func(t *testing.T, client *AdminClient) {
+				row, err := client.Apis.RevokeApisKey(context.Background(), 21)
+				if err != nil {
+					t.Fatalf("吊销 sk-key 失败: %v", err)
+				}
+				if row.Id != 21 || row.Status != "revoked" {
+					t.Fatalf("吊销结果解析不符: %+v", row)
+				}
+			},
+			wantBody: []string{`"id":21`},
+		},
+		{
+			name: "RemoveApisKey", service: "ApisKeyAdminService",
+			method: http.MethodDelete, path: "/api/apis-keys/remove",
+			data: map[string]any{"id": 21},
+			invoke: func(t *testing.T, client *AdminClient) {
+				result, err := client.Apis.RemoveApisKey(context.Background(), 21)
+				if err != nil {
+					t.Fatalf("删除 sk-key 失败: %v", err)
+				}
+				if result.Id != 21 {
+					t.Fatalf("删除 sk-key 结果解析不符: %+v", result)
+				}
+			},
+			wantBody: []string{`"id":21`},
+		},
 	}
 }
 
-// TestApisRoutesHTTP - 55 条商城路由逐条经 HTTP 假平台校验：
+// TestApisRoutesHTTP - 73 条商城路由逐条经 HTTP 假平台校验：
 // ① 请求打到登记表登记的「动词 + 路径」（未登记即 404，用例直接失败）；
 // ② query 按平台约定序列化（标量直写、数组 key[]=v 重复）；
 // ③ 写路径请求体字段与平台入参结构逐字对齐（含显式 false / 负数等不可省略的取值）；
@@ -1144,8 +1556,8 @@ func apisRouteCases() []apisRouteCase {
 func TestApisRoutesHTTP(t *testing.T) {
 
 	cases := apisRouteCases()
-	if len(cases) != 55 {
-		t.Fatalf("商城路由用例应为 55 条，实际 %d 条", len(cases))
+	if len(cases) != 73 {
+		t.Fatalf("商城路由用例应为 73 条，实际 %d 条", len(cases))
 	}
 
 	for _, one := range cases {
