@@ -374,9 +374,9 @@ type Receipt struct {
 	ChargeMode     string                 `protobuf:"bytes,2,opt,name=charge_mode,json=chargeMode,proto3" json:"charge_mode,omitempty"`              // 主计费模式：free_quota / trial / subscription_quota / metered_balance
 	CacheHit       bool                   `protobuf:"varint,3,opt,name=cache_hit,json=cacheHit,proto3" json:"cache_hit,omitempty"`                   // 是否命中平台缓存（折扣由本字段 + amount 实收体现）
 	Quantity       int64                  `protobuf:"varint,4,opt,name=quantity,proto3" json:"quantity,omitempty"`                                   // 本次实际计量数
-	Amount         int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`                                       // 本次实收金额（分；免费、体验与订阅额度内为 0）
+	Amount         int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`                                       // 本次实收金额（万分；免费、体验与订阅额度内为 0）
 	QuotaRemaining int64                  `protobuf:"varint,6,opt,name=quota_remaining,json=quotaRemaining,proto3" json:"quota_remaining,omitempty"` // 主计费模式对应的剩余额度（按量与不限量时为 0）
-	BalanceAfter   int64                  `protobuf:"varint,7,opt,name=balance_after,json=balanceAfter,proto3" json:"balance_after,omitempty"`       // 余额账户可用余额（分；未开户为 0）
+	BalanceAfter   int64                  `protobuf:"varint,7,opt,name=balance_after,json=balanceAfter,proto3" json:"balance_after,omitempty"`       // 余额账户可用余额（万分；未开户为 0）
 	ServerTime     int64                  `protobuf:"varint,8,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`             // 服务端时间（毫秒，供客户校时）
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -661,7 +661,7 @@ type UsageRecord struct {
 	Quantity      int64                  `protobuf:"varint,8,opt,name=quantity,proto3" json:"quantity,omitempty"`
 	ChargeMode    string                 `protobuf:"bytes,9,opt,name=charge_mode,json=chargeMode,proto3" json:"charge_mode,omitempty"`
 	CacheHit      bool                   `protobuf:"varint,10,opt,name=cache_hit,json=cacheHit,proto3" json:"cache_hit,omitempty"`
-	Amount        int64                  `protobuf:"varint,11,opt,name=amount,proto3" json:"amount,omitempty"`                           // 本次扣费（分；免费、体验与订阅额度内为 0）
+	Amount        int64                  `protobuf:"varint,11,opt,name=amount,proto3" json:"amount,omitempty"`                           // 本次扣费（万分；免费、体验与订阅额度内为 0）
 	Result        string                 `protobuf:"bytes,12,opt,name=result,proto3" json:"result,omitempty"`                            // 调用结果：success / provider_error / rejected / settle_error
 	UpstreamMs    int64                  `protobuf:"varint,13,opt,name=upstream_ms,json=upstreamMs,proto3" json:"upstream_ms,omitempty"` // 上游耗时（毫秒，监控用）
 	CreateAt      int64                  `protobuf:"varint,14,opt,name=create_at,json=createAt,proto3" json:"create_at,omitempty"`       // 创建时间（毫秒戳）

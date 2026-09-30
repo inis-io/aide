@@ -11,11 +11,11 @@ type Receipt struct {
 	CacheHit bool `json:"cacheHit"`
 	// Quantity - 本次计费数量
 	Quantity int64 `json:"quantity"`
-	// Amount - 实收金额（分；免费、体验与订阅额度内为 0）
+	// Amount - 实收金额（万分；免费、体验与订阅额度内为 0）
 	Amount int64 `json:"amount"`
 	// QuotaRemaining - 订阅额度余量（次；无订阅额度语义时为 0）
 	QuotaRemaining int64 `json:"quotaRemaining"`
-	// BalanceAfter - 扣费后余额账户余额（分；metered_balance 模式返回）
+	// BalanceAfter - 扣费后余额账户余额（万分；metered_balance 模式返回）
 	BalanceAfter int64 `json:"balanceAfter"`
 	// ServerTime - 服务端时间（毫秒时间戳，供校时）
 	ServerTime int64 `json:"serverTime"`

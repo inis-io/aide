@@ -1516,7 +1516,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | 方法 | 说明 | 路由 | 参数 → 返回 |
 |---|---|---|---|
 | `GetWallet` | 我的钱包账户（惰性建户，归属取登录态） | `GET /api/wallet-accounts/take` | 无 → `*WalletAccount` |
-| `GetWalletSpent` | 本月已消费（分；权威口径为钱包流水） | `GET /api/wallet-accounts/spent` | 无 → `*WalletSpentResult` |
+| `GetWalletSpent` | 本月已消费（万分；权威口径为钱包流水） | `GET /api/wallet-accounts/spent` | 无 → `*WalletSpentResult` |
 | `FindWalletLogs` | 钱包流水分页 | `GET /api/wallet-accounts/logs` | `*WalletLogQuery` → `*Page[WalletLog]` |
 | `SetWalletLimit` | 设置月度消费限制（0=关闭；负数由平台拒绝） | `POST /api/wallet-accounts/limit` | `userId int, limit int64` → `*WalletAccount` |
 | `AdjustWallet` | 平台调整钱包余额（正数赠送/负数扣减，说明必填，风险 high） | `POST /api/wallet-accounts/adjust` | `WalletAdjustInput` → `*WalletState` |
@@ -1637,12 +1637,12 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `SaasTenantUsageRow` / `SaasTenantUsageSummary` / `SaasTenantHistoryExport` | 用量历史行（`HourBucket` 整点水位）/ 用量水位（`Limit`/`Value` 为指针，nil 表示未定义/未上报）/ 留痕 CSV 导出 |
 | `ProjectModule` | 项目功能模块（`ModuleCode` 项目内唯一、`ParentCode` 父模块编码） |
 | `ApisOfferProduct` / `ApisOfferPlan` / `ApisProductOffer` | 商品浏览白名单视图（剥离 `UpstreamConfig` / `Uid` 等内部字段）：`ApisProductOffer` = `product` + `plans`，商品浏览的两条路由（`find` 的**页元素**与 `take`）都返回它，组件类型分别是 `ApisOfferProduct` / `ApisOfferPlan` |
-| `ApisProduct` / `ApisPlan` | 产品（draft/on_sale/off_sale/archived）/ 套餐（subscription 订阅制、metered 付费制按量；`Price` 单位随计费模式为「分」或「万分/次」） |
+| `ApisProduct` / `ApisPlan` | 产品（draft/on_sale/off_sale/archived）/ 套餐（subscription 订阅制、metered 付费制按量；`Price` 单位随计费模式为「万分」每周期总价或按量兜底单价「万分/次」，同一标度） |
 | `ApisOrder` / `ApisSubscription` | 订单（pending→paid→refunded / cancelled / closed；退款单 `OrderType=refund` + `RefundOrderNo`）/ 订阅（active ↔ expired/cancelled，含周期与自动续费偏好） |
 | `WalletAccount` / `WalletLog` | 平台钱包账户（`Balance` / `Frozen` / `MonthlySpendLimit` / `Status`）/ 流水（只追加，`TxType` 为 recharge/consume/hold/release/refund/subscribe/adjust，含 `OperatorId` 操作人） |
-| `WalletState` / `WalletSpentResult` | 人工调账结果（含 `Available` / `Replayed`）/ 本月已消费 `{monthSpent}`（分） |
+| `WalletState` / `WalletSpentResult` | 人工调账结果（含 `Available` / `Replayed`）/ 本月已消费 `{monthSpent}`（万分） |
 | `ApisBill` | 账单（subscription 周期账单 / metered 按量账单；`Detail` 为明细快照 JSON，生成后不可变） |
-| `ApisUsageRecord` / `ApisUsageDaily` | 调用流水（`ChargeMode` / `Result` / `CacheHit` / `UpstreamMs`）/ 日聚合（账单与看板只读本表，不扫流水） |
+| `ApisUsageRecord` / `ApisUsageDaily` | 调用流水（`ChargeMode` / `Result` / `CacheHit` / `UpstreamMs` / `KeyId` sk-key 归因）/ 日聚合（账单与看板只读本表，不扫流水） |
 | `ApisUsageDailySummary`（含 `ApisUsageDailySummaryTotals` / `Day` / `Group`） | 看板汇总（服务端 GROUP BY + 单用户视角今日实时条带；`Totals` 恒等于 `Days` 求和） |
 
 ## 21. 接口契约与兼容性约定

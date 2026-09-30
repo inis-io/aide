@@ -7,9 +7,9 @@ package admin
 //   - 输入结构对齐 licen-hub/backend/app/service/apis/*.go 的 *Params（写路径入参）与 *Query（读路径筛选）；
 //   - 时间戳除特别注明外均为毫秒（平台 autoCreateTime:milli）。
 //
-// 金额口径：钱包余额与订单金额单位为「分」（affects 调整/退款）；按量兜底单价（meteredPrice）为
+// 金额口径：钱包余额与订单金额单位为「万分」（affects 调整/退款）；按量兜底单价（meteredPrice）为
 // 「万分/次」，落在产品层（ApisProduct.MeteredPrice，商城浏览经 ApisOfferPlanItem.MeteredPrice
-// 透出），两者不是同一标度，展示与换算由调用方自行处理。
+// 透出），两者同标度，展示与换算由调用方自行处理。
 //
 // 套餐多产品化（设计 02 §2.2）：套餐不再绑定单一产品，订阅额度/限额逐产品落在 ApisPlanItem
 // 明细行（四维 quota + 并发/QPS）；按量计费已自套餐明细下沉产品层（ApisProduct 的
@@ -70,7 +70,7 @@ type ApisProduct struct {
 }
 
 // ApisPlan - API 套餐 / 价格方案（平台 models/basic.ApisPlan）
-// 套餐为「产品明细的载体」：billingMode 只剩 subscription（订阅制），Price 为每周期总价（分），
+// 套餐为「产品明细的载体」：billingMode 只剩 subscription（订阅制），Price 为每周期总价（万分），
 // 计费与限额逐产品落在明细行（ApisPlanItem）；按量计费已下沉产品层（ApisProduct 的 metered 三字段）。
 type ApisPlan struct {
 	// Id - 主键
@@ -81,7 +81,7 @@ type ApisPlan struct {
 	Name string `json:"name"`
 	// BillingMode - 计费模式（恒为 subscription 订阅制；按量计费见产品 meteredPrice）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期总价（分）
+	// Price - 订阅制每周期总价（万分）
 	Price int64 `json:"price"`
 	// Period - 订阅周期（monthly/quarterly/yearly）
 	Period string `json:"period"`
@@ -147,7 +147,7 @@ type ApisOfferPlan struct {
 	Name string `json:"name"`
 	// BillingMode - 计费模式（恒为 subscription 订阅制）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期总价（分）
+	// Price - 订阅制每周期总价（万分）
 	Price int64 `json:"price"`
 	// Period - 订阅周期（月/季/年）
 	Period string `json:"period"`
@@ -265,7 +265,7 @@ type ApisPlanInput struct {
 	Name string `json:"name"`
 	// BillingMode - 计费模式（平台只接受 subscription 订阅制，留空按 subscription 处理；按量计费已下沉产品层）
 	BillingMode string `json:"billingMode"`
-	// Price - 订阅制每周期总价（分）
+	// Price - 订阅制每周期总价（万分）
 	Price int64 `json:"price"`
 	// Period - 订阅周期（monthly/quarterly/yearly）
 	Period string `json:"period"`
@@ -325,7 +325,7 @@ type ApisOrder struct {
 	OrderType string `json:"orderType"`
 	// PlanId - 订阅类订单关联套餐ID
 	PlanId int `json:"planId"`
-	// Amount - 应付金额（分）
+	// Amount - 应付金额（万分）
 	Amount int64 `json:"amount"`
 	// Status - 状态（pending/paid/cancelled/refunded/closed）
 	Status string `json:"status"`
@@ -525,11 +525,11 @@ type WalletAccount struct {
 	Id int `json:"id"`
 	// UserId - 归属用户ID（一人一户）
 	UserId int `json:"userId"`
-	// Balance - 余额（分）
+	// Balance - 余额（万分）
 	Balance int64 `json:"balance"`
-	// Frozen - 预扣冻结金额（分）
+	// Frozen - 预扣冻结金额（万分）
 	Frozen int64 `json:"frozen"`
-	// MonthlySpendLimit - 月度消费限制（分，0=不限制）
+	// MonthlySpendLimit - 月度消费限制（万分，0=不限制）
 	MonthlySpendLimit int64 `json:"monthlySpendLimit"`
 	// Status - 状态（normal 正常 / frozen 风控冻结，冻结后禁止消费，仅可退款）
 	Status string `json:"status"`
@@ -556,7 +556,7 @@ type WalletLog struct {
 	AccountId int `json:"accountId"`
 	// TxType - 流水类型（recharge/consume/hold/release/refund/subscribe/adjust）
 	TxType string `json:"txType"`
-	// Amount - 变动金额（分），收入为正、支出为负
+	// Amount - 变动金额（万分），收入为正、支出为负
 	Amount int64 `json:"amount"`
 	// BalanceAfter - 变动后余额（对账快照）
 	BalanceAfter int64 `json:"balanceAfter"`
@@ -578,11 +578,11 @@ type WalletState struct {
 	UserId int `json:"userId"`
 	// AccountId - 余额账户ID
 	AccountId int `json:"accountId"`
-	// Balance - 变更后余额（分）
+	// Balance - 变更后余额（万分）
 	Balance int64 `json:"balance"`
-	// Frozen - 预扣冻结金额（分）
+	// Frozen - 预扣冻结金额（万分）
 	Frozen int64 `json:"frozen"`
-	// Available - 可用余额（分，balance - frozen）
+	// Available - 可用余额（万分，balance - frozen）
 	Available int64 `json:"available"`
 	// Version - 乐观锁版本
 	Version int `json:"version"`
@@ -596,7 +596,7 @@ type WalletState struct {
 
 // WalletSpentResult - 本月已消费（平台 HTTP {monthSpent} / gRPC apisSpentEnvelope）
 type WalletSpentResult struct {
-	// MonthSpent - 本月已消费（分；权威口径为钱包流水）
+	// MonthSpent - 本月已消费（万分；权威口径为钱包流水）
 	MonthSpent int64 `json:"monthSpent"`
 }
 
@@ -637,7 +637,7 @@ type WalletAccountQuery struct {
 type WalletAdjustInput struct {
 	// UserId - 目标用户（平台侧必须显式指定且落在读写范围内）
 	UserId int `json:"userId,omitempty"`
-	// Amount - 调整金额（分），正数赠送、负数扣减
+	// Amount - 调整金额（万分），正数赠送、负数扣减
 	Amount int64 `json:"amount,omitempty"`
 	// RequestId - 幂等键
 	RequestId string `json:"requestId,omitempty"`
@@ -670,7 +670,7 @@ type ApisBill struct {
 	IdemKey string `json:"idemKey"`
 	// TotalQuantity - 账期总调用量
 	TotalQuantity int64 `json:"totalQuantity"`
-	// TotalAmount - 账期总金额（分）
+	// TotalAmount - 账期总金额（万分）
 	TotalAmount int64 `json:"totalAmount"`
 	// Detail - 明细快照 JSON（[{capability,charge_mode,cache_hit,quantity,unit_price,amount}]），生成后不可变
 	Detail string `json:"detail"`
@@ -719,6 +719,8 @@ type ApisUsageRecord struct {
 	ProductId int `json:"productId"`
 	// ActivationNo - 激活记录编号（排障定位、分实例统计）
 	ActivationNo string `json:"activationNo"`
+	// KeyId - sk-key 凭证归因（apis_keys.id；sk-key 凭证调用 >0，许可证凭证 = 0）
+	KeyId int `json:"keyId"`
 	// SubId - 命中的订阅ID（纯按量调用为 0）
 	SubId int `json:"subId"`
 	// Quantity - 本次计量数（通常 1，批量接口=实际条数）
@@ -727,7 +729,7 @@ type ApisUsageRecord struct {
 	ChargeMode string `json:"chargeMode"`
 	// CacheHit - 是否命中平台缓存（命中按 cacheDiscount 折扣计费）
 	CacheHit bool `json:"cacheHit"`
-	// Amount - 本次扣费（分；免费、体验与订阅额度内为 0）
+	// Amount - 本次扣费（万分；免费、体验与订阅额度内为 0）
 	Amount int64 `json:"amount"`
 	// Result - 结果（success/provider_error/rejected/settle_error）
 	Result string `json:"result"`
@@ -784,7 +786,7 @@ type ApisUsageDaily struct {
 	CacheHit bool `json:"cacheHit"`
 	// TotalQuantity - 日总量
 	TotalQuantity int64 `json:"totalQuantity"`
-	// TotalAmount - 日总扣费（分）
+	// TotalAmount - 日总扣费（万分）
 	TotalAmount int64 `json:"totalAmount"`
 	// SuccessCount - 成功次数
 	SuccessCount int64 `json:"successCount"`
@@ -836,7 +838,7 @@ type ApisUsageDailySummaryQuery struct {
 type ApisUsageDailySummaryTotals struct {
 	// Quantity - 区间总计量数
 	Quantity int64 `json:"quantity"`
-	// Amount - 区间总金额（分）
+	// Amount - 区间总金额（万分）
 	Amount int64 `json:"amount"`
 	// SuccessCount - 成功次数
 	SuccessCount int64 `json:"successCount"`
@@ -857,7 +859,7 @@ type ApisUsageDailySummaryDay struct {
 	StatDate string `json:"statDate"`
 	// Quantity - 当日计量数
 	Quantity int64 `json:"quantity"`
-	// Amount - 当日金额（分）
+	// Amount - 当日金额（万分）
 	Amount int64 `json:"amount"`
 	// SuccessCount - 当日成功次数
 	SuccessCount int64 `json:"successCount"`
@@ -876,7 +878,7 @@ type ApisUsageDailySummaryGroup struct {
 	Key string `json:"key"`
 	// Quantity - 分组计量数
 	Quantity int64 `json:"quantity"`
-	// Amount - 分组金额（分）
+	// Amount - 分组金额（万分）
 	Amount int64 `json:"amount"`
 }
 
@@ -1305,9 +1307,9 @@ type ApisLlmLog struct {
 	UpstreamStatus int `json:"upstreamStatus"`
 	// ErrorType - 错误类型（failover 多段尝试以 JSON 数组留痕）
 	ErrorType string `json:"errorType"`
-	// Amount - 报价金额（分，按调度序第一名渠道映射行的报价结算）
+	// Amount - 报价金额（万分，按调度序第一名渠道映射行的报价结算）
 	Amount int64 `json:"amount"`
-	// CostAmount - 渠道成本（分，null=未核算，0=渠道免费）
+	// CostAmount - 渠道成本（万分，null=未核算，0=渠道免费）
 	CostAmount *int64 `json:"costAmount"`
 	// CreateAt - 调用时间（毫秒）
 	CreateAt int64 `json:"createAt"`
@@ -1358,7 +1360,7 @@ type ApisKey struct {
 	Prefix string `json:"prefix"`
 	// AllowedModels - 模型白名单（空 = 不限）
 	AllowedModels []string `json:"allowedModels"`
-	// MonthlySpendLimit - 月度消费限额（分，0 = 不限）
+	// MonthlySpendLimit - 月度消费限额（万分，0 = 不限）
 	MonthlySpendLimit int64 `json:"monthlySpendLimit"`
 	// ExpiresAt - 过期时间（毫秒戳，0 = 永不过期）
 	ExpiresAt int64 `json:"expiresAt"`
@@ -1385,7 +1387,7 @@ type ApisKeyInput struct {
 	Name string `json:"name"`
 	// AllowedModels - 模型白名单（空 = 不限；创建时校验全部存在于模型目录）
 	AllowedModels []string `json:"allowedModels"`
-	// MonthlySpendLimit - 月度消费限额（分，0 = 不限）
+	// MonthlySpendLimit - 月度消费限额（万分，0 = 不限）
 	MonthlySpendLimit int64 `json:"monthlySpendLimit"`
 	// ExpiresAt - 过期时间（毫秒戳，0 = 永不过期）
 	ExpiresAt int64 `json:"expiresAt"`

@@ -91,9 +91,9 @@ message Receipt {
   string charge_mode = 2;       // 主计费模式：free_quota / trial / subscription_quota / metered_balance
   bool cache_hit = 3;           // 是否命中平台缓存（折扣由本字段 + amount 实收体现）
   int64 quantity = 4;           // 本次实际计量数
-  int64 amount = 5;             // 本次实收金额（分；免费、体验与订阅额度内为 0）
+  int64 amount = 5;             // 本次实收金额（万分；免费、体验与订阅额度内为 0）
   int64 quota_remaining = 6;    // 主计费模式对应的剩余额度（按量与不限量时为 0）
-  int64 balance_after = 7;      // 余额账户可用余额（分；未开户为 0）
+  int64 balance_after = 7;      // 余额账户可用余额（万分；未开户为 0）
   int64 server_time = 8;        // 服务端时间（毫秒，供客户校时）
 }
 
@@ -132,7 +132,7 @@ message UsageRecord {
   int64 quantity = 8;
   string charge_mode = 9;
   bool cache_hit = 10;
-  int64 amount = 11;           // 本次扣费（分；免费、体验与订阅额度内为 0）
+  int64 amount = 11;           // 本次扣费（万分；免费、体验与订阅额度内为 0）
   string result = 12;          // 调用结果：success / provider_error / rejected / settle_error
   int64 upstream_ms = 13;      // 上游耗时（毫秒，监控用）
   int64 create_at = 14;        // 创建时间（毫秒戳）

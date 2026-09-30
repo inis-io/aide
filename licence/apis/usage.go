@@ -71,7 +71,7 @@ type UsageRecord struct {
 	ChargeMode string `json:"chargeMode"`
 	// CacheHit - 是否命中平台缓存
 	CacheHit bool `json:"cacheHit"`
-	// Amount - 本次扣费（分；免费、体验与订阅额度内为 0）
+	// Amount - 本次扣费（万分；免费、体验与订阅额度内为 0）
 	Amount int64 `json:"amount"`
 	// Result - 调用结果：success / provider_error / rejected / settle_error
 	Result string `json:"result"`

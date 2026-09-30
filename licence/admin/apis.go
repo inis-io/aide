@@ -22,7 +22,7 @@ import (
 // 纪律要点：
 //   - 归属与数据范围一律由平台服务层裁决（member 强制本人、platform 按 apis 域范围），SDK 只做 typed 传参；
 //   - 幂等键（requestId）由调用方生成并显式传入，SDK 不代为生成，失败后不得跨协议自动重试；
-//   - 金额单位为「分」，按量兜底单价为「万分/次」且落在产品层（ApisProduct.MeteredPrice，
+//   - 金额单位为「万分」，按量兜底单价为「万分/次」且落在产品层（ApisProduct.MeteredPrice，
 //     商城浏览经 ApisOfferPlanItem.MeteredPrice 透出）；
 //   - 套餐多产品化：订阅额度/限额逐产品配置（ApisPlanInput.Items 全量替换，billingMode 只剩 subscription），
 //     商城浏览以套餐为中心（ApisOfferPlan.Items 携带全部产品明细）；
@@ -579,7 +579,7 @@ func (this *ApisResource) GetWallet(ctx context.Context) (*WalletAccount, error)
 	return &result, nil
 }
 
-// GetWalletSpent - 本月已消费（分；权威口径为钱包流水）：GET /api/wallet-accounts/spent
+// GetWalletSpent - 本月已消费（万分；权威口径为钱包流水）：GET /api/wallet-accounts/spent
 // 权限码 wallet.account.read；与 monthlySpendLimit 配套展示。
 func (this *ApisResource) GetWalletSpent(ctx context.Context) (*WalletSpentResult, error) {
 
