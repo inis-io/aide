@@ -1,0 +1,52 @@
+version: 1
+contract: licenhub.star.v1
+defaults:
+  transport_fallback: false
+  envelope: raw_json_bytes
+  auth: activation-sign-v1
+  idempotent_key: x-request-id
+# 星链中枢（Star Hub）运行面协议矩阵（强制维护，任一协议适配或一致性测试缺失不算完成；
+# 权威能力清单与字段语义见 licen-hub docs/md/star/星链中枢设计与落地方案.md §4/§3）。
+# 列序固定 12 列，与 proto/apis/v1 矩阵同格式；由同目录 protocol_matrix_test.go 逐行校验：
+#   0 SDK 方法（按 Client.Star.Xxx 预登记——runtime 实现属下一波 S3，本批仅契约层）
+#   1 HTTP 方法  2 HTTP 路径（前缀 /api/v1/star/）
+#   3 gRPC full method（真名，本列书写不含前导 /，如 licenhub.star.v1.StarDirectoryService/Join；
+#     生成代码的 FullMethodName 常量本身含前导 /，二者仅差首字符，拼签名 canonical 照抄常量）
+#   4 认证（activation-sign-v1 = 许可证凭证 + Ed25519 请求签名：HTTP X-License-* 头族 /
+#     gRPC metadata x-license-*，canonical 沿用运行面既有口径）
+#   5 权限码（运行面身份由许可证凭证推导，不进 IAM 权限码体系，留空）
+#   6 数据域（固定 star，licen-hub 侧接入 app/access 新 Domain star，fail-closed）
+#   7 操作（read / write）  8 风险（normal / high / critical）
+#   9 幂等（true / false / read-only；写操作幂等键 = 业务单号，经 metadata
+#      x-request-id / HTTP X-Request-Id 透传，不进签名 canonical）
+#   10 关键业务码（空格分隔，口径同 apis 运行面：逐字挂在 status 的 errdetails.ErrorInfo.Reason，
+#      与 HTTP 运行面失败信封 code 同源；NOT_FOUND 是认证失败的唯一外显码——模糊 404 防爆破）
+#   11 HTTP 路由落地状态（landed 已落地 / pending 待落地；星链 HTTP 路由属 S2 licen-hub 服务端
+#      施工范围，本批 S1 仅契约层，全部 pending）
+#
+# 凭证族与幂等键不进消息：token/时间戳/nonce/签名走 metadata x-license-*，
+# 调用级幂等键走 metadata x-request-id（等价 HTTP X-Request-Id）。
+# 金额 int64 万分、时间 int64 毫秒、比例/分值 int32 万分位（score_net 为 int64 万分位）。
+runtime:
+  # Join 注册/心跳为 upsert，天然幂等（公钥轮换 v1 简化为上送即覆盖 + 写审计），无业务单号。
+  - [Client.Star.Join, POST, /api/v1/star/directory/join, licenhub.star.v1.StarDirectoryService/Join, activation-sign-v1, "", star, write, normal, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN INTERNAL_ERROR", pending]
+  - [Client.Star.ListPeers, POST, /api/v1/star/directory/peers, licenhub.star.v1.StarDirectoryService/ListPeers, activation-sign-v1, "", star, read, normal, read-only, "NOT_FOUND UNAUTHORIZED FORBIDDEN INVALID_ARGUMENT INTERNAL_ERROR", pending]
+  # PushHotIndex 上报即该舰全量快照（整批覆盖该舰索引），快照幂等。
+  - [Client.Star.PushHotIndex, POST, /api/v1/star/index/push, licenhub.star.v1.StarIndexService/PushHotIndex, activation-sign-v1, "", star, write, normal, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN RATE_LIMITED INTERNAL_ERROR", pending]
+  - [Client.Star.PullGlobalHot, POST, /api/v1/star/index/pull, licenhub.star.v1.StarIndexService/PullGlobalHot, activation-sign-v1, "", star, read, normal, read-only, "NOT_FOUND UNAUTHORIZED FORBIDDEN INVALID_ARGUMENT RATE_LIMITED INTERNAL_ERROR", pending]
+  # 点数购入：request_id = purchase_no；钱包 consume → 点数池入账（汇率快照存单）。
+  - [Client.Star.CreditPurchase, POST, /api/v1/star/billing/purchase, licenhub.star.v1.StarBillingService/CreditPurchase, activation-sign-v1, "", star, write, critical, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN INSUFFICIENT_BALANCE SPEND_LIMIT_EXCEEDED ACCOUNT_FROZEN CONFLICT INTERNAL_ERROR", pending]
+  # 点数发放核销：request_id = grant_no；点数池扣减（余额不足 → INSUFFICIENT_BALANCE 语义按点数池）。
+  - [Client.Star.CreditGrantOut, POST, /api/v1/star/billing/grant-out, licenhub.star.v1.StarBillingService/CreditGrantOut, activation-sign-v1, "", star, write, high, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN INSUFFICIENT_BALANCE ACCOUNT_FROZEN CONFLICT INTERNAL_ERROR", pending]
+  # 投流单创建：request_id = promote_no；发起舰长钱包 hold（点数 × 汇率快照）。
+  - [Client.Star.PromoteOrderCreate, POST, /api/v1/star/billing/order-create, licenhub.star.v1.StarBillingService/PromoteOrderCreate, activation-sign-v1, "", star, write, high, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN INSUFFICIENT_BALANCE SPEND_LIMIT_EXCEEDED ACCOUNT_FROZEN CONFLICT INTERNAL_ERROR", pending]
+  # 投流结算：request_id = promote_no（分账流水各带派生键 {promote_no}:split:*）；
+  # consume 拆账 源舰 20% / 目标舰群 50%（按有效阅读占比瓜分）/ 平台 30%。
+  - [Client.Star.PromoteOrderSettle, POST, /api/v1/star/billing/order-settle, licenhub.star.v1.StarBillingService/PromoteOrderSettle, activation-sign-v1, "", star, write, critical, true, "INVALID_ARGUMENT INVALID_STATE NOT_FOUND UNAUTHORIZED FORBIDDEN ACCOUNT_FROZEN CONFLICT INTERNAL_ERROR", pending]
+  # 投流取消/退款：request_id = promote_no；release 解冻差额（refund_ratio 万分位）。
+  - [Client.Star.PromoteOrderCancel, POST, /api/v1/star/billing/order-cancel, licenhub.star.v1.StarBillingService/PromoteOrderCancel, activation-sign-v1, "", star, write, high, true, "INVALID_ARGUMENT INVALID_STATE NOT_FOUND UNAUTHORIZED FORBIDDEN ACCOUNT_FROZEN CONFLICT INTERNAL_ERROR", pending]
+  # 投流阅读上报：promote_no + from_instance_id + period_hour 归集 upsert，天然幂等；
+  # status = accepted（有效）/ quarantined（隔离，隔离量不参与分账）。
+  - [Client.Star.ReportPromoteStats, POST, /api/v1/star/billing/report-stats, licenhub.star.v1.StarBillingService/ReportPromoteStats, activation-sign-v1, "", star, write, normal, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN RATE_LIMITED INTERNAL_ERROR", pending]
+  # 仲裁结果上报：request_id = report_no；举报路由本身舰际直达，本接口是处置结果的中枢归集。
+  - [Client.Star.ReportOutcome, POST, /api/v1/star/arbitration/report-outcome, licenhub.star.v1.StarArbitrationService/ReportOutcome, activation-sign-v1, "", star, write, normal, true, "INVALID_ARGUMENT NOT_FOUND UNAUTHORIZED FORBIDDEN CONFLICT INTERNAL_ERROR", pending]

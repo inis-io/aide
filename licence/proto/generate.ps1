@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $protoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -22,7 +22,8 @@ try {
         --go-grpc_out=. --go-grpc_opt=paths=source_relative `
         licence/v1/runtime.proto `
         licence/v1/admin.proto `
-        apis/v1/runtime.proto
+        apis/v1/runtime.proto `
+        star/v1/star.proto
 } finally {
     Pop-Location
 }

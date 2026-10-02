@@ -1,0 +1,279 @@
+syntax = "proto3";
+
+package licenhub.star.v1;
+
+option go_package = "github.com/inis-io/aide/licence/proto/star/v1;starv1";
+
+// 星链中枢（Star Hub）运行面契约——权威能力清单与字段语义见 licen-hub
+// docs/md/star/星链中枢设计与落地方案.md（§4 运行面契约 / §3 数据模型）。
+//
+// 签名凭证族与错误语义完全对齐许可证运行面（activation-sign-v1，模糊 NotFound）：
+// activation token / 时间戳 / nonce / 签名 / 签名版本全部走 gRPC metadata
+// （x-license-* 头族，与 HTTP 一一对应），不进任何请求消息；调用级幂等键走
+// metadata x-request-id（等价 HTTP X-Request-Id），写操作幂等键 = 业务单号
+// （purchase_no / grant_no / promote_no / report_no），不进签名 canonical。
+// 签名 canonical 沿用运行面既有口径（licence/protocol.GRPCContent），
+// {fullMethod} 取生成代码的 *_FullMethodName 常量原值（含前导 /）。
+//
+// 统一约定：
+//   - 金额一律 int64 万分（1 元 = 10000），点数 int64（1 点 = 1 元，汇率快照存流水）；
+//   - 时间一律 int64 毫秒戳（period_hour 为归集周期小时起点的毫秒戳）；
+//   - 比例/分值一律 int32 万分位（0~10000，整型化防浮点漂移）：percentile /
+//     trust_score / refund_ratio 同此；score_net 为归一热度分，int64 万分位；
+//   - meta 为 JSON 原始字节（摘要元数据：标题/摘要/作者快照/统计快照/origin_url），
+//     embedding 为 float16 压缩向量原始字节——bytes 原样透传，禁止转 message 重序列化；
+//   - 通用回执 StarAck（code/message）：code=0 成功，非 0 为业务码（错误映射口径同
+//     apis 运行面：gRPC 侧经 status + errdetails.ErrorInfo.Reason，客户端以业务码为准）。
+
+// StarAck - 通用回执（code=0 成功；非 0 时 message 为人类可读说明）。
+message StarAck {
+  int32 code = 1;    // 业务码（0 = 成功）
+  string message = 2; // 说明（失败时为失败原因）
+}
+
+// StarDirectoryService - 星链目录：实例登记/心跳/目录增量下发。
+service StarDirectoryService {
+  // Join - 注册/心跳（upsert 天然幂等）：上报实例身份与公钥，
+  // 返回仲裁资格态 star_status / 信用分 trust_score / 目录水位 since。
+  // 公钥轮换 v1 简化：上送即覆盖，hub 写审计。
+  rpc Join(StarJoinRequest) returns (StarJoinResponse);
+  // ListPeers - 目录增量拉取：按 since 水位下发变更同伴，返回新水位。
+  rpc ListPeers(StarListPeersRequest) returns (StarListPeersResponse);
+}
+
+// StarIndexService - 热度索引：站内热榜上报（百分位制，不上正文）与全网榜下发。
+service StarIndexService {
+  // PushHotIndex - 热榜上报：批量条目（上报即该舰全量快照，整批覆盖该舰索引，
+  // 快照幂等）；返回受理条目数。
+  rpc PushHotIndex(StarPushHotIndexRequest) returns (StarPushHotIndexResponse);
+  // PullGlobalHot - 全网榜拉取：topK + 分类/语言过滤，score_net 归一后降序下发。
+  rpc PullGlobalHot(StarPullGlobalHotRequest) returns (StarPullGlobalHotResponse);
+}
+
+// StarBillingService - 清结算：点数发行（舰长批发）+ 投流单 hold/settle/refund + 分账。
+// 资金走平台钱包既有 Hold/Settle/Release/Refund/Split 机制（禁止第二套资金表）；
+// 一切写操作幂等键 = 业务单号，经 metadata x-request-id 透传。
+service StarBillingService {
+  // CreditPurchase - 点数购入：舰长钱包 consume → 点数池入账（汇率快照）；
+  // 幂等键 request_id = purchase_no。
+  rpc CreditPurchase(StarCreditPurchaseRequest) returns (StarAck);
+  // CreditGrantOut - 点数发放核销：舰长点数池扣减（发放到站内用户，
+  // im 侧入账凭证回执）；幂等键 request_id = grant_no。
+  rpc CreditGrantOut(StarCreditGrantOutRequest) returns (StarCreditGrantOutResponse);
+  // PromoteOrderCreate - 投流单创建：发起舰长钱包 hold（点数 × 汇率）；
+  // 幂等键 request_id = promote_no（经 metadata x-request-id 透传）。
+  rpc PromoteOrderCreate(StarPromoteOrderCreateRequest) returns (StarAck);
+  // PromoteOrderSettle - 投流结算：按比例 r = min(done,target)/target 结算，
+  // 差额退款，结算额拆账 源舰 20% / 目标舰群 50%（按有效阅读占比瓜分）/ 平台 30%，
+  // 返回 SettleBill 分账快照；幂等键 request_id = promote_no（分账流水各带派生键）。
+  rpc PromoteOrderSettle(StarPromoteOrderSettleRequest) returns (StarPromoteOrderSettleResponse);
+  // PromoteOrderCancel - 投流取消/退款：release 解冻差额（拒审/撤销/到期按比例）；
+  // 幂等键 request_id = promote_no。
+  rpc PromoteOrderCancel(StarPromoteOrderCancelRequest) returns (StarPromoteOrderCancelResponse);
+  // ReportPromoteStats - 投流阅读上报：目标舰按 promote_no 归集有效阅读
+  // （promote_no + from_instance_id + period_hour 归集 upsert，天然幂等）。
+  rpc ReportPromoteStats(StarReportPromoteStatsRequest) returns (StarAck);
+}
+
+// StarArbitrationService - 仲裁归集：举报处置结果上报（举报路由本身舰际直达）。
+service StarArbitrationService {
+  // ReportOutcome - 仲裁结果上报：源舰处置后主动上报（举报舰可申诉补录）；
+  // 幂等键 request_id = report_no。
+  rpc ReportOutcome(StarReportOutcomeRequest) returns (StarAck);
+}
+
+// ============================== 星链目录 ==============================
+
+// StarJoinRequest - 注册/心跳上送。
+message StarJoinRequest {
+  string instance_id = 1;  // 实例标识（= deployment_instances.instance_no，身份锚定激活体系）
+  string name = 2;         // 舰名
+  string endpoint = 3;     // 舰际 gRPC 地址
+  string pubkey = 4;       // 实例 Ed25519 公钥 hex（实例级密钥，私钥不出舰）
+  string app_version = 5;  // im 版本（心跳顺带）
+}
+
+// StarJoinResponse - 注册/心跳回执。
+message StarJoinResponse {
+  StarAck ack = 1;       // 通用回执
+  string star_status = 2; // 仲裁资格态：active / suspended / left
+  int32 trust_score = 3; // 信用分（万分位 0~10000，冷启动 6000 = 0.60）
+  int64 since = 4;       // 目录水位（毫秒戳，供 ListPeers 增量拉取）
+}
+
+// StarListPeersRequest - 目录增量拉取请求。
+message StarListPeersRequest {
+  int64 since = 1; // 目录水位（毫秒戳；0 = 全量）
+}
+
+// StarPeer - 目录同伴条目。
+message StarPeer {
+  string instance_id = 1;  // 实例标识
+  string name = 2;         // 舰名
+  string endpoint = 3;     // 舰际 gRPC 地址
+  string pubkey = 4;       // 实例 Ed25519 公钥 hex
+  string star_status = 5;  // 仲裁资格态：active / suspended / left
+  int32 trust_score = 6;   // 信用分（万分位 0~10000）
+  string app_version = 7;  // im 版本
+  int64 last_beat_at = 8;  // 最近心跳（毫秒戳）
+}
+
+// StarListPeersResponse - 目录增量拉取回执。
+message StarListPeersResponse {
+  StarAck ack = 1;           // 通用回执
+  repeated StarPeer peers = 2; // 自 since 以来变更的同伴
+  int64 since = 3;           // 新目录水位（毫秒戳）
+}
+
+// ============================== 热度索引 ==============================
+
+// StarHotIndexItem - 站内热榜条目（上报即该舰全量快照的一部分）。
+message StarHotIndexItem {
+  string remote_note_id = 1; // 源站笔记标识
+  int32 percentile = 2;      // 站内百分位（万分位 0~10000）
+  string category = 3;       // 分类过滤标签（可空）
+  string language = 4;       // 语言过滤标签（可空）
+  bytes meta = 5;            // 摘要元数据 JSON 原始字节（标题/摘要/作者快照/统计快照/origin_url）
+  bytes embedding = 6;       // float16 压缩笔记向量（联邦召回用，可空）
+  int64 published_at = 7;    // 笔记发布时间（毫秒戳，freshness 半衰输入）
+}
+
+// StarPushHotIndexRequest - 热榜上报请求。
+message StarPushHotIndexRequest {
+  string instance_id = 1;              // 来源舰实例标识
+  repeated StarHotIndexItem items = 2; // 热榜条目批（整批覆盖该舰索引）
+}
+
+// StarPushHotIndexResponse - 热榜上报回执。
+message StarPushHotIndexResponse {
+  StarAck ack = 1;   // 通用回执
+  int32 accepted = 2; // 受理条目数
+}
+
+// StarPullGlobalHotRequest - 全网榜拉取请求。
+message StarPullGlobalHotRequest {
+  int32 top_k = 1;    // 拉取条数上限
+  string category = 2; // 分类过滤（可空 = 不过滤）
+  string language = 3; // 语言过滤（可空 = 不过滤）
+}
+
+// StarGlobalHotItem - 全网榜条目。
+message StarGlobalHotItem {
+  string instance_id = 1;    // 来源舰实例标识
+  string remote_note_id = 2; // 源站笔记标识
+  int64 score_net = 3;       // 归一热度分（万分位；percentile × 半衰 × trust，pull 时计算）
+  bytes meta = 4;            // 摘要元数据 JSON 原始字节
+  bytes embedding = 5;       // float16 压缩笔记向量（可空）
+  string origin_url = 6;     // 源站笔记链接
+  int64 published_at = 7;    // 笔记发布时间（毫秒戳）
+}
+
+// StarPullGlobalHotResponse - 全网榜拉取回执（score_net 降序）。
+message StarPullGlobalHotResponse {
+  StarAck ack = 1;                  // 通用回执
+  repeated StarGlobalHotItem items = 2; // 全网榜条目
+}
+
+// ============================== 清结算 ==============================
+
+// StarCreditPurchaseRequest - 点数购入请求（幂等键 request_id = purchase_no）。
+message StarCreditPurchaseRequest {
+  string purchase_no = 1; // 购入单号（幂等键）
+  int64 points = 2;       // 购入点数
+  int64 amount_fen = 3;   // 支付金额（万分）
+  int64 rate_fen = 4;     // 汇率快照（1 点 = rate_fen 万分，默认 10000）
+}
+
+// StarCreditGrantOutRequest - 点数发放核销请求（幂等键 request_id = grant_no）。
+message StarCreditGrantOutRequest {
+  string grant_no = 1;    // 发放核销单号（幂等键）
+  int64 points = 2;       // 发放点数
+  string target_note = 3; // 目标说明（发放到站内用户的备注）
+}
+
+// StarCreditGrantOutResponse - 点数发放核销回执。
+message StarCreditGrantOutResponse {
+  StarAck ack = 1;        // 通用回执
+  int64 balance_after = 2; // 核销后点数池余额
+}
+
+// StarPromoteOrderCreateRequest - 投流单创建请求（幂等键 request_id = promote_no）。
+message StarPromoteOrderCreateRequest {
+  string promote_no = 1;           // 投流单号（幂等键，全联邦唯一）
+  string note_origin_instance = 2; // 被投流笔记的源舰实例标识
+  string remote_note_id = 3;       // 源站笔记标识
+  string from_instance_id = 4;     // 发起舰实例标识（hold 账户归属）
+  int64 points = 5;                // 投入点数
+  int64 amount_fen = 6;            // 折算金额（万分，汇率快照）
+  int64 target_views = 7;          // 目标阅读量
+}
+
+// StarPromoteOrderSettleRequest - 投流结算请求（幂等键 request_id = promote_no）。
+message StarPromoteOrderSettleRequest {
+  string promote_no = 1;  // 投流单号（幂等键）
+  int64 done_views = 2;   // 实际达成阅读量（ReportPromoteStats 归集）
+  int64 target_views = 3; // 目标阅读量
+  string reason = 4;      // 结算原因（complete / 到期 / 人工复核等）
+}
+
+// StarSettleTargetLine - 分账目标舰明细行。
+message StarSettleTargetLine {
+  string instance_id = 1; // 目标舰实例标识
+  int64 fen = 2;          // 分账金额（万分，按有效阅读占比瓜分）
+  int64 views = 3;        // 该舰有效阅读量（accepted 口径）
+}
+
+// StarSettleBill - 分账快照（投流结算返回，同时落 star_promote_orders.settle_snapshot）。
+message StarSettleBill {
+  string settle_no = 1;                     // 结算单号（hub 生成，SET-{年}-%06d）
+  int64 amount_fen = 2;                     // 原 hold 金额（万分）
+  int64 refund_fen = 3;                     // 退款金额（万分，未达成部分 release）
+  int64 source_fen = 4;                     // 源舰长分账（万分，结算额 × 20%）
+  int64 target_fen = 5;                     // 目标舰群分账合计（万分，结算额 × 50%）
+  int64 platform_fen = 6;                   // 平台分账（万分，结算额 × 30%）
+  repeated StarSettleTargetLine target_lines = 7; // 目标舰群明细行
+  int64 settled_at = 8;                     // 结算时间（毫秒戳）
+}
+
+// StarPromoteOrderSettleResponse - 投流结算回执。
+message StarPromoteOrderSettleResponse {
+  StarAck ack = 1;        // 通用回执
+  StarSettleBill bill = 2; // 分账快照
+}
+
+// StarPromoteOrderCancelRequest - 投流取消/退款请求（幂等键 request_id = promote_no）。
+message StarPromoteOrderCancelRequest {
+  string promote_no = 1;   // 投流单号（幂等键）
+  int32 refund_ratio = 2;  // 退款比例（万分位 0~10000，release 解冻比例）
+  string reason = 3;       // 取消原因（拒审 / 撤销 / 到期等）
+}
+
+// StarPromoteOrderCancelResponse - 投流取消/退款回执。
+message StarPromoteOrderCancelResponse {
+  StarAck ack = 1;      // 通用回执
+  int64 refund_fen = 2; // 实际退款金额（万分）
+}
+
+// StarReportPromoteStatsRequest - 投流阅读上报请求
+//（promote_no + from_instance_id + period_hour 归集 upsert）。
+message StarReportPromoteStatsRequest {
+  string promote_no = 1;       // 投流单号
+  string from_instance_id = 2; // 上报舰（目标舰）实例标识
+  int64 period_hour = 3;       // 归集周期小时起点（毫秒戳）
+  int64 views = 4;             // 本周期阅读量
+  int64 unique_viewers = 5;    // 本周期去重阅读人数
+  string status = 6;           // 口径：accepted（有效）/ quarantined（隔离，不参与分账）
+}
+
+// ============================== 仲裁归集 ==============================
+
+// StarReportOutcomeRequest - 仲裁结果上报请求（幂等键 request_id = report_no）。
+message StarReportOutcomeRequest {
+  string report_no = 1;          // 举报单号（幂等键）
+  string from_instance_id = 2;   // 举报发起舰实例标识
+  string target_instance_id = 3; // 被举报舰（= 源舰）实例标识
+  string remote_note_id = 4;     // 源站笔记标识
+  string reason = 5;             // 举报原因
+  string outcome = 6;            // 处置结果：pending / upheld（成立）/ rejected（驳回）
+  int64 outcome_at = 7;          // 处置时间（毫秒戳）
+}
