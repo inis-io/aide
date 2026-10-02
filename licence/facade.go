@@ -63,6 +63,7 @@ type (
 )
 
 var FingerprintHash = LicenceRuntime.FingerprintHash
+var LookupPublicKey = LicenceRuntime.LookupPublicKey
 var New = LicenceRuntime.New
 var NewGRPCConn = LicenceRuntime.NewGRPCConn
 

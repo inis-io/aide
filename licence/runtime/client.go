@@ -512,7 +512,7 @@ func (this *Client) restore() error {
 		if err != nil {
 			return err
 		}
-		publicKey, exist := this.options.PublicKeys[envelope.Payload.KeyVersion]
+		publicKey, exist := LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
 		if !exist || !LicenceProtocol.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
 			return errors.New("本地缓存信封验签失败")
 		}

@@ -340,7 +340,7 @@ func (this *Client) applyEnvelope(raw json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	publicKey, exist := this.options.PublicKeys[envelope.Payload.KeyVersion]
+	publicKey, exist := LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
 	if !exist {
 		return errors.New("未内置 keyVersion=" + envelope.Payload.KeyVersion + " 的验签公钥")
 	}

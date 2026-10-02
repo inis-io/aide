@@ -245,7 +245,7 @@ func (this *Client) VerifyManifest(raw json.RawMessage) (*Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	publicKey, exist := this.options.ReleasePublicKeys[manifest.Payload.KeyVersion]
+	publicKey, exist := LookupPublicKey(this.options.ReleasePublicKeys, manifest.Payload.KeyVersion)
 	if !exist {
 		return nil, errors.New("未内置 keyVersion=" + manifest.Payload.KeyVersion + " 的 release 验签公钥")
 	}
@@ -259,7 +259,7 @@ func (this *Client) VerifyManifest(raw json.RawMessage) (*Manifest, error) {
 // verifyArtifact - 复核发布物签名（canonical ArtifactPayload + release-key 公钥）
 func (this *Client) verifyArtifact(artifact ManifestArtifact, version string) bool {
 
-	publicKey, exist := this.options.ReleasePublicKeys[artifact.KeyVersion]
+	publicKey, exist := LookupPublicKey(this.options.ReleasePublicKeys, artifact.KeyVersion)
 	if !exist {
 		return false
 	}

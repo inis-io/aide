@@ -364,7 +364,7 @@ func (this *Client) verifyTenantEnvelope(raw json.RawMessage) (*TenantEnvelope, 
 	if err != nil {
 		return nil, err
 	}
-	publicKey, exist := this.options.PublicKeys[envelope.Payload.KeyVersion]
+	publicKey, exist := LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
 	if !exist {
 		return nil, errors.New("未内置 keyVersion=" + envelope.Payload.KeyVersion + " 的验签公钥")
 	}

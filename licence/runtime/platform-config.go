@@ -171,7 +171,7 @@ func (this *Client) verifyPlatformConfigEnvelope(raw json.RawMessage) (*Platform
 	if err != nil {
 		return nil, err
 	}
-	publicKey, exists := this.options.PublicKeys[envelope.Payload.KeyVersion]
+	publicKey, exists := LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
 	if !exists {
 		return nil, errors.New("未内置 keyVersion=" + envelope.Payload.KeyVersion + " 的验签公钥")
 	}

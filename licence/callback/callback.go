@@ -20,6 +20,7 @@ import (
 	"time"
 
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
+	LicenceRuntime "github.com/inis-io/aide/licence/runtime"
 )
 
 const (
@@ -234,7 +235,7 @@ func (this *CallbackHandler) dispatchEnvelope(ctx context.Context, envelope Call
 		}
 	}()
 
-	publicKey, exists := this.options.PublicKeys[envelope.Payload.KeyVersion]
+	publicKey, exists := LicenceRuntime.LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
 	if !exists || !LicenceProtocol.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
 		return "", errors.New("callback signature verification failed")
 	}
