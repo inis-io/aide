@@ -115,6 +115,10 @@ const (
 	// EventUpdateAvailable - 项目发布新版本（hint），data: {version}；仅作近实时提示，
 	// 灰度与升级权仍以 updates/check 判定为准（设计 §4.4）
 	EventUpdateAvailable = "update.available"
+	// EventStarDirectoryChanged - 星链目录变更（实例注册/心跳公钥轮换/trust 或资格态调整）
+	EventStarDirectoryChanged = "star.directory.changed"
+	// EventStarArbitrationVerdict - 星链仲裁裁决（举报处置结果落定）
+	EventStarArbitrationVerdict = "star.arbitration.verdict"
 )
 
 // CallbackEvent - 分发给业务回调的事件对象

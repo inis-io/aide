@@ -10,6 +10,7 @@ import (
 	"github.com/inis-io/aide/licence/apis"
 	apisv1 "github.com/inis-io/aide/licence/proto/apis/v1"
 	licencev1 "github.com/inis-io/aide/licence/proto/licence/v1"
+	starv1 "github.com/inis-io/aide/licence/proto/star/v1"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 	"github.com/spf13/cast"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -41,6 +42,10 @@ type grpcRuntimeTransport struct {
 	event          licencev1.EventRuntimeServiceClient
 	pushback       licencev1.ConfigPushbackRuntimeServiceClient
 	apis           apisv1.ApisRuntimeServiceClient
+	starDirectory  starv1.StarDirectoryServiceClient
+	starIndex      starv1.StarIndexServiceClient
+	starBilling    starv1.StarBillingServiceClient
+	starArbitration starv1.StarArbitrationServiceClient
 	closeOnce      sync.Once
 	closeErr       error
 }
@@ -59,6 +64,10 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 		event:          licencev1.NewEventRuntimeServiceClient(conn),
 		pushback:       licencev1.NewConfigPushbackRuntimeServiceClient(conn),
 		apis:           apisv1.NewApisRuntimeServiceClient(conn),
+		starDirectory:  starv1.NewStarDirectoryServiceClient(conn),
+		starIndex:      starv1.NewStarIndexServiceClient(conn),
+		starBilling:    starv1.NewStarBillingServiceClient(conn),
+		starArbitration: starv1.NewStarArbitrationServiceClient(conn),
 	}, nil
 }
 
@@ -868,7 +877,7 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 			"pushed_at": response.GetPushedAt(),
 		})
 	}
-	return 0, nil, errorsNewUnsupported(method, requestURI)
+	return this.roundTripStar(ctx, method, path, requestURI, body, withSign)
 }
 
 func updateReportMap(response *licencev1.UpdateReportResponse) map[string]any {
@@ -1121,4 +1130,397 @@ func apisReceiptMap(receipt *apisv1.Receipt) map[string]any {
 		"amount": receipt.GetAmount(), "quotaRemaining": receipt.GetQuotaRemaining(),
 		"balanceAfter": receipt.GetBalanceAfter(), "serverTime": receipt.GetServerTime(),
 	}
+}
+
+// ============================= gRPC 扩展传输（星链中枢运行面） =============================
+
+// 星链 11 条 RPC 的传输绑定（proto/star/v1/protocol-matrix.yaml 第 2/3 列一一对应）：
+// 业务语义在 runtime/star_*.go 只写一份（HTTP 同形 JSON 体），本段只做 proto ↔ 信封翻译；
+// 失败经 starFailureEnvelope 合成与 HTTP 失败信封同形的 {code,msg,detail}（业务码取
+// errdetails.ErrorInfo.Reason，与 licen-hub grpc/star/v1 的 serviceError 同口径）。
+
+// starListPeersBody - 目录增量拉取请求体
+type starListPeersBody struct {
+	Since int64 `json:"since"`
+}
+
+// starPurchaseBody - 点数购入请求体
+type starPurchaseBody struct {
+	PurchaseNo string `json:"purchaseNo"`
+	Points     int64  `json:"points"`
+	AmountFen  int64  `json:"amountFen"`
+	RateFen    int64  `json:"rateFen"`
+}
+
+// starGrantOutBody - 点数发放核销请求体
+type starGrantOutBody struct {
+	GrantNo    string `json:"grantNo"`
+	Points     int64  `json:"points"`
+	TargetNote string `json:"targetNote"`
+}
+
+// starOrderCreateBody - 投流单创建请求体
+type starOrderCreateBody struct {
+	PromoteNo          string `json:"promoteNo"`
+	NoteOriginInstance string `json:"noteOriginInstance"`
+	RemoteNoteId       string `json:"remoteNoteId"`
+	FromInstanceId     string `json:"fromInstanceId"`
+	Points             int64  `json:"points"`
+	AmountFen          int64  `json:"amountFen"`
+	TargetViews        int64  `json:"targetViews"`
+}
+
+// starOrderSettleBody - 投流结算请求体
+type starOrderSettleBody struct {
+	PromoteNo   string `json:"promoteNo"`
+	DoneViews   int64  `json:"doneViews"`
+	TargetViews int64  `json:"targetViews"`
+	Reason      string `json:"reason"`
+}
+
+// starOrderCancelBody - 投流取消/退款请求体
+type starOrderCancelBody struct {
+	PromoteNo   string `json:"promoteNo"`
+	RefundRatio int    `json:"refundRatio"`
+	Reason      string `json:"reason"`
+}
+
+// starReportStatsBody - 投流阅读上报请求体
+type starReportStatsBody struct {
+	PromoteNo      string `json:"promoteNo"`
+	FromInstanceId string `json:"fromInstanceId"`
+	PeriodHour     int64  `json:"periodHour"`
+	Views          int64  `json:"views"`
+	UniqueViewers  int64  `json:"uniqueViewers"`
+	Status         string `json:"status"`
+}
+
+// starReportOutcomeBody - 仲裁结果上报请求体
+type starReportOutcomeBody struct {
+	ReportNo         string `json:"reportNo"`
+	FromInstanceId   string `json:"fromInstanceId"`
+	TargetInstanceId string `json:"targetInstanceId"`
+	RemoteNoteId     string `json:"remoteNoteId"`
+	Reason           string `json:"reason"`
+	Outcome          string `json:"outcome"`
+	OutcomeAt        int64  `json:"outcomeAt"`
+}
+
+// starEnvelope - 星链成功信封：{code:0, msg:"ok", data:…}（与 licen-hub star 运行面
+// runtimeJSON 同形）；业务层只解析 data，Ack 内容不进信封（ack.code 非 0 的场景服务端
+// 一律走 gRPC error，不会出现在成功响应里）。
+func starEnvelope(data map[string]any) (int, []byte, error) {
+	return marshalMap(map[string]any{"code": 0, "msg": "ok", "data": data})
+}
+
+// starFailureEnvelope - gRPC 业务错误 → 与 HTTP 失败信封同形的 JSON + HTTP 等价状态码。
+// 口径与 apisFailureEnvelope 完全一致（业务码以 errdetails.ErrorInfo.Reason 为准，
+// 未挂 ErrorInfo 时按 apisCodeByGRPCStatus 反推）；仅错误文本前缀为 star。
+// Canceled / DeadlineExceeded / Unavailable 同样原样透传（客户端取消与传输故障不伪装业务码）。
+func starFailureEnvelope(err error) (int, []byte, error) {
+
+	grpcStatus := status.Convert(err)
+	switch grpcStatus.Code() {
+	case codes.Canceled:
+		return 0, nil, fmt.Errorf("star: 调用已取消：%w", context.Canceled)
+	case codes.DeadlineExceeded:
+		return 0, nil, fmt.Errorf("star: 调用已超时：%w", context.DeadlineExceeded)
+	case codes.Unavailable:
+		return 0, nil, err
+	}
+	code := apisCodeByGRPCStatus(grpcStatus.Code())
+	detail := map[string]any{}
+	for _, item := range grpcStatus.Details() {
+		info, ok := item.(*errdetails.ErrorInfo)
+		if !ok {
+			continue
+		}
+		if info.GetReason() != "" {
+			code = info.GetReason()
+		}
+		for key, value := range info.GetMetadata() {
+			detail[key] = value
+		}
+		break
+	}
+	body := map[string]any{"code": code, "msg": grpcStatus.Message()}
+	if len(detail) > 0 {
+		body["detail"] = detail
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return apis.HTTPStatusByCode(code), raw, nil
+}
+
+// starPeerMap - 目录同伴 proto → 信封条目（camelCase 键与 HTTP 侧 PeerItem 逐字一致）
+func starPeerMap(item *starv1.StarPeer) map[string]any {
+	return map[string]any{
+		"instanceId": item.GetInstanceId(), "name": item.GetName(), "endpoint": item.GetEndpoint(),
+		"pubkey": item.GetPubkey(), "starStatus": item.GetStarStatus(), "trustScore": item.GetTrustScore(),
+		"appVersion": item.GetAppVersion(), "lastBeatAt": item.GetLastBeatAt(),
+	}
+}
+
+// starGlobalHotMap - 全网榜条目 proto → 信封条目（meta 为 JSON 原文透传）
+func starGlobalHotMap(item *starv1.StarGlobalHotItem) map[string]any {
+	row := map[string]any{
+		"instanceId": item.GetInstanceId(), "remoteNoteId": item.GetRemoteNoteId(),
+		"scoreNet": item.GetScoreNet(), "originUrl": item.GetOriginUrl(), "publishedAt": item.GetPublishedAt(),
+	}
+	if len(item.GetMeta()) > 0 {
+		row["meta"] = json.RawMessage(item.GetMeta())
+	}
+	if len(item.GetEmbedding()) > 0 {
+		row["embedding"] = item.GetEmbedding()
+	}
+	return row
+}
+
+// starSettleBillMap - 分账快照 proto → 信封 data（与 HTTP 侧 SettleBill 的 SDK 消费字段取交集）
+func starSettleBillMap(bill *starv1.StarSettleBill) map[string]any {
+	lines := make([]map[string]any, 0, len(bill.GetTargetLines()))
+	for _, line := range bill.GetTargetLines() {
+		lines = append(lines, map[string]any{
+			"instanceId": line.GetInstanceId(), "fen": line.GetFen(), "views": line.GetViews(),
+		})
+	}
+	return map[string]any{
+		"settleNo": bill.GetSettleNo(), "amountFen": bill.GetAmountFen(), "refundFen": bill.GetRefundFen(),
+		"sourceFen": bill.GetSourceFen(), "targetFen": bill.GetTargetFen(), "platformFen": bill.GetPlatformFen(),
+		"targetLines": lines, "settledAt": bill.GetSettledAt(),
+	}
+}
+
+// roundTripStar - 星链中枢运行面 gRPC 分支（RoundTrip → roundTripExtended → 本函数）。
+func (this *grpcRuntimeTransport) roundTripStar(ctx context.Context, method, path, requestURI string, body []byte, withSign bool) (int, []byte, error) {
+	switch method + " " + path {
+	case http.MethodPost + " " + "/api/v1/star/directory/join":
+		var input StarJoinInput
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarJoinRequest{
+			InstanceId: input.InstanceId, Name: input.Name, Endpoint: input.Endpoint,
+			Pubkey: input.Pubkey, AppVersion: input.AppVersion,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarDirectoryService_Join_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starDirectory.Join(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{
+			"starStatus": response.GetStarStatus(), "trustScore": response.GetTrustScore(), "since": response.GetSince(),
+		})
+
+	case http.MethodPost + " " + "/api/v1/star/directory/peers":
+		var input starListPeersBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarListPeersRequest{Since: input.Since}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarDirectoryService_ListPeers_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starDirectory.ListPeers(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		peers := make([]map[string]any, 0, len(response.GetPeers()))
+		for _, item := range response.GetPeers() {
+			peers = append(peers, starPeerMap(item))
+		}
+		return starEnvelope(map[string]any{"peers": peers, "since": response.GetSince()})
+
+	case http.MethodPost + " " + "/api/v1/star/index/push":
+		var input starPushHotIndexBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		items := make([]*starv1.StarHotIndexItem, 0, len(input.Items))
+		for _, item := range input.Items {
+			items = append(items, &starv1.StarHotIndexItem{
+				RemoteNoteId: item.RemoteNoteId, Percentile: int32(item.Percentile),
+				Category: item.Category, Language: item.Language,
+				Meta: item.Meta, Embedding: item.Embedding, PublishedAt: item.PublishedAt,
+			})
+		}
+		request := &starv1.StarPushHotIndexRequest{InstanceId: input.InstanceId, Items: items}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarIndexService_PushHotIndex_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starIndex.PushHotIndex(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{"accepted": response.GetAccepted()})
+
+	case http.MethodPost + " " + "/api/v1/star/index/pull":
+		var input StarPullGlobalHotInput
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarPullGlobalHotRequest{
+			TopK: int32(input.TopK), Category: input.Category, Language: input.Language,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarIndexService_PullGlobalHot_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starIndex.PullGlobalHot(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		items := make([]map[string]any, 0, len(response.GetItems()))
+		for _, item := range response.GetItems() {
+			items = append(items, starGlobalHotMap(item))
+		}
+		return starEnvelope(map[string]any{"items": items})
+
+	case http.MethodPost + " " + "/api/v1/star/billing/purchase":
+		var input starPurchaseBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarCreditPurchaseRequest{
+			PurchaseNo: input.PurchaseNo, Points: input.Points, AmountFen: input.AmountFen, RateFen: input.RateFen,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarBillingService_CreditPurchase_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		if _, err = this.starBilling.CreditPurchase(callCtx, request); err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{"purchaseNo": input.PurchaseNo})
+
+	case http.MethodPost + " " + "/api/v1/star/billing/grant-out":
+		var input starGrantOutBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarCreditGrantOutRequest{
+			GrantNo: input.GrantNo, Points: input.Points, TargetNote: input.TargetNote,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarBillingService_CreditGrantOut_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starBilling.CreditGrantOut(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{"balanceAfter": response.GetBalanceAfter()})
+
+	case http.MethodPost + " " + "/api/v1/star/billing/order-create":
+		var input starOrderCreateBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarPromoteOrderCreateRequest{
+			PromoteNo: input.PromoteNo, NoteOriginInstance: input.NoteOriginInstance,
+			RemoteNoteId: input.RemoteNoteId, FromInstanceId: input.FromInstanceId,
+			Points: input.Points, AmountFen: input.AmountFen, TargetViews: input.TargetViews,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarBillingService_PromoteOrderCreate_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		if _, err = this.starBilling.PromoteOrderCreate(callCtx, request); err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{"promoteNo": input.PromoteNo})
+
+	case http.MethodPost + " " + "/api/v1/star/billing/order-settle":
+		var input starOrderSettleBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarPromoteOrderSettleRequest{
+			PromoteNo: input.PromoteNo, DoneViews: input.DoneViews,
+			TargetViews: input.TargetViews, Reason: input.Reason,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarBillingService_PromoteOrderSettle_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starBilling.PromoteOrderSettle(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(starSettleBillMap(response.GetBill()))
+
+	case http.MethodPost + " " + "/api/v1/star/billing/order-cancel":
+		var input starOrderCancelBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarPromoteOrderCancelRequest{
+			PromoteNo: input.PromoteNo, RefundRatio: int32(input.RefundRatio), Reason: input.Reason,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarBillingService_PromoteOrderCancel_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.starBilling.PromoteOrderCancel(callCtx, request)
+		if err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{"refundFen": response.GetRefundFen()})
+
+	case http.MethodPost + " " + "/api/v1/star/billing/report-stats":
+		var input starReportStatsBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarReportPromoteStatsRequest{
+			PromoteNo: input.PromoteNo, FromInstanceId: input.FromInstanceId, PeriodHour: input.PeriodHour,
+			Views: input.Views, UniqueViewers: input.UniqueViewers, Status: input.Status,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarBillingService_ReportPromoteStats_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		if _, err = this.starBilling.ReportPromoteStats(callCtx, request); err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{})
+
+	case http.MethodPost + " " + "/api/v1/star/arbitration/report-outcome":
+		var input starReportOutcomeBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &starv1.StarReportOutcomeRequest{
+			ReportNo: input.ReportNo, FromInstanceId: input.FromInstanceId,
+			TargetInstanceId: input.TargetInstanceId, RemoteNoteId: input.RemoteNoteId,
+			Reason: input.Reason, Outcome: input.Outcome, OutcomeAt: input.OutcomeAt,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, starv1.StarArbitrationService_ReportOutcome_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		if _, err = this.starArbitration.ReportOutcome(callCtx, request); err != nil {
+			return starFailureEnvelope(err)
+		}
+		return starEnvelope(map[string]any{"reportNo": input.ReportNo})
+	}
+	return 0, nil, errorsNewUnsupported(method, requestURI)
 }

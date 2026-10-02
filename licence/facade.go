@@ -143,3 +143,43 @@ type (
 	PushbackDefinitionsResult = LicenceRuntime.PushbackDefinitionsResult
 	PushbackResult            = LicenceRuntime.PushbackResult
 )
+
+// ============================= 星链中枢（Star Hub，镜像 runtime 包） =============================
+
+const (
+	StarStatusActive     = LicenceRuntime.StarStatusActive
+	StarStatusSuspended  = LicenceRuntime.StarStatusSuspended
+	StarStatusLeft       = LicenceRuntime.StarStatusLeft
+	StarStatsAccepted    = LicenceRuntime.StarStatsAccepted
+	StarStatsQuarantined = LicenceRuntime.StarStatsQuarantined
+	StarOutcomePending   = LicenceRuntime.StarOutcomePending
+	StarOutcomeUpheld    = LicenceRuntime.StarOutcomeUpheld
+	StarOutcomeRejected  = LicenceRuntime.StarOutcomeRejected
+)
+
+var ErrStarNotActivated = LicenceRuntime.ErrStarNotActivated
+
+type (
+	StarService                  = LicenceRuntime.StarService
+	StarJoinInput                = LicenceRuntime.StarJoinInput
+	StarJoinResult               = LicenceRuntime.StarJoinResult
+	StarPeer                     = LicenceRuntime.StarPeer
+	StarPeersResult              = LicenceRuntime.StarPeersResult
+	StarHotIndexItem             = LicenceRuntime.StarHotIndexItem
+	StarPushHotIndexInput        = LicenceRuntime.StarPushHotIndexInput
+	StarPullGlobalHotInput       = LicenceRuntime.StarPullGlobalHotInput
+	StarGlobalHotItem            = LicenceRuntime.StarGlobalHotItem
+	StarCreditPurchaseInput      = LicenceRuntime.StarCreditPurchaseInput
+	StarCreditPurchaseResult     = LicenceRuntime.StarCreditPurchaseResult
+	StarGrantOutInput            = LicenceRuntime.StarGrantOutInput
+	StarGrantOutResult           = LicenceRuntime.StarGrantOutResult
+	StarPromoteOrderCreateInput  = LicenceRuntime.StarPromoteOrderCreateInput
+	StarPromoteOrderCreateResult = LicenceRuntime.StarPromoteOrderCreateResult
+	StarPromoteOrderSettleInput  = LicenceRuntime.StarPromoteOrderSettleInput
+	StarSettleBill               = LicenceRuntime.StarSettleBill
+	StarSettleTargetLine         = LicenceRuntime.StarSettleTargetLine
+	StarPromoteOrderCancelInput  = LicenceRuntime.StarPromoteOrderCancelInput
+	StarPromoteOrderCancelResult = LicenceRuntime.StarPromoteOrderCancelResult
+	StarReportPromoteStatsInput  = LicenceRuntime.StarReportPromoteStatsInput
+	StarReportOutcomeInput       = LicenceRuntime.StarReportOutcomeInput
+)

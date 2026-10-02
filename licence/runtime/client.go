@@ -144,6 +144,10 @@ type Client struct {
 	// Apis - API 商城 typed 方法包挂载点（apis 子包；New 时构造，生命周期跟随本 Client）
 	Apis *apis.Client
 
+	// Star - 星链中枢运行面挂载点（New 时构造，生命周期跟随本 Client；
+	// 实例身份缺省锚定 Options.InstanceNo）
+	Star *StarService
+
 	// cancel - 后台循环取消函数
 	cancel context.CancelFunc
 }
@@ -216,6 +220,7 @@ func New(options Options) (*Client, error) {
 		pendingConsumption: make(map[string]int),
 	}
 	client.Apis = apis.New(apisDoer{client: client})
+	client.Star = &StarService{client: client}
 	client.transport, err = newRuntimeTransport(client)
 	if err != nil {
 		return nil, err
