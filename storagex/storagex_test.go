@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cast"
 )
 
 // fakeStore - 测试用驱动：内存记录全部调用，不触发任何网络与磁盘请求
@@ -570,4 +572,344 @@ func TestStoreError(t *testing.T) {
 
 	inst.HasConfig = false
 	inst.useDefault()
+}
+
+// fakeMultipartStore - 测试用全能力假驱动：在 fakeStore 之上实现 Multiparter / Getter / SignedURLer，记录换算后的相对 key
+type fakeMultipartStore struct {
+	*fakeStore
+	// 分片族方法收到的相对 key 调用记录
+	keys []string
+	// Get 收到的相对 key
+	getKey string
+	// SignedURL 收到的相对 key
+	signKey string
+}
+
+// InitMultipart - 假实现，记录 key 并返回固定 uploadId
+func (this *fakeMultipartStore) InitMultipart(_ context.Context, key string) (string, error) {
+	this.keys = append(this.keys, key)
+	return "fake-upload-id", nil
+}
+
+// UploadPart - 假实现，记录 key
+func (this *fakeMultipartStore) UploadPart(_ context.Context, key, _ string, index int, _ io.Reader, size int64) (Part, error) {
+	this.keys = append(this.keys, key)
+	return Part{Index: index, ETag: "fake-etag", Size: size}, nil
+}
+
+// ListParts - 假实现，记录 key
+func (this *fakeMultipartStore) ListParts(_ context.Context, key, _ string) ([]Part, error) {
+	this.keys = append(this.keys, key)
+	return []Part{{Index: 1, ETag: "fake-etag", Size: 1}}, nil
+}
+
+// CompleteMultipart - 假实现，记录 key
+func (this *fakeMultipartStore) CompleteMultipart(_ context.Context, key, _ string, _ []Part) error {
+	this.keys = append(this.keys, key)
+	return nil
+}
+
+// AbortMultipart - 假实现，记录 key
+func (this *fakeMultipartStore) AbortMultipart(_ context.Context, key, _ string) error {
+	this.keys = append(this.keys, key)
+	return nil
+}
+
+// Get - 假实现，记录 key
+func (this *fakeMultipartStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	this.getKey = key
+	return io.NopCloser(strings.NewReader("ok")), nil
+}
+
+// SignedURL - 假实现，记录 key
+func (this *fakeMultipartStore) SignedURL(_ context.Context, key string, _ time.Duration) (string, error) {
+	this.signKey = key
+	return "https://signed.example.com/" + key, nil
+}
+
+// TestDriverMultipart - 验证 Driver 分片族方法：公开路径换算为相对 key、.. 穿越拒绝、驱动不支持时报错含能力名
+func TestDriverMultipart(t *testing.T) {
+
+	full := &fakeMultipartStore{fakeStore: newFakeStore()}
+	driver := NewDriver(full)
+
+	uploadId, err := driver.InitMultipart("/app/big/a.zip")
+	if err != nil || uploadId != "fake-upload-id" {
+		t.Fatalf("InitMultipart 失败：uploadId=%s err=%v", uploadId, err)
+	}
+	if len(full.keys) != 1 || full.keys[0] != "big/a.zip" {
+		t.Fatalf("应换算为相对 key big/a.zip，实际 %v", full.keys)
+	}
+	if _, err = driver.UploadPart("/app/big/a.zip", uploadId, 2, strings.NewReader("xy"), 2); err != nil {
+		t.Fatalf("UploadPart 失败：%v", err)
+	}
+	if _, err = driver.ListParts("/app/big/a.zip", uploadId); err != nil {
+		t.Fatalf("ListParts 失败：%v", err)
+	}
+	if err = driver.CompleteMultipart("/app/big/a.zip", uploadId, []Part{{Index: 1, ETag: "fake-etag", Size: 1}}); err != nil {
+		t.Fatalf("CompleteMultipart 失败：%v", err)
+	}
+	if err = driver.AbortMultipart("/app/big/a.zip", uploadId); err != nil {
+		t.Fatalf("AbortMultipart 失败：%v", err)
+	}
+	// 五次调用都应收到同一个相对 key
+	for _, key := range full.keys {
+		if key != "big/a.zip" {
+			t.Fatalf("分片族方法应收到相对 key big/a.zip，实际 %v", full.keys)
+		}
+	}
+
+	// Get 与 SignedURL 公开路径换算
+	reader, err := driver.Get("/app/big/a.zip")
+	if err != nil {
+		t.Fatalf("Get 失败：%v", err)
+	}
+	_ = reader.Close()
+	if full.getKey != "big/a.zip" {
+		t.Fatalf("Get 应收到相对 key big/a.zip，实际 %s", full.getKey)
+	}
+	if _, err = driver.SignedURL("/app/big/a.zip", time.Minute); err != nil {
+		t.Fatalf("SignedURL 失败：%v", err)
+	}
+	if full.signKey != "big/a.zip" {
+		t.Fatalf("SignedURL 应收到相对 key big/a.zip，实际 %s", full.signKey)
+	}
+
+	// 穿越与越界拒绝
+	if _, err = driver.InitMultipart("/app/../escape.zip"); err == nil {
+		t.Fatal(".. 穿越应报错")
+	}
+	if _, err = driver.InitMultipart("/other/a.zip"); err == nil {
+		t.Fatal("越出存储根应报错")
+	}
+	if _, err = driver.Get("/app/../../etc/passwd"); err == nil {
+		t.Fatal("Get 穿越应报错")
+	}
+	if _, err = driver.SignedURL("/app", time.Minute); err == nil {
+		t.Fatal("存储根本身不允许签发")
+	}
+
+	// 不支持可选能力的驱动：报错应含能力名
+	plain := NewDriver(newFakeStore())
+	if _, err = plain.InitMultipart("/app/a.zip"); err == nil || !strings.Contains(err.Error(), "Multiparter") {
+		t.Fatalf("不支持分片应报错并提示 Multiparter，实际 %v", err)
+	}
+	if _, err = plain.Get("/app/a.zip"); err == nil || !strings.Contains(err.Error(), "Getter") {
+		t.Fatalf("不支持读取应报错并提示 Getter，实际 %v", err)
+	}
+	if _, err = plain.SignedURL("/app/a.zip", time.Minute); err == nil || !strings.Contains(err.Error(), "SignedURLer") {
+		t.Fatalf("不支持签名应报错并提示 SignedURLer，实际 %v", err)
+	}
+}
+
+// TestDriverSignedURLKey - 验证 Driver.SignedURL 口径：公开路径换算为相对 key，云端签名 URL 不双前缀（本地计算签名，不联网）
+func TestDriverSignedURLKey(t *testing.T) {
+
+	factory, err := newOssStore(Config{OSS: OSSConfig{
+		AccessKeyId: "test-access-key", AccessKeySecret: "test-secret", Bucket: "smoke-bucket", Endpoint: "oss-cn-guangzhou.aliyuncs.com", Path: "AIDE",
+	}})
+	if err != nil {
+		t.Fatalf("构造 OSS 驱动失败：%v", err)
+	}
+	signed, err := NewDriver(factory).SignedURL("/AIDE/artifacts/app.bin", time.Minute)
+	if err != nil {
+		t.Fatalf("SignedURL 失败：%v", err)
+	}
+	parsed, err := url.Parse(signed)
+	if err != nil {
+		t.Fatalf("预签名 URL 解析失败：%v", err)
+	}
+	if parsed.Path != "/AIDE/artifacts/app.bin" {
+		t.Fatalf("签名 URL 双前缀或路径不符：%s", signed)
+	}
+}
+
+// TestLocalMultipart - 验证本地驱动分片全生命周期：Init → 乱序上传 → ListParts 升序 → Complete 逐字节一致且临时区清空 → Abort 清理
+func TestLocalMultipart(t *testing.T) {
+
+	root := filepath.Join(t.TempDir(), "storage")
+	store := &LocalStore{Config: LocalConfig{Domain: "http://localhost:2000", Root: root}}
+	driver := NewDriver(store)
+
+	publicPath := "/storage/2026-10/big.bin"
+	key := "2026-10/big.bin"
+	content := []string{"hello-", "storagex-", "multipart"}
+
+	// 初始化会话：临时区目录与 meta.json 落地
+	uploadId, err := driver.InitMultipart(publicPath)
+	if err != nil {
+		t.Fatalf("InitMultipart 失败：%v", err)
+	}
+	dir := filepath.Join(root, ".multipart", uploadId)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("临时区目录未创建：%v", err)
+	}
+	meta, err := os.ReadFile(filepath.Join(dir, "meta.json"))
+	if err != nil || !strings.Contains(string(meta), key) {
+		t.Fatalf("meta.json 应记录 key：%q err=%v", meta, err)
+	}
+
+	// 乱序上传 3 片（3 → 1 → 2），回执 ETag 为 size 摘要
+	for _, index := range []int{3, 1, 2} {
+		part, err := driver.UploadPart(publicPath, uploadId, index, strings.NewReader(content[index-1]), int64(len(content[index-1])))
+		if err != nil {
+			t.Fatalf("UploadPart %d 失败：%v", index, err)
+		}
+		if part.Size != int64(len(content[index-1])) || part.ETag != "size:"+cast.ToString(part.Size) {
+			t.Fatalf("分片回执不符：%+v", part)
+		}
+	}
+
+	// 同 index 幂等覆盖（重传安全）
+	if _, err = driver.UploadPart(publicPath, uploadId, 2, strings.NewReader(content[1]), int64(len(content[1]))); err != nil {
+		t.Fatalf("同 index 重传失败：%v", err)
+	}
+
+	// ListParts 按序号升序
+	parts, err := driver.ListParts(publicPath, uploadId)
+	if err != nil || len(parts) != 3 {
+		t.Fatalf("ListParts 不符：%+v err=%v", parts, err)
+	}
+	for i, part := range parts {
+		if part.Index != i+1 || part.Size != int64(len(content[i])) {
+			t.Fatalf("分片顺序或大小不符：%+v", parts)
+		}
+	}
+
+	// 声明字节数与实际不符应拒绝
+	if _, err = driver.UploadPart(publicPath, uploadId, 4, strings.NewReader("x"), 5); err == nil {
+		t.Fatal("字节数不符应报错")
+	}
+
+	// Complete：拼接结果逐字节一致，临时区清空
+	if err = driver.CompleteMultipart(publicPath, uploadId, parts); err != nil {
+		t.Fatalf("CompleteMultipart 失败：%v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "2026-10", "big.bin"))
+	if err != nil || string(data) != strings.Join(content, "") {
+		t.Fatalf("合并内容不符：data=%q err=%v", data, err)
+	}
+	if _, err = os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("Complete 后临时区应已清空")
+	}
+
+	// Get 回读一致
+	reader, err := driver.Get(publicPath)
+	if err != nil {
+		t.Fatalf("Get 失败：%v", err)
+	}
+	back, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil || string(back) != strings.Join(content, "") {
+		t.Fatalf("Get 回读不符：%q err=%v", back, err)
+	}
+
+	// Abort：临时区清理
+	uploadId2, err := driver.InitMultipart(publicPath)
+	if err != nil {
+		t.Fatalf("再次 InitMultipart 失败：%v", err)
+	}
+	if _, err = driver.UploadPart(publicPath, uploadId2, 1, strings.NewReader("abort"), 5); err != nil {
+		t.Fatalf("UploadPart 失败：%v", err)
+	}
+	if err = driver.AbortMultipart(publicPath, uploadId2); err != nil {
+		t.Fatalf("AbortMultipart 失败：%v", err)
+	}
+	if _, err = os.Stat(filepath.Join(root, ".multipart", uploadId2)); !os.IsNotExist(err) {
+		t.Fatal("Abort 后临时区应已清空")
+	}
+
+	// 已清理会话继续上传应报错
+	if _, err = driver.UploadPart(publicPath, uploadId2, 1, strings.NewReader("x"), 1); err == nil {
+		t.Fatal("会话已清理后继续上传应报错")
+	}
+}
+
+// TestLocalPutAtomic - 验证 Put 原子写：同名覆盖内容正确、无临时文件残留；List 不暴露 .multipart 临时区
+func TestLocalPutAtomic(t *testing.T) {
+
+	root := filepath.Join(t.TempDir(), "storage")
+	store := &LocalStore{Config: LocalConfig{Domain: "http://localhost:2000", Root: root}}
+	driver := NewDriver(store)
+
+	if resp := driver.Dir("a").Name("f").Ext("txt").Put(strings.NewReader("v1")); resp.Error != nil {
+		t.Fatalf("首次上传失败：%v", resp.Error)
+	}
+	if resp := driver.Dir("a").Name("f").Ext("txt").Put(strings.NewReader("v2-longer-content")); resp.Error != nil {
+		t.Fatalf("覆盖上传失败：%v", resp.Error)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "a", "f.txt"))
+	if err != nil || string(data) != "v2-longer-content" {
+		t.Fatalf("覆盖后内容不符：%q err=%v", data, err)
+	}
+
+	// 无 .tmp 临时文件残留
+	entries, err := os.ReadDir(filepath.Join(root, "a"))
+	if err != nil {
+		t.Fatalf("读目录失败：%v", err)
+	}
+	for _, item := range entries {
+		if strings.Contains(item.Name(), ".tmp-") {
+			t.Fatalf("存在临时文件残留：%s", item.Name())
+		}
+	}
+
+	// List 不暴露 .multipart 临时区
+	uploadId, err := driver.InitMultipart("/storage/a/f.txt")
+	if err != nil {
+		t.Fatalf("InitMultipart 失败：%v", err)
+	}
+	if _, err = driver.UploadPart("/storage/a/f.txt", uploadId, 1, strings.NewReader("x"), 1); err != nil {
+		t.Fatalf("UploadPart 失败：%v", err)
+	}
+	list := driver.List(ListParams{Dir: "/storage"})
+	if list.Error != nil {
+		t.Fatalf("List 失败：%v", list.Error)
+	}
+	for _, entry := range list.List {
+		if entry.Name == ".multipart" {
+			t.Fatal("List 不应暴露 .multipart 临时区")
+		}
+	}
+}
+
+// TestBuiltinOptionalInterfaces - 验证三内置驱动实现 Multiparter / Getter 可选接口（OSS/COS 仅断言不调用，不联网）
+func TestBuiltinOptionalInterfaces(t *testing.T) {
+
+	local, err := newLocalStore(Config{Local: LocalConfig{Root: "public/storage", Domain: "http://localhost:2000"}})
+	if err != nil {
+		t.Fatalf("构造 local 驱动失败：%v", err)
+	}
+	if _, ok := local.(Multiparter); !ok {
+		t.Fatal("local 驱动应实现 Multiparter")
+	}
+	if _, ok := local.(Getter); !ok {
+		t.Fatal("local 驱动应实现 Getter")
+	}
+
+	ossStore, err := newOssStore(Config{OSS: OSSConfig{
+		AccessKeyId: "test-access-key", AccessKeySecret: "test-secret", Bucket: "smoke-bucket", Endpoint: "oss-cn-guangzhou.aliyuncs.com", Path: "AIDE",
+	}})
+	if err != nil {
+		t.Fatalf("构造 OSS 驱动失败：%v", err)
+	}
+	if _, ok := ossStore.(Multiparter); !ok {
+		t.Fatal("OSS 驱动应实现 Multiparter")
+	}
+	if _, ok := ossStore.(Getter); !ok {
+		t.Fatal("OSS 驱动应实现 Getter")
+	}
+
+	cosStore, err := newCosStore(Config{COS: COSConfig{
+		AppId: "1250000000", SecretId: "test-secret-id", SecretKey: "test-secret-key", Bucket: "smoke-bucket", Region: "ap-guangzhou", Path: "AIDE",
+	}})
+	if err != nil {
+		t.Fatalf("构造 COS 驱动失败：%v", err)
+	}
+	if _, ok := cosStore.(Multiparter); !ok {
+		t.Fatal("COS 驱动应实现 Multiparter")
+	}
+	if _, ok := cosStore.(Getter); !ok {
+		t.Fatal("COS 驱动应实现 Getter")
+	}
 }

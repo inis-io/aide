@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	pathpkg "path"
+	"sort"
 	"strings"
 	"time"
 
@@ -185,6 +186,111 @@ func (this *CosStore) SignedURL(ctx context.Context, key string, expire time.Dur
 	return url.String(), nil
 }
 
+// InitMultipart - 初始化云端分片会话，返回 uploadId
+func (this *CosStore) InitMultipart(ctx context.Context, key string) (uploadId string, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
+	result, _, err := this.Client.Object.InitiateMultipartUpload(ctx, this.key(key), nil)
+	if err != nil {
+		return "", err
+	}
+	return result.UploadID, nil
+}
+
+// UploadPart - 上传一个分片（非 Seeker reader 必须携带 ContentLength 流式透传；同 index 重传覆盖；ETag 取自响应头）
+func (this *CosStore) UploadPart(ctx context.Context, key, uploadId string, index int, reader io.Reader, size int64) (part Part, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return part, err
+	}
+	// 云端约束：片序号 [1, 10000]，除最后一片外每片 ≥1MB（由调用方保证）
+	if index < 1 || index > 10000 {
+		return part, fmt.Errorf("storagex: COS 分片序号须在 [1, 10000]，实际 %d", index)
+	}
+	resp, err := this.Client.Object.UploadPart(ctx, this.key(key), uploadId, index, reader,
+		&cos.ObjectUploadPartOptions{ContentLength: size})
+	if err != nil {
+		return part, err
+	}
+	return Part{Index: index, ETag: resp.Header.Get("ETag"), Size: size}, nil
+}
+
+// ListParts - 列出云端已上传分片（按序号升序，分页拉全），供断点恢复对账
+func (this *CosStore) ListParts(ctx context.Context, key, uploadId string) (parts []Part, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	parts = []Part{}
+	marker := ""
+	for {
+		result, _, item := this.Client.Object.ListParts(ctx, this.key(key), uploadId, &cos.ObjectListPartsOptions{
+			MaxParts:         "1000",
+			PartNumberMarker: marker,
+		})
+		if item != nil {
+			return nil, item
+		}
+		for _, uploaded := range result.Parts {
+			parts = append(parts, Part{Index: uploaded.PartNumber, ETag: uploaded.ETag, Size: uploaded.Size})
+		}
+		if !result.IsTruncated {
+			break
+		}
+		marker = result.NextPartNumberMarker
+	}
+	sort.Slice(parts, func(i, j int) bool { return parts[i].Index < parts[j].Index })
+	return parts, nil
+}
+
+// CompleteMultipart - 通知云端合并分片（COS 要求片序号升序，先排序再提交；复制切片避免改动调用方数据）
+func (this *CosStore) CompleteMultipart(ctx context.Context, key, uploadId string, parts []Part) (err error) {
+
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("storagex: 分片清单不能为空")
+	}
+	ordered := make([]Part, len(parts))
+	copy(ordered, parts)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Index < ordered[j].Index })
+
+	objects := make([]cos.Object, 0, len(ordered))
+	for _, part := range ordered {
+		objects = append(objects, cos.Object{PartNumber: part.Index, ETag: part.ETag})
+	}
+	_, _, err = this.Client.Object.CompleteMultipartUpload(ctx, this.key(key), uploadId,
+		&cos.CompleteMultipartUploadOptions{Parts: objects})
+	return err
+}
+
+// AbortMultipart - 中止云端会话并清理已上传分片
+func (this *CosStore) AbortMultipart(ctx context.Context, key, uploadId string) (err error) {
+
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	_, err = this.Client.Object.AbortMultipartUpload(ctx, this.key(key), uploadId)
+	return err
+}
+
+// Get - 读取对象内容（响应 Body 即 io.ReadCloser，调用方负责关闭）
+func (this *CosStore) Get(ctx context.Context, key string) (reader io.ReadCloser, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	resp, err := this.Client.Object.Get(ctx, this.key(key), nil)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
 // collectKeys - 收集指定 Key 对应的全部对象（文件返回自身，目录返回前缀下全部对象）
 func (this *CosStore) collectKeys(ctx context.Context, key string) (keys []string, err error) {
 
@@ -257,5 +363,9 @@ func encodeUriKey(key string) string {
 var _ Store = (*CosStore)(nil)
 
 var _ SignedURLer = (*CosStore)(nil)
+
+var _ Multiparter = (*CosStore)(nil)
+
+var _ Getter = (*CosStore)(nil)
 
 // ================================== 腾讯云对象存储 - 结束 ==================================

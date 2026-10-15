@@ -10,18 +10,20 @@
 ## 目录结构
 
 ```
-├── storagex.go    # Store 接口、registry 注册表（变量初始化登记）、Driver 链式包装
+├── storagex.go    # Store 接口、可选能力接口（SignedURLer/Multiparter/Getter + Part）、registry 注册表、Driver 链式包装（含公开路径入口方法）
 ├── config.go      # Config 配置结构、normConfig 默认值补齐
 ├── facade.go      # 全局门面：Inst 控制器单例 + Storage 全局实例（storeError 占位）
-├── local.go       # 本地磁盘驱动（os 落盘，List 内存分页 Marker 为偏移量）
-├── oss.go         # 阿里云 OSS 驱动（云端 Marker 分页，目录为 / 结尾占位对象，Move 复制后删源）
-├── cos.go         # 腾讯云 COS 驱动（同 OSS 语义）
-└── storagex_test.go # 注册表、链式值语义、配置归一化、命名与响应组装、公开路径防护、本地驱动实测、热重载测试
+├── local.go       # 本地磁盘驱动（原子 Put：tmp+rename；分片临时区 {Root}/.multipart/；List 内存分页排除临时区）
+├── oss.go         # 阿里云 OSS 驱动（云端 Marker 分页；multipart 直传；SignedURL；GetObject）
+├── cos.go         # 腾讯云 COS 驱动（同 OSS 语义；Complete 前强制分片升序）
+└── storagex_test.go # 注册表、链式值语义、配置归一化、命名与响应组装、公开路径防护、local 分片全生命周期、原子写、热重载测试
 ```
 
 ## 核心约定
 
 - **`Store` 接口是唯一扩展点**：只含 `Root` / `Domain` / `Put` / `List` / `MakeDir` / `Remove` / `Move` 七个方法，均带 `context.Context`。内置驱动在 `storagex.go` 的 `registry` 变量初始化时登记；外部驱动在自己包内 `init()` 中 `Register("名称", 工厂)` 注册，同名覆盖。新增内置驱动：新建文件实现 `Store`，并在 `registry` 登记一行。
+- **可选能力接口**（v0.0.3 起）：`SignedURLer`（限时签名 URL，OSS/COS）、`Multiparter`（分片上传 `InitMultipart`/`UploadPart`/`ListParts`/`CompleteMultipart`/`AbortMultipart`，local/OSS/COS 均实现；分片序号从 1 开始，非末片 ≥100KB、总数 ≤10000）、`Getter`（读取对象内容，三驱动均实现）。可选能力一律走「可选接口 + 类型断言」，不进 `Store`；驱动缺失能力时返回含驱动类型名与能力名的明确错误，并补 `var _ 接口 = (*XxxStore)(nil)` 编译期断言。
+- **Driver 层公开路径入口**：`SignedURL` / `Get` / `InitMultipart` / `UploadPart` / `ListParts` / `CompleteMultipart` / `AbortMultipart` 接收**公开路径**（带前导斜杠），由 Driver 层统一 `splitPublicPath` 换算为相对根 key 后断言调用——消费方（im/licen-hub）不得自行 TrimPrefix 拼根，历史双前缀缺陷即源于此。
 - **`Store` 契约**：所有方法的 key / dir / src / dst 均为**相对存储根**的路径（不含根目录名），由 Driver 层完成公开路径换算与路径穿越校验后传入；`List` 返回条目只需填 `Name` / `IsDir` / `Size` / `ModTime`，`Path` / `Url` 由 Driver 层组装。
 - **`Driver` 链式包装**（`Ctx` / `Dir` / `Name` / `Ext` / `Put` / `List` / `MakeDir` / `Remove` / `Move` / `Root`），**值语义**：每次链式调用返回副本。**对象命名统一收敛在 Driver 层**（缺省目录 `年-月/日/`、缺省文件名 `毫秒时间戳-随机后缀` 防同毫秒撞名）；`Name` 统一 `path.Base` 去目录成分。`storagex.New("oss", config)` 创建独立实例。
 - **公开路径语义**：根为 `store.Root()`（local 取根目录最后一段，OSS/COS 为配置的 `Path`），`Put` 响应与 `List` 条目的 `Path` 带前导 `/`，`Url = Domain + Path`；`List` 的 `Prefix` 为 Driver 层页内过滤（云端分页场景命中数量可能少于 Limit）。

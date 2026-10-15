@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	pathpkg "path"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/inis-io/aide/utils"
+	"github.com/spf13/cast"
 )
 
 // ================================== 阿里云对象存储 - 开始 ==================================
@@ -222,6 +224,125 @@ func (this *OssStore) SignedURL(ctx context.Context, key string, expire time.Dur
 	return bucket.SignURL(this.key(key), oss.HTTPGet, seconds)
 }
 
+// InitMultipart - 初始化云端分片会话，返回 uploadId
+func (this *OssStore) InitMultipart(ctx context.Context, key string) (uploadId string, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return "", err
+	}
+	result, err := bucket.InitiateMultipartUpload(this.key(key))
+	if err != nil {
+		return "", err
+	}
+	return result.UploadID, nil
+}
+
+// UploadPart - 上传一个分片（流式透传，SDK 按 partSize 自动携带 ContentLength；同 index 重传覆盖）
+func (this *OssStore) UploadPart(ctx context.Context, key, uploadId string, index int, reader io.Reader, size int64) (part Part, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return part, err
+	}
+	// 云端约束：片序号 [1, 10000]，除最后一片外每片 ≥100KB（由调用方保证）
+	if index < 1 || index > 10000 {
+		return part, fmt.Errorf("storagex: OSS 分片序号须在 [1, 10000]，实际 %d", index)
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return part, err
+	}
+	imur := oss.InitiateMultipartUploadResult{Key: this.key(key), UploadID: uploadId}
+	uploaded, err := bucket.UploadPart(imur, reader, size, index, oss.ContentLength(size))
+	if err != nil {
+		return part, err
+	}
+	return Part{Index: uploaded.PartNumber, ETag: uploaded.ETag, Size: size}, nil
+}
+
+// ListParts - 列出云端已上传分片（按序号升序，分页拉全），供断点恢复对账
+func (this *OssStore) ListParts(ctx context.Context, key, uploadId string) (parts []Part, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return nil, err
+	}
+
+	imur := oss.InitiateMultipartUploadResult{Key: this.key(key), UploadID: uploadId}
+	parts = []Part{}
+	marker := 0
+	for {
+		result, item := bucket.ListUploadedParts(imur, oss.MaxParts(1000), oss.PartNumberMarker(marker))
+		if item != nil {
+			return nil, item
+		}
+		for _, uploaded := range result.UploadedParts {
+			parts = append(parts, Part{Index: uploaded.PartNumber, ETag: uploaded.ETag, Size: int64(uploaded.Size)})
+		}
+		if !result.IsTruncated {
+			break
+		}
+		marker = cast.ToInt(result.NextPartNumberMarker)
+	}
+	sort.Slice(parts, func(i, j int) bool { return parts[i].Index < parts[j].Index })
+	return parts, nil
+}
+
+// CompleteMultipart - 通知云端合并分片（SDK 内部按序号升序排序）
+func (this *OssStore) CompleteMultipart(ctx context.Context, key, uploadId string, parts []Part) (err error) {
+
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("storagex: 分片清单不能为空")
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return err
+	}
+	imur := oss.InitiateMultipartUploadResult{Key: this.key(key), UploadID: uploadId}
+	uploadParts := make([]oss.UploadPart, 0, len(parts))
+	for _, part := range parts {
+		uploadParts = append(uploadParts, oss.UploadPart{PartNumber: part.Index, ETag: part.ETag})
+	}
+	_, err = bucket.CompleteMultipartUpload(imur, uploadParts)
+	return err
+}
+
+// AbortMultipart - 中止云端会话并清理已上传分片
+func (this *OssStore) AbortMultipart(ctx context.Context, key, uploadId string) (err error) {
+
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return err
+	}
+	imur := oss.InitiateMultipartUploadResult{Key: this.key(key), UploadID: uploadId}
+	return bucket.AbortMultipartUpload(imur)
+}
+
+// Get - 读取对象内容（调用方负责关闭）
+func (this *OssStore) Get(ctx context.Context, key string) (reader io.ReadCloser, err error) {
+
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	bucket, err := this.bucket()
+	if err != nil {
+		return nil, err
+	}
+	return bucket.GetObject(this.key(key))
+}
+
 // collectKeys - 收集指定 Key 对应的全部对象（文件返回自身，目录返回前缀下全部对象）
 func (this *OssStore) collectKeys(bucket *oss.Bucket, key string) (keys []string, err error) {
 
@@ -274,5 +395,9 @@ func deleteOssKeys(bucket *oss.Bucket, keys []string) error {
 var _ Store = (*OssStore)(nil)
 
 var _ SignedURLer = (*OssStore)(nil)
+
+var _ Multiparter = (*OssStore)(nil)
+
+var _ Getter = (*OssStore)(nil)
 
 // ================================== 阿里云对象存储 - 结束 ==================================

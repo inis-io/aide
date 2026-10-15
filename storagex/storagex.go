@@ -56,6 +56,38 @@ type SignedURLer interface {
 	SignedURL(ctx context.Context, key string, expire time.Duration) (string, error)
 }
 
+// Part - 分片信息
+type Part struct {
+	// 分片序号（从 1 开始）
+	Index int `json:"index"`
+	// 分片校验值（云端返回的 ETag；local 为 "size:字节数" 摘要）
+	ETag string `json:"etag"`
+	// 分片字节数
+	Size int64 `json:"size"`
+}
+
+// Multiparter - 可选接口：分片上传（local / OSS / COS 均实现）。
+// key 为「相对存储根」路径（与 Store 契约一致）；uploadId 由驱动在 InitMultipart 生成并返回；
+// index 从 1 开始；除最后一片外每片 ≥100KB（云端约束），片数 ≤10000。
+type Multiparter interface {
+	// InitMultipart - 初始化分片会话，返回 uploadId
+	InitMultipart(ctx context.Context, key string) (uploadId string, err error)
+	// UploadPart - 上传一个分片（reader 为分片内容，size 为其字节数；幂等：同 index 重传覆盖）
+	UploadPart(ctx context.Context, key, uploadId string, index int, reader io.Reader, size int64) (part Part, err error)
+	// ListParts - 列出已上传分片（按序号升序），供断点恢复对账
+	ListParts(ctx context.Context, key, uploadId string) (parts []Part, err error)
+	// CompleteMultipart - 按 parts 顺序合并分片为正式对象
+	CompleteMultipart(ctx context.Context, key, uploadId string, parts []Part) (err error)
+	// AbortMultipart - 中止会话并清理已上传分片
+	AbortMultipart(ctx context.Context, key, uploadId string) (err error)
+}
+
+// Getter - 可选接口：读取对象内容（消除消费方各自拼本地路径的拷贝代码）。
+// key 为「相对存储根」路径（与 Store 契约一致）。
+type Getter interface {
+	Get(ctx context.Context, key string) (reader io.ReadCloser, err error)
+}
+
 // Factory - 驱动工厂：按配置构建驱动实例（传入的 Config 已归一化）
 type Factory func(config Config) (Store, error)
 
@@ -447,6 +479,104 @@ func (this Driver) Root() string {
 		return ""
 	}
 	return joinPublicPath(this.store.Root(), "")
+}
+
+// multiparter - 公开路径换算 + 分片能力断言（供分片族方法复用；路径穿越防护统一收敛在此）
+func (this Driver) multiparter(publicPath string) (mp Multiparter, key string, err error) {
+	if this.store == nil {
+		return nil, "", fmt.Errorf("storagex: 存储驱动未初始化")
+	}
+	rel, ok := splitPublicPath(this.store.Root(), publicPath)
+	if !ok || utils.Is.Empty(rel) {
+		return nil, "", fmt.Errorf("storagex: 路径不合法或越出存储根：%s", publicPath)
+	}
+	mp, ok = this.store.(Multiparter)
+	if !ok {
+		return nil, "", fmt.Errorf("storagex: 驱动[%T]不支持分片上传（未实现 Multiparter）", this.store)
+	}
+	return mp, rel, nil
+}
+
+// InitMultipart - 初始化分片上传会话，返回 uploadId
+/**
+ * @param publicPath string - 目标公开路径（如 /storage/2026-10/15/a.zip）
+ * @example：
+ * 	uploadId, err := storagex.Storage.InitMultipart("/storage/big/a.zip")
+ */
+func (this Driver) InitMultipart(publicPath string) (uploadId string, err error) {
+	mp, key, err := this.multiparter(publicPath)
+	if err != nil {
+		return "", err
+	}
+	return mp.InitMultipart(this.context(), key)
+}
+
+// UploadPart - 上传一个分片（reader 为分片内容，size 为其字节数；幂等：同 index 重传覆盖）
+func (this Driver) UploadPart(publicPath, uploadId string, index int, reader io.Reader, size int64) (part Part, err error) {
+	mp, key, err := this.multiparter(publicPath)
+	if err != nil {
+		return part, err
+	}
+	return mp.UploadPart(this.context(), key, uploadId, index, reader, size)
+}
+
+// ListParts - 列出已上传分片（按序号升序），供断点恢复对账
+func (this Driver) ListParts(publicPath, uploadId string) (parts []Part, err error) {
+	mp, key, err := this.multiparter(publicPath)
+	if err != nil {
+		return nil, err
+	}
+	return mp.ListParts(this.context(), key, uploadId)
+}
+
+// CompleteMultipart - 按 parts 顺序合并分片为正式对象
+func (this Driver) CompleteMultipart(publicPath, uploadId string, parts []Part) (err error) {
+	mp, key, err := this.multiparter(publicPath)
+	if err != nil {
+		return err
+	}
+	return mp.CompleteMultipart(this.context(), key, uploadId, parts)
+}
+
+// AbortMultipart - 中止会话并清理已上传分片
+func (this Driver) AbortMultipart(publicPath, uploadId string) (err error) {
+	mp, key, err := this.multiparter(publicPath)
+	if err != nil {
+		return err
+	}
+	return mp.AbortMultipart(this.context(), key, uploadId)
+}
+
+// Get - 读取对象内容（驱动需实现 Getter；调用方负责关闭返回的 reader）
+func (this Driver) Get(publicPath string) (reader io.ReadCloser, err error) {
+	if this.store == nil {
+		return nil, fmt.Errorf("storagex: 存储驱动未初始化")
+	}
+	rel, ok := splitPublicPath(this.store.Root(), publicPath)
+	if !ok || utils.Is.Empty(rel) {
+		return nil, fmt.Errorf("storagex: 路径不合法或越出存储根：%s", publicPath)
+	}
+	getter, ok := this.store.(Getter)
+	if !ok {
+		return nil, fmt.Errorf("storagex: 驱动[%T]不支持读取对象内容（未实现 Getter）", this.store)
+	}
+	return getter.Get(this.context(), rel)
+}
+
+// SignedURL - 为公开路径签发限时签名 URL（驱动需实现 SignedURLer；key 换算为相对存储根，杜绝双前缀）
+func (this Driver) SignedURL(publicPath string, expire time.Duration) (string, error) {
+	if this.store == nil {
+		return "", fmt.Errorf("storagex: 存储驱动未初始化")
+	}
+	rel, ok := splitPublicPath(this.store.Root(), publicPath)
+	if !ok || utils.Is.Empty(rel) {
+		return "", fmt.Errorf("storagex: 路径不合法或越出存储根：%s", publicPath)
+	}
+	signer, ok := this.store.(SignedURLer)
+	if !ok {
+		return "", fmt.Errorf("storagex: 驱动[%T]不支持签发签名URL（未实现 SignedURLer）", this.store)
+	}
+	return signer.SignedURL(this.context(), rel, expire)
 }
 
 // ================================== 链式存储实例 - 结束 ==================================
