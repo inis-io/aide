@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/inis-io/aide/licence/apis"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -315,19 +316,60 @@ func (this *Client) Envelope() (LicenceProtocol.Envelope, bool) {
 	return this.envelope, this.envelope.Payload.LicenseId != ""
 }
 
-// HasFeature - 功能权益闸门：放行状态且载荷 features[code] 为 true
-func (this *Client) HasFeature(code string) bool {
+// GetBool - 读取布尔型权益（项目模块 valueType=bool）：返回载荷 entitlements[code]。
+// 键缺省或值不是布尔时返回 (false, false)；本方法只读载荷，不含授权状态闸门，
+// 需要「授权放行才开放功能」的调用方必须同时判断 Status()。
+func (this *Client) GetBool(code string) (bool, bool) {
 	this.mu.RLock()
 	defer this.mu.RUnlock()
-	return LicenceProtocol.PassThrough(this.state.Status) && this.envelope.Payload.Features[code]
+	value, exist := this.envelope.Payload.Entitlements[code]
+	if !exist {
+		return false, false
+	}
+	boolean, ok := value.(bool)
+	return boolean, ok
 }
 
-// GetLimit - 额度查询：返回载荷 limits[key]（未配置返回 0, false）
-func (this *Client) GetLimit(key string) (int64, bool) {
+// GetInt - 读取整数型权益（项目模块 valueType=int）：返回载荷 entitlements[code]。
+// 键缺省、值不是数值或数值含小数时返回 (0, false)；整数值的 float64 可无损转换。
+func (this *Client) GetInt(code string) (int64, bool) {
 	this.mu.RLock()
 	defer this.mu.RUnlock()
-	value, exist := this.envelope.Payload.Limits[key]
-	return value, exist
+	number, ok := entitlementNumber(this.envelope.Payload.Entitlements[code])
+	if !ok || number != math.Trunc(number) {
+		return 0, false
+	}
+	return int64(number), true
+}
+
+// GetFloat - 读取数值型权益（项目模块 valueType=int/float）：返回载荷 entitlements[code]。
+// 键缺省或值不是数值时返回 (0, false)；整数与小数同样接受。
+func (this *Client) GetFloat(code string) (float64, bool) {
+	this.mu.RLock()
+	defer this.mu.RUnlock()
+	return entitlementNumber(this.envelope.Payload.Entitlements[code])
+}
+
+// entitlementNumber - 权益数值归一：JSON 解析结果一律为 float64，
+// 同时兼容进程内直接构造的 int / int64，其余类型视为类型不符。
+func entitlementNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		number, err := typed.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return number, true
+	}
+	return 0, false
 }
 
 // CheckVersion - 版本范围本地判定（与平台 version-range 语义一致，空范围 = 不限制）

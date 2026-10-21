@@ -57,9 +57,8 @@ type fakePlatform struct {
 	forceStatus string
 	// upgradeUntil - 升级权截止（毫秒，0 = 不限）
 	upgradeUntil int64
-	// features/limits - 载荷权益
-	features map[string]bool
-	limits   map[string]int64
+	// entitlements - 载荷统一权益表（bool / 整数 / 小数混合）
+	entitlements map[string]any
 	// version - 许可证乐观锁版本（载荷变化递增，触发 validate 下发新信封）
 	version int
 	// issuedVersion - 最近一次随响应下发的信封版本
@@ -221,8 +220,7 @@ func newFakePlatform(t *testing.T) *fakePlatform {
 	platform := &fakePlatform{
 		seed: seed, publicKey: hex.EncodeToString(publicKey),
 		validUntil: "", graceDays: 7, version: 1,
-		features:        map[string]bool{"report.advanced": true, "ai.chat": false},
-		limits:          map[string]int64{"max_users": 100},
+		entitlements:    map[string]any{"report.advanced": true, "ai.chat": false, "max_users": 100, "max_storage_gb": 2.5},
 		tenants:         make(map[string]fakeTenant),
 		platformConfigs: make(map[string]PlatformConfigItem),
 	}
@@ -462,9 +460,9 @@ func (this *fakePlatform) issue(fingerprint string) (LicenceProtocol.Envelope, e
 		Environment: "production", ValidFrom: "2026-01-01T00:00:00Z",
 		ValidUntil: this.validUntil, GraceDays: this.graceDays,
 		VersionRange: ">=2.0.0 <3.0.0",
-		Features:     this.features, Limits: this.limits,
-		Binding:  &LicenceProtocol.Binding{Type: "fingerprint", Value: fingerprint},
-		IssuedAt: time.Now().UTC().Format(time.RFC3339), KeyVersion: "license-key-2026-01", Nonce: LicenceProtocol.Licence.Nonce(),
+		Entitlements: this.entitlements,
+		Binding:      &LicenceProtocol.Binding{Type: "fingerprint", Value: fingerprint},
+		IssuedAt:     time.Now().UTC().Format(time.RFC3339), KeyVersion: "license-key-2026-01", Nonce: LicenceProtocol.Licence.Nonce(),
 		BindingPolicy: LicenceProtocol.BindingPolicySingle, SeatLimit: 1,
 	}
 	return LicenceProtocol.Licence.Payload(payload).Seed(this.seed).Issue()
@@ -933,11 +931,32 @@ func TestClientActivateAndRefresh(t *testing.T) {
 	if deviceName != "test-device" {
 		t.Fatalf("设备名称未随激活上报: %s", deviceName)
 	}
-	if !client.HasFeature("report.advanced") || client.HasFeature("ai.chat") {
-		t.Fatalf("HasFeature 判定错误")
+	if granted, ok := client.GetBool("report.advanced"); !ok || !granted {
+		t.Fatalf("GetBool(report.advanced) = %v %v, want true true", granted, ok)
 	}
-	if value, exist := client.GetLimit("max_users"); !exist || value != 100 {
-		t.Fatalf("GetLimit 判定错误: %v %v", value, exist)
+	if granted, ok := client.GetBool("ai.chat"); !ok || granted {
+		t.Fatalf("GetBool(ai.chat) = %v %v, want false true", granted, ok)
+	}
+	if _, ok := client.GetBool("max_users"); ok {
+		t.Fatalf("数值型权益按布尔读取应返回 ok=false")
+	}
+	if value, ok := client.GetInt("max_users"); !ok || value != 100 {
+		t.Fatalf("GetInt(max_users) = %v %v, want 100 true", value, ok)
+	}
+	if _, ok := client.GetInt("max_storage_gb"); ok {
+		t.Fatalf("小数权益按整数读取应返回 ok=false")
+	}
+	if value, ok := client.GetFloat("max_storage_gb"); !ok || value != 2.5 {
+		t.Fatalf("GetFloat(max_storage_gb) = %v %v, want 2.5 true", value, ok)
+	}
+	if value, ok := client.GetFloat("max_users"); !ok || value != 100 {
+		t.Fatalf("GetFloat(max_users) = %v %v, want 100 true", value, ok)
+	}
+	if _, ok := client.GetBool("missing"); ok {
+		t.Fatalf("缺省键应返回 ok=false")
+	}
+	if _, ok := client.GetInt("report.advanced"); ok {
+		t.Fatalf("布尔权益按整数读取应返回 ok=false")
 	}
 	if !client.CheckVersion("2.3.1") || client.CheckVersion("3.0.0") {
 		t.Fatalf("CheckVersion 判定错误")
@@ -1127,12 +1146,12 @@ func TestClientEnvelopeRefresh(t *testing.T) {
 
 	// 平台侧调整权益并递增载荷版本
 	platform.mu.Lock()
-	platform.features["ai.chat"] = true
+	platform.entitlements["ai.chat"] = true
 	platform.version++
 	platform.mu.Unlock()
 
 	time.Sleep(350 * time.Millisecond)
-	if !client.HasFeature("ai.chat") {
+	if granted, ok := client.GetBool("ai.chat"); !ok || !granted {
 		t.Fatalf("新信封未生效：ai.chat 应为已授权")
 	}
 }

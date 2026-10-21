@@ -186,7 +186,7 @@ func (this *fakePlatform) handleActivate(writer http.ResponseWriter, body []byte
 		LicenseId: "LIC-2026-000123", UserId: "USR-2026-000001", ProjectId: "PRJ-2026-000001",
 		InstanceId: "INS-2026-000001", Environment: "production", ValidFrom: "2026-01-01T00:00:00Z",
 		ValidUntil: "", GraceDays: 7, VersionRange: ">=2.0.0 <3.0.0",
-		Features: map[string]bool{"report.advanced": true}, Limits: map[string]int64{"max_users": 100},
+		Entitlements: map[string]any{"report.advanced": true, "max_users": 100},
 		Binding:  &LicenceProtocol.Binding{Type: "fingerprint", Value: params.FingerprintHash},
 		IssuedAt: time.Now().UTC().Format(time.RFC3339), KeyVersion: "license-key-2026-01",
 		Nonce: LicenceProtocol.Licence.Nonce(), BindingPolicy: LicenceProtocol.BindingPolicySingle, SeatLimit: 1,

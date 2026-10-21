@@ -141,10 +141,10 @@ func main() {
 	defer client.Close() // 停止刷新并释放 HTTP/gRPC 连接
 
 	// 业务闸门：功能 / 额度 / 版本范围
-	if client.HasFeature("report.advanced") {
+	if granted, ok := client.GetBool("report.advanced"); ok && granted {
 		// 开放高级报表
 	}
-	maxUsers, exist := client.GetLimit("max_users")
+	maxUsers, exist := client.GetInt("max_users")
 	if !client.CheckVersion("2.3.1") {
 		// 当前版本不在授权范围
 	}
@@ -454,7 +454,7 @@ licence.Options{
 1. 平台方开通账号 → 资格审核通过
 2. 建项目 → 登记实例（记下你的指纹盐）→ 申请授权 → 平台签发
 3. 拿到 `licenseNo` + 按项目导出 `PublicKeys`（`GET /api/licenses/public-key?projectId=X` 全版本 `keys[]`；用更新功能再导出 `ReleasePublicKeys`）
-4. `licence.New` + `Start` → 用 `HasFeature/GetLimit/CheckVersion` 做业务闸门
+4. `licence.New` + `Start` → 用 `GetBool/GetInt/GetFloat/CheckVersion` 做业务闸门
 5.（可选）`CheckUpdate`/`DownloadArtifact`/`ReportUpgrade` 接在线更新
 6.（可选 SaaS）`TenantSync`/`TenantValidate` 接多租户
 7.（可选 CI）`admin.NewAdmin` 做运维自动化
@@ -548,8 +548,7 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 | `UpgradeUntil` | `string` | 升级权到期时间（RFC3339，空串 = 不限制） |
 | `GraceDays` | `int` | 宽限期（天） |
 | `VersionRange` | `string` | 允许的项目版本范围（空 = 不限制） |
-| `Features` | `map[string]bool` | 功能权益表（`code → 是否授权`） |
-| `Limits` | `map[string]int64` | 额度表（`key → 上限`） |
+| `Entitlements` | `map[string]any` | 统一权益表（`模块编码 → bool / 整数 / 小数`） |
 | `Binding` | `*Binding` | 绑定信息（类型/值，如设备绑定） |
 | `IssuedAt` | `string` | 签发时间（RFC3339） |
 | `KeyVersion` | `string` | 签名密钥版本（选公钥用） |
@@ -568,7 +567,7 @@ SDK 按职责拆为「根包 + 子包」，客户项目接入仍只需 import �
 
 | 函数 | 签名 | 说明 |
 |---|---|---|
-| `MarshalPayload` | `func MarshalPayload(payload Payload) ([]byte, error)` | 序列化载荷为待签名字节。结构体字段顺序稳定，map 字段（features/limits）由 `encoding/json` 按键名排序，同一载荷任意时刻序列化结果字节一致 |
+| `MarshalPayload` | `func MarshalPayload(payload Payload) ([]byte, error)` | 序列化载荷为待签名字节。结构体字段顺序稳定，map 字段（entitlements）由 `encoding/json` 按键名排序，同一载荷任意时刻序列化结果字节一致 |
 | `ParseEnvelope` | `func ParseEnvelope(data []byte) (envelope Envelope, rawPayload []byte, err error)` | 解析信封 JSON，同时返回**载荷原始字节**。验签必须基于载荷原文（而非重序列化），平台只追加新字段时原文验签天然兼容 |
 
 ### 13.3 Licence 链式工具类（nil 安全，全局变量 `licence.Licence`）
@@ -714,8 +713,9 @@ type Options struct {
 | `SeatNo` | `func (this *Client) SeatNo() string` | 当前机器的席位编号（尚未激活或历史服务端未返回时为空；仅展示/排障） |
 | `DeviceName` | `func (this *Client) DeviceName() string` | 实际生效的机器名称（`Options.DeviceName` 或其缺省主机名，与激活上送值一致） |
 | `Envelope` | `func (this *Client) Envelope() (Envelope, bool)` | 当前缓存信封（第二返回值标识是否存在） |
-| `HasFeature` | `func (this *Client) HasFeature(code string) bool` | 功能权益闸门：放行状态且载荷 `features[code]` 为 true |
-| `GetLimit` | `func (this *Client) GetLimit(key string) (int64, bool)` | 额度查询：返回载荷 `limits[key]`（未配置返回 0, false） |
+| `GetBool` | `func (this *Client) GetBool(code string) (bool, bool)` | 布尔权益读取：载荷 `entitlements[code]`（键缺省/类型不符返回 false, false；不含状态闸门，需配合 `Status()`） |
+| `GetInt` | `func (this *Client) GetInt(code string) (int64, bool)` | 整数权益读取：载荷 `entitlements[code]`（小数或非数值返回 0, false） |
+| `GetFloat` | `func (this *Client) GetFloat(code string) (float64, bool)` | 数值权益读取：载荷 `entitlements[code]`（整数与小数均接受） |
 | `CheckVersion` | `func (this *Client) CheckVersion(version string) bool` | 版本范围本地判定（与平台语义一致，空范围 = 不限制） |
 | `ReportUsage` | `func (this *Client) ReportUsage(usage map[string]int64)` | 用量上报：合并进待上报表，随下次 validate 携带，服务端确认后清空 |
 | `Reactivate` | `func (this *Client) Reactivate(ctx context.Context) error` | 重新激活（换机/令牌丢失/EXPIRED 引导路径）：生成新客户端密钥对重新绑定，旧公钥随旧激活记录失效 |
@@ -735,8 +735,9 @@ if err = client.Start(context.Background()); err != nil {
 }
 defer client.Stop()
 
-if client.HasFeature("report.advanced") { /* 开放高级报表 */ }
-if maxUsers, ok := client.GetLimit("max_users"); ok { /* 额度内 */ }
+if granted, ok := client.GetBool("report.advanced"); ok && granted { /* 开放高级报表 */ }
+if maxUsers, ok := client.GetInt("max_users"); ok { /* 额度内 */ }
+if quotaGB, ok := client.GetFloat("max_storage_gb"); ok { /* 小数额度 */ }
 if !client.CheckVersion("2.3.1") { /* 当前版本不在授权范围 */ }
 ```
 
@@ -1573,7 +1574,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `ProjectInput` | `Id`（Update 必填）、`ProjectName`（Create 必填，最长 128）；归属用户由平台按登录态强制写入 |
 | `InstanceInput` | `ProjectId`（Create 必填）、`ServerFingerprint`（原文提交，平台加盐哈希存储）、`NotifyUrl`（平台回调入口）、`IsBillableSet`（显式设置计费标记） |
 | `LicenseApplyInput` | `ProjectId` / `LicenseType` / `Environment` / `Reason` 必填、`RequestPayload`（期望权益自由 JSON） |
-| `LicenseIssuePayload` | 签发参数：四个期限为毫秒时间戳，0=不限制（`ValidUntil` 0=永久）、`Features` / `Limits` / `Binding` |
+| `LicenseIssuePayload` | 签发参数：四个期限为毫秒时间戳，0=不限制（`ValidUntil` 0=永久）、`Entitlements` / `Binding` |
 | `LicenseReviewInput` | `Id` / `Action` 必填、`IssuePayload`（approve 时可选，为空从申请的 requestPayload 回退解析） |
 | `LicenseActionInput` | `Id` 必填、`Reason`（suspend/revoke 必填）、renew 传新期限、`IssuePayload`（reissue 生效） |
 | `VersionInput` | 新建仅允许 draft/testing 状态；发布与归档走专用接口；`OsArch` 平台架构**多值数组**（如 `["linux/amd64","linux/arm64"]`） |

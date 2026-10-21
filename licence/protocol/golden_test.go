@@ -8,6 +8,8 @@ import (
 
 // Golden 向量由 licen-hub 平台签发端（backend/app/common/sign）原样生成，
 // 任何序列化/签名语义的漂移（如误换 JSON 库导致 <>& 转义差异）都会在此暴露。
+// 权益表统一为 entitlements 后，两组向量已按新载荷（含 bool / 整数 / 小数三种取值）重新生成，
+// 平台侧 Payload 结构必须与本文件逐字段镜像。
 
 const (
 	// goldenSeed - 固定私钥种子（01 02 ... 20）的 hex
@@ -24,7 +26,7 @@ type goldenVector struct {
 	signature string
 }
 
-// goldenVectors - 平台签发端生成的两组向量（全字段含 <>& 特殊字符 / 最小字段永久授权）
+// goldenVectors - 两组向量（全字段含 <>& 特殊字符且权益含 bool/整数/小数 / 最小字段永久授权）
 // canonical 中的 <>& 等六个字面字符序列即 Go encoding/json 的 HTML 转义原文
 var goldenVectors = []goldenVector{
 	{
@@ -35,14 +37,16 @@ var goldenVectors = []goldenVector{
 			ValidFrom:   "2026-01-01T00:00:00Z", ValidUntil: "2027-01-01T00:00:00Z",
 			MaintenanceUntil: "2026-12-31T23:59:59Z", UpgradeUntil: "2026-12-31T23:59:59Z",
 			GraceDays: 15, VersionRange: ">=2.0.0 <3.0.0",
-			Features: map[string]bool{"report.advanced": true, "export<pro>&": true, "ai.chat": false},
-			Limits:   map[string]int64{"max_users": 100, "api<call>&daily": 1000000},
+			Entitlements: map[string]any{
+				"report.advanced": true, "export<pro>&": true, "ai.chat": false,
+				"max_users": 100, "api<call>&daily": 1000000, "max_storage_gb": 2.5,
+			},
 			Binding:  &Binding{Type: "fingerprint", Value: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
 			IssuedAt: "2026-08-08T12:00:00Z", KeyVersion: "license-key-2026-01", Nonce: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
 			BindingPolicy: "single", SeatLimit: 1,
 		},
-		canonical: `{"licenseId":"LIC-2026-000123","userId":"USR-2026-000001","projectId":"PRJ-2026-000001","instanceId":"INS-2026-000001","environment":"production","validFrom":"2026-01-01T00:00:00Z","validUntil":"2027-01-01T00:00:00Z","maintenanceUntil":"2026-12-31T23:59:59Z","upgradeUntil":"2026-12-31T23:59:59Z","graceDays":15,"versionRange":"\u003e=2.0.0 \u003c3.0.0","features":{"ai.chat":false,"export\u003cpro\u003e\u0026":true,"report.advanced":true},"limits":{"api\u003ccall\u003e\u0026daily":1000000,"max_users":100},"binding":{"type":"fingerprint","value":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90","bindingPolicy":"single","seatLimit":1}`,
-		signature: "d69d53f0e6cdca38ff8d7e9823100e95592417ea0c0fcbe88f626409a55a1b552b0b82f6026985eb1b13ced0578284423dd8bb61cb03375cb14068e423300408",
+		canonical: `{"licenseId":"LIC-2026-000123","userId":"USR-2026-000001","projectId":"PRJ-2026-000001","instanceId":"INS-2026-000001","environment":"production","validFrom":"2026-01-01T00:00:00Z","validUntil":"2027-01-01T00:00:00Z","maintenanceUntil":"2026-12-31T23:59:59Z","upgradeUntil":"2026-12-31T23:59:59Z","graceDays":15,"versionRange":"\u003e=2.0.0 \u003c3.0.0","entitlements":{"ai.chat":false,"api\u003ccall\u003e\u0026daily":1000000,"export\u003cpro\u003e\u0026":true,"max_storage_gb":2.5,"max_users":100,"report.advanced":true},"binding":{"type":"fingerprint","value":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"a1b2c3d4e5f60718293a4b5c6d7e8f90","bindingPolicy":"single","seatLimit":1}`,
+		signature: "9df24668574f6a561ad8a58668c132bcb15b39c7f77914f591c55f01afcaef75ef7dcc8422c04089e401b5a4af3a71e7a0779e1666af35d5d77c1d60f6e5020d",
 	},
 	{
 		name: "最小字段永久授权",
@@ -51,12 +55,12 @@ var goldenVectors = []goldenVector{
 			Environment: "trial",
 			ValidFrom:   "2026-01-01T00:00:00Z", ValidUntil: "", MaintenanceUntil: "", UpgradeUntil: "",
 			GraceDays: 0, VersionRange: "",
-			Features: map[string]bool{}, Limits: map[string]int64{}, Binding: nil,
+			Entitlements: map[string]any{}, Binding: nil,
 			IssuedAt: "2026-08-08T12:00:00Z", KeyVersion: "license-key-2026-01", Nonce: "00000000000000000000000000000000",
 			BindingPolicy: "seats", SeatLimit: 5,
 		},
-		canonical: `{"licenseId":"LIC-2026-000456","userId":"USR-2026-000002","projectId":"PRJ-2026-000002","instanceId":"","environment":"trial","validFrom":"2026-01-01T00:00:00Z","validUntil":"","maintenanceUntil":"","upgradeUntil":"","graceDays":0,"versionRange":"","features":{},"limits":{},"binding":null,"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"00000000000000000000000000000000","bindingPolicy":"seats","seatLimit":5}`,
-		signature: "4bb18ffcad47f90fcd4e2264adaa633bf014bc57cafc810140acbb27cc69b2eb2b57cde14ca9019dbab8da9849b8daa7ea9a87e81f6a18572f7941eab944b10d",
+		canonical: `{"licenseId":"LIC-2026-000456","userId":"USR-2026-000002","projectId":"PRJ-2026-000002","instanceId":"","environment":"trial","validFrom":"2026-01-01T00:00:00Z","validUntil":"","maintenanceUntil":"","upgradeUntil":"","graceDays":0,"versionRange":"","entitlements":{},"binding":null,"issuedAt":"2026-08-08T12:00:00Z","keyVersion":"license-key-2026-01","nonce":"00000000000000000000000000000000","bindingPolicy":"seats","seatLimit":5}`,
+		signature: "f3f2abc5f1dce3c7d87dde85543eeb7199542cbf8e7095c73b5b0538ea3ab0fea4e5839ca9a51f58c3ac12f26ba41a99d2b284a723a0acbfb061142a44d50706",
 	},
 }
 

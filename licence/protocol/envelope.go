@@ -27,24 +27,26 @@ type Binding struct {
 // 新增字段只允许追加到末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。
 // userId/projectId/instanceId 使用业务编号（USR-/PRJ-/INS-），不暴露数据库自增 id。
 // 四个期限字段为 RFC3339 字符串，空串表示不限制（validUntil 空 = 永久授权）。
+// Entitlements 为统一权益表：键为项目模块编码，值为原生 bool / number（整数或小数），
+// 由 encoding/json 解析进 any 后数值一律为 float64；整数配额超出 2^53 时有精度损失
+// （配额场景不可及，不做补偿）。
 type Payload struct {
-	LicenseId        string           `json:"licenseId"`
-	UserId           string           `json:"userId"`
-	ProjectId        string           `json:"projectId"`
-	InstanceId       string           `json:"instanceId"`
-	Environment      string           `json:"environment"`
-	ValidFrom        string           `json:"validFrom"`
-	ValidUntil       string           `json:"validUntil"`
-	MaintenanceUntil string           `json:"maintenanceUntil"`
-	UpgradeUntil     string           `json:"upgradeUntil"`
-	GraceDays        int              `json:"graceDays"`
-	VersionRange     string           `json:"versionRange"`
-	Features         map[string]bool  `json:"features"`
-	Limits           map[string]int64 `json:"limits"`
-	Binding          *Binding         `json:"binding"`
-	IssuedAt         string           `json:"issuedAt"`
-	KeyVersion       string           `json:"keyVersion"`
-	Nonce            string           `json:"nonce"`
+	LicenseId        string         `json:"licenseId"`
+	UserId           string         `json:"userId"`
+	ProjectId        string         `json:"projectId"`
+	InstanceId       string         `json:"instanceId"`
+	Environment      string         `json:"environment"`
+	ValidFrom        string         `json:"validFrom"`
+	ValidUntil       string         `json:"validUntil"`
+	MaintenanceUntil string         `json:"maintenanceUntil"`
+	UpgradeUntil     string         `json:"upgradeUntil"`
+	GraceDays        int            `json:"graceDays"`
+	VersionRange     string         `json:"versionRange"`
+	Entitlements     map[string]any `json:"entitlements"`
+	Binding          *Binding       `json:"binding"`
+	IssuedAt         string         `json:"issuedAt"`
+	KeyVersion       string         `json:"keyVersion"`
+	Nonce            string         `json:"nonce"`
 	// BindingPolicy - 绑定策略：single（单机）或 seats（多机席位）
 	BindingPolicy string `json:"bindingPolicy"`
 	// SeatLimit - 席位上限；single 固定为 1，seats 至少为 2
@@ -71,7 +73,7 @@ type Envelope struct {
 }
 
 // MarshalPayload - 序列化载荷为待签名字节
-// 结构体字段顺序稳定，map 字段（features/limits）由 encoding/json 按键名排序，
+// 结构体字段顺序稳定，map 字段（entitlements）由 encoding/json 按键名排序，
 // 同一载荷任意时刻序列化结果字节一致，验签方可复现。
 func MarshalPayload(payload Payload) ([]byte, error) {
 	return json.Marshal(payload)
