@@ -1,0 +1,204 @@
+syntax = "proto3";
+
+// openpay.merchant.v1 - inis-pay 开放平台商户服务契约
+// 本文件是契约的唯一出处，由 SDK 仓库（github.com/inis-io/aide/openpay）持有；
+// pay 后端复制同名文件生成服务端桩。字段一律 snake_case 定义，
+// protojson 序列化产出 lowerCamelCase，与 HTTP 链路 JSON tag 一致，
+// 保证两条链路对同一逻辑请求产出相同签名（签名时排除空值）。
+package openpay.merchant.v1;
+
+option go_package = "openpay/merchant/v1;merchantv1";
+
+// MerchantService - 商户开放服务
+// 全部方法要求 outgoing metadata 携带 x-openpay-sign（MD5 大写签名，
+// 签名输入 = protojson 序列化请求消息 → map（排除 sign/空值）→ 字典序拼串 → &secret=<商户密钥>）
+service MerchantService {
+  rpc CreateTrade(CreateTradeRequest) returns (CreateTradeResponse);          // 统一下单
+  rpc QueryTrade(TradeQueryRequest) returns (TradeQueryResponse);             // 商户查单
+  rpc GetCheckout(CheckoutRequest) returns (CheckoutResponse);                // 收银/取支付链接
+  rpc SendTransfer(TransferRequest) returns (TransferResponse);               // 转账发起
+  rpc QueryTransfer(TransferQueryRequest) returns (TransferQueryResponse);    // 转账查询
+  rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);       // 商户通道列表
+}
+
+// ============================= 公共结构 =============================
+
+// Envelope - 统一业务信封（与 HTTP 信封 {code,msg} 对齐；code==200 成功）
+message Envelope {
+  int32  code = 1;  // 业务码（200 成功，其余失败）
+  string msg  = 2;  // 中文文案
+}
+
+// MerchantBrief - 商户展示信息（限制字段）
+message MerchantBrief {
+  string name     = 1;  // 商户名称
+  string mch_id   = 2;  // 商户号
+  string avatar   = 3;  // 头像
+  string describe = 4;  // 描述
+  string status   = 5;  // 状态
+}
+
+// Gateway - 支付网关（商户可见字段子集）
+message Gateway {
+  int32  id         = 1;  // 网关ID
+  string name       = 2;  // 网关名称
+  string scene      = 3;  // 网关平台（alipay、wechat、paypal）
+  string status     = 4;  // 状态
+  int32  is_sandbox = 5;  // 是否沙箱（0/1）
+  double cost_rate  = 6;  // 成本费率
+}
+
+// Channel - 支付/转账通道
+message Channel {
+  int32            id       = 1;  // 通道ID
+  string           code     = 2;  // 通道代码
+  string           name     = 3;  // 通道名称
+  string           currency = 4;  // 币种
+  double           fee_rate = 5;  // 通道费率
+  string           status   = 6;  // 状态
+  string           remark   = 7;  // 备注
+  repeated Gateway gateways = 8;  // 通道支持的网关
+}
+
+// Trade - 订单
+message Trade {
+  string trade_no         = 1;   // 平台订单号
+  string out_trade_no     = 2;   // 商户订单号
+  string gateway_trade_no = 3;   // 支付网关订单号
+  string mch_id           = 4;   // 商户号
+  string scene            = 5;   // 支付场景（alipay、wechat）
+  string way              = 6;   // 支付方式（scan、url）
+  double amount           = 7;   // 金额（元）
+  string currency         = 8;   // 货币
+  string status           = 9;   // 状态（created/pending/paid/fail/closed/refunding/refunded/refund-part）
+  string url              = 10;  // 支付链接
+  string describe         = 11;  // 描述
+  string remark           = 12;  // 备注
+  string notify_url       = 13;  // 异步通知URL
+  string return_url       = 14;  // 同步跳转URL
+  int64  expire_at        = 15;  // 过期时间（毫秒，0 表示永不过期）
+  int64  create_at        = 16;  // 创建时间（毫秒）
+  int64  update_at        = 17;  // 更新时间（毫秒）
+}
+
+// Trans - 转账单
+message Trans {
+  string trade_no         = 1;   // 平台转账单号
+  string out_trade_no     = 2;   // 商户转账单号
+  string gateway_trade_no = 3;   // 支付网关转账单号
+  string mch_id           = 4;   // 商户号
+  string scene            = 5;   // 支付场景
+  string way              = 6;   // 转账方式（direct、card）
+  double amount           = 7;   // 金额（元）
+  string currency         = 8;   // 货币
+  string status           = 9;   // 状态（pending/processing/success/fail/closed）
+  string payee_account    = 10;  // 收款账号
+  string payee_name       = 11;  // 收款人姓名
+  string payee_type       = 12;  // 收款方类型
+  string describe         = 13;  // 转账描述
+  string remark           = 14;  // 备注
+  int64  expire_at        = 15;  // 过期时间（毫秒）
+  int64  create_at        = 16;  // 创建时间（毫秒）
+  int64  update_at        = 17;  // 更新时间（毫秒）
+}
+
+// ============================= 交易 =============================
+
+// CreateTradeRequest - 统一下单请求（签名前须注入默认值 currency=CNY、expired=900）
+message CreateTradeRequest {
+  string mch_id       = 1;   // 商户号
+  double amount       = 2;   // 金额（元，≥0.01）
+  string channel_code = 3;   // 渠道编码（必填）
+  string currency     = 4;   // 货币（默认 CNY）
+  string describe     = 5;   // 描述（≤256）
+  int64  expired      = 6;   // 过期秒数（默认 900）
+  string out_trade_no = 7;   // 商户订单号（≤32，商户内唯一，幂等键）
+  string notify_url   = 8;   // 支付结果回调地址
+  string return_url   = 9;   // 支付完成跳转地址
+  string remark       = 10;  // 备注（≤256）
+}
+
+message CreateTradeResponse {
+  Envelope         envelope = 1;  // 业务信封
+  Trade            trade    = 2;  // 订单行
+  repeated Gateway gateways = 3;  // 可用网关
+  MerchantBrief    merchant = 4;  // 商户信息
+}
+
+// TradeQueryRequest - 商户查单（trade_no 与 out_trade_no 至少其一）
+message TradeQueryRequest {
+  string mch_id       = 1;  // 商户号
+  string trade_no     = 2;  // 平台订单号
+  string out_trade_no = 3;  // 商户订单号
+}
+
+message TradeQueryResponse {
+  Envelope envelope = 1;  // 业务信封
+  Trade    trade    = 2;  // 订单行
+}
+
+// CheckoutRequest - 收银请求（取支付链接）
+message CheckoutRequest {
+  string mch_id   = 1;  // 商户号
+  string trade_no = 2;  // 平台订单号（必填）
+  string scene    = 3;  // 支付场景（默认 alipay）
+  string way      = 4;  // 支付方式（默认 auto）
+  bool   gen_url  = 5;  // 生成支付链接（SDK 默认注入 true）
+}
+
+message CheckoutResponse {
+  Envelope         envelope = 1;  // 业务信封
+  Trade            trade    = 2;  // 订单行（支付链接在 trade.url）
+  repeated Gateway gateways = 3;  // 可用网关
+  MerchantBrief    merchant = 4;  // 商户信息
+}
+
+// ============================= 转账 =============================
+
+// TransferRequest - 转账发起（签名前须注入默认值 currency=CNY、payee_type=ALIPAY_LOGON_ID）
+message TransferRequest {
+  string mch_id                     = 1;   // 商户号
+  string channel_code               = 2;   // 渠道编码（必填）
+  string scene                      = 3;   // 支付场景（必填）
+  double amount                     = 4;   // 金额（元，≥0.01）
+  string currency                   = 5;   // 货币（默认 CNY）
+  string payee_account              = 6;   // 收款账号（必填）
+  string payee_name                 = 7;   // 收款人姓名
+  string payee_type                 = 8;   // 收款方类型（默认 ALIPAY_LOGON_ID）
+  string describe                   = 9;   // 转账描述（≤256）
+  string out_trade_no               = 10;  // 商户转账单号（≤32，幂等键）
+  string notify_url                 = 11;  // 异步通知地址
+  string remark                     = 12;  // 备注（≤256）
+  string transfer_scene_name        = 13;  // 转账场景名称（支付宝合规）
+  string transfer_scene_report_info = 14;  // 转账场景报备说明
+}
+
+message TransferResponse {
+  Envelope      envelope = 1;  // 业务信封
+  Trans         trans    = 2;  // 转账单行
+  MerchantBrief merchant = 3;  // 商户信息
+}
+
+// TransferQueryRequest - 转账查询（trade_no 与 out_trade_no 至少其一）
+message TransferQueryRequest {
+  string mch_id       = 1;  // 商户号
+  string trade_no     = 2;  // 平台转账单号
+  string out_trade_no = 3;  // 商户转账单号
+}
+
+message TransferQueryResponse {
+  Envelope envelope = 1;  // 业务信封
+  Trans    trans    = 2;  // 转账单行
+}
+
+// ============================= 通道 =============================
+
+// ListChannelsRequest - 商户通道列表请求
+message ListChannelsRequest {
+  string mch_id = 1;  // 商户号
+}
+
+message ListChannelsResponse {
+  Envelope         envelope = 1;  // 业务信封
+  repeated Channel channels = 2;  // 通道列表
+}
