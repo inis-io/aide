@@ -7,7 +7,7 @@
 - 项目名称：`aide`，模块路径 `github.com/inis-io/aide`（见 `go.mod`）。
 - 定位：一个 **Go 工具包（library，不是可执行应用）**，收录常用函数与通用服务封装，用于简化业务开发中的重复性工作。仓库根目录的 `main.go` 是空的占位文件（`func main() {}`），项目本身不产出可运行程序。
 - 安装方式：`go get github.com/inis-io/aide`。
-- Go 版本要求：`go 1.26`（`go.mod` 中声明）。
+- Go 版本要求：`go 1.27.3`（`go.mod` 中声明）。
 
 ## 技术栈与主要依赖
 
@@ -143,7 +143,7 @@ cd pay && go build ./... && go vet ./... && go test ./...       # pay 模块单�
 
 > 一次性验证全部模块可依次执行上表命令；子模块的 `go.sum` 因 `replace` 指向本地路径，首次构建会自动补齐。
 
-当前有测试的包：`licence` 模块各包（`runtime`：httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户；`protocol`：golden 字节向量、签发/验签/防篡改、版本范围与本地状态判定；`admin`：管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传；`callback`/`updater`/`proto/licence/v1` 协议矩阵自检）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、全新根目录首次原子方法回归（真实 OsFs 多级目录）、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close）、layered 分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串、增减配平与不平衡累加）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法 Incr/IncrBy/Decr/SetNX/TTL——Driver 透传、file 固定窗口与并发自增、增减配平并发回归、redis 经 miniredis 实测 Lua 路径、storeError 错误透传）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.26（windows/amd64）下均已验证通过。
+当前有测试的包：`licence` 模块各包（`runtime`：httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户；`protocol`：golden 字节向量、签发/验签/防篡改、版本范围与本地状态判定；`admin`：管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传；`callback`/`updater`/`proto/licence/v1` 协议矩阵自检）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、全新根目录首次原子方法回归（真实 OsFs 多级目录）、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close）、layered 分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串、增减配平与不平衡累加）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法 Incr/IncrBy/Decr/SetNX/TTL——Driver 透传、file 固定窗口与并发自增、增减配平并发回归、redis 经 miniredis 实测 Lua 路径、storeError 错误透传）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.27.3（windows/amd64）下均已验证通过。
 
 ## 代码风格指南
 
