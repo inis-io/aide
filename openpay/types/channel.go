@@ -1,8 +1,4 @@
-package openpay
-
-import (
-	"context"
-)
+package types
 
 // ============================= 通道 - 开始 =============================
 
@@ -24,26 +20,6 @@ type Channel struct {
 	Remark string `json:"remark"`
 	// Gateways - 通道支持的网关
 	Gateways []Gateway `json:"gateways"`
-}
-
-// ListChannels - 查询商户可用通道列表
-// 通道编码（Channel.Code）即下单/转账请求的 channelCode。
-/**
- * @param ctx context.Context - 调用上下文
- * @return []Channel - 通道列表（无可用通道时为空切片）
- * @return error - ErrTransport / ErrInvalidSign / *APIError
- * @example：
- * 	channels, err := client.ListChannels(ctx)
- * 	for _, channel := range channels { fmt.Println(channel.Code) }
- */
-func (this *Client) ListChannels(ctx context.Context) ([]Channel, error) {
-
-	channels := &[]Channel{}
-	if err := this.invoke(ctx, OpChannelList, nil, channels); err != nil {
-		return nil, err
-	}
-
-	return *channels, nil
 }
 
 // ============================= 通道 - 结束 =============================

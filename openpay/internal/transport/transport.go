@@ -1,15 +1,41 @@
-package openpay
+// Package transport - openpay SDK 的内部传输链路实现（HTTP / gRPC）。
+//
+// 本包是内部实现细节：商户不直接接触，统一经根包 openpay.Client 使用。
+// 两条链路共用 sign.Signer 与 types 的默认值注入（types.*.Normalize），
+// 因此对同一逻辑请求产出同一签名；Operation 是链路无关的稳定操作名。
+package transport
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"net/http"
+	"time"
+
+	"google.golang.org/grpc"
+
+	"github.com/inis-io/aide/openpay/sign"
 )
 
 // ============================= 传输层抽象 - 开始 =============================
 
-// mchIdField - 商户号键名（HTTP 链路须进 body/query，gRPC 链路在消息体内）
-const mchIdField = "mchId"
+// Config - 传输链路装配参数（由根包 Client 填充）
+type Config struct {
+	// Endpoint - 平台地址（如 https://pay.example.com，末尾斜杠已裁剪）
+	Endpoint string
+	// MchId - 商户号（HTTP 链路进 body/query，gRPC 链路进消息体与 metadata）
+	MchId string
+	// Secret - 商户密钥（仅本地签名使用）
+	Secret string
+	// Signer - 签名器（nil 时回退 MD5）
+	Signer sign.Signer
+	// Timeout - 单次调用超时（HTTP 链路用作内置客户端超时）
+	Timeout time.Duration
+	// UserAgent - 请求 User-Agent
+	UserAgent string
+	// HTTPClient - HTTP 链路自定义客户端（nil 时按 Timeout 内置）
+	HTTPClient *http.Client
+	// DialOpts - gRPC 拨号选项（为空时使用 plaintext）
+	DialOpts []grpc.DialOption
+}
 
 // Operation - 稳定操作名（链路无关；HTTP 映射到 method+path，gRPC 映射到 RPC 方法）
 type Operation string
@@ -46,26 +72,7 @@ type dataUnmarshaler interface {
 	UnmarshalData(raw []byte) error
 }
 
-// structToMap - 按 JSON tag 将结构体展开为签名参数集
-// 与服务端「结构体 → JSON → map」路径一致，保证签名键名（camelCase）与值形态完全相同。
-/**
- * @param value any - 待展开的结构体（指针亦可）
- * @return map[string]any - 签名参数集
- * @return error - 序列化失败（包装 ErrInvalidRequest）
- */
-func structToMap(value any) (map[string]any, error) {
-
-	text, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("%w：请求参数序列化失败（%v）", ErrInvalidRequest, err)
-	}
-
-	params := make(map[string]any)
-	if err = json.Unmarshal(text, &params); err != nil {
-		return nil, fmt.Errorf("%w：请求参数解析失败（%v）", ErrInvalidRequest, err)
-	}
-
-	return params, nil
-}
+// mchIdField - 商户号键名（HTTP 链路须进 body/query，gRPC 链路在消息体内）
+const mchIdField = "mchId"
 
 // ============================= 传输层抽象 - 结束 =============================

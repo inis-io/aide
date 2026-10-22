@@ -1,4 +1,4 @@
-package openpay
+package transport
 
 import (
 	"bytes"
@@ -8,9 +8,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+
+	"github.com/inis-io/aide/openpay/sign"
+	"github.com/inis-io/aide/openpay/types"
 )
 
 // ============================= HTTP 链路 - 开始 =============================
+
+// signField - 签名键名（body/sign 字段或 query 的 sign 参数）
+const signField = "sign"
 
 // httpRoute - HTTP 链路路由描述
 type httpRoute struct {
@@ -42,28 +49,33 @@ type httpTransport struct {
 	// secret - 商户密钥
 	secret string
 	// signer - 签名器
-	signer Signer
+	signer sign.Signer
 	// client - HTTP 客户端
 	client *http.Client
 	// userAgent - 请求 User-Agent
 	userAgent string
 }
 
-// newHTTPTransport - 按客户端配置装配 HTTP 链路
-func newHTTPTransport(client *Client) *httpTransport {
+// NewHTTP - 装配 HTTP 链路（零业务请求，纯结构装配）
+func NewHTTP(config Config) Transport {
 
-	httpClient := client.httpClient
+	signer := config.Signer
+	if signer == nil {
+		signer = sign.New()
+	}
+
+	httpClient := config.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: client.timeout}
+		httpClient = &http.Client{Timeout: config.Timeout}
 	}
 
 	return &httpTransport{
-		endpoint:  client.endpoint,
-		mchId:     client.mchId,
-		secret:    client.secret,
-		signer:    client.signer,
+		endpoint:  strings.TrimRight(config.Endpoint, "/"),
+		mchId:     config.MchId,
+		secret:    config.Secret,
+		signer:    signer,
 		client:    httpClient,
-		userAgent: client.userAgent,
+		userAgent: config.UserAgent,
 	}
 }
 
@@ -72,7 +84,7 @@ func (this *httpTransport) Invoke(ctx context.Context, op Operation, req, resp a
 
 	route, ok := httpRoutes[op]
 	if !ok {
-		return fmt.Errorf("%w：未知操作 %s", ErrInvalidRequest, op)
+		return fmt.Errorf("%w：未知操作 %s", types.ErrInvalidRequest, op)
 	}
 
 	params, err := this.payload(op, req)
@@ -92,13 +104,13 @@ func (this *httpTransport) Invoke(ctx context.Context, op Operation, req, resp a
 
 	response, err := this.client.Do(request)
 	if err != nil {
-		return fmt.Errorf("%w：HTTP 请求失败（%v）", ErrTransport, err)
+		return fmt.Errorf("%w：HTTP 请求失败（%v）", types.ErrTransport, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
 	raw, err := io.ReadAll(response.Body)
 	if err != nil {
-		return fmt.Errorf("%w：读取响应失败（%v）", ErrTransport, err)
+		return fmt.Errorf("%w：读取响应失败（%v）", types.ErrTransport, err)
 	}
 
 	return decodeEnvelope(raw, resp)
@@ -115,7 +127,7 @@ func (this *httpTransport) request(ctx context.Context, route httpRoute, params 
 	if route.method == http.MethodGet {
 		query := make(url.Values, len(params))
 		for key, value := range params {
-			if text := signValue(value); text != "" {
+			if text := sign.Value(value); text != "" {
 				query.Set(key, text)
 			}
 		}
@@ -125,7 +137,7 @@ func (this *httpTransport) request(ctx context.Context, route httpRoute, params 
 
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 		if err != nil {
-			return nil, fmt.Errorf("%w：构造 GET 请求失败（%v）", ErrTransport, err)
+			return nil, fmt.Errorf("%w：构造 GET 请求失败（%v）", types.ErrTransport, err)
 		}
 		request.Header.Set("User-Agent", this.userAgent)
 
@@ -134,12 +146,12 @@ func (this *httpTransport) request(ctx context.Context, route httpRoute, params 
 
 	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, fmt.Errorf("%w：请求序列化失败（%v）", ErrInvalidRequest, err)
+		return nil, fmt.Errorf("%w：请求序列化失败（%v）", types.ErrInvalidRequest, err)
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("%w：构造 POST 请求失败（%v）", ErrTransport, err)
+		return nil, fmt.Errorf("%w：构造 POST 请求失败（%v）", types.ErrTransport, err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", this.userAgent)
@@ -148,50 +160,50 @@ func (this *httpTransport) request(ctx context.Context, route httpRoute, params 
 }
 
 // payload - 组装签名参数集（按操作注入服务端默认值；签名由调用方在组装后追加）
-// 与 gRPC 链路共用同一批 normalize() 方法与同一个签名器，保证两链路签名语义一致。
+// 与 gRPC 链路共用同一批 Normalize() 方法与同一个签名器，保证两链路签名语义一致。
 func (this *httpTransport) payload(op Operation, req any) (map[string]any, error) {
 
 	switch op {
 
 	case OpTradeCreate:
-		in, ok := req.(*TradeCreateRequest)
+		in, ok := req.(*types.TradeCreateRequest)
 		if !ok || in == nil {
-			return nil, fmt.Errorf("%w：下单请求类型不匹配", ErrInvalidRequest)
+			return nil, fmt.Errorf("%w：下单请求类型不匹配", types.ErrInvalidRequest)
 		}
 		value := *in
-		value.normalize()
+		value.Normalize()
 		return this.signedParams(value)
 
 	case OpTradeQuery:
-		in, ok := req.(*TradeQueryRequest)
+		in, ok := req.(*types.TradeQueryRequest)
 		if !ok || in == nil {
-			return nil, fmt.Errorf("%w：查单请求类型不匹配", ErrInvalidRequest)
+			return nil, fmt.Errorf("%w：查单请求类型不匹配", types.ErrInvalidRequest)
 		}
 		return this.signedParams(*in)
 
 	case OpCheckout:
-		in, ok := req.(*CheckoutRequest)
+		in, ok := req.(*types.CheckoutRequest)
 		if !ok || in == nil {
-			return nil, fmt.Errorf("%w：收银请求类型不匹配", ErrInvalidRequest)
+			return nil, fmt.Errorf("%w：收银请求类型不匹配", types.ErrInvalidRequest)
 		}
 		value := *in
-		value.normalize()
+		value.Normalize()
 		// 收银端点为公开端点、平台不验签，且请求体无 mchId 字段，故不注入商户号
 		return structToMap(value)
 
 	case OpTransferSend:
-		in, ok := req.(*TransferRequest)
+		in, ok := req.(*types.TransferRequest)
 		if !ok || in == nil {
-			return nil, fmt.Errorf("%w：转账请求类型不匹配", ErrInvalidRequest)
+			return nil, fmt.Errorf("%w：转账请求类型不匹配", types.ErrInvalidRequest)
 		}
 		value := *in
-		value.normalize()
+		value.Normalize()
 		return this.signedParams(value)
 
 	case OpTransferQuery:
-		in, ok := req.(*TransferQueryRequest)
+		in, ok := req.(*types.TransferQueryRequest)
 		if !ok || in == nil {
-			return nil, fmt.Errorf("%w：转账查询请求类型不匹配", ErrInvalidRequest)
+			return nil, fmt.Errorf("%w：转账查询请求类型不匹配", types.ErrInvalidRequest)
 		}
 		return this.signedParams(*in)
 
@@ -199,7 +211,7 @@ func (this *httpTransport) payload(op Operation, req any) (map[string]any, error
 		return map[string]any{mchIdField: this.mchId}, nil
 	}
 
-	return nil, fmt.Errorf("%w：未知操作 %s", ErrInvalidRequest, op)
+	return nil, fmt.Errorf("%w：未知操作 %s", types.ErrInvalidRequest, op)
 }
 
 // signedParams - 请求结构体展开为签名参数集并注入商户号
@@ -214,7 +226,24 @@ func (this *httpTransport) signedParams(req any) (map[string]any, error) {
 	return params, nil
 }
 
-// decodeEnvelope - 解析平台信封 {code,msg,data}；code!=200 归一为 *APIError
+// structToMap - 按 JSON tag 将结构体展开为签名参数集
+// 与服务端「结构体 → JSON → map」路径一致，保证签名键名（camelCase）与值形态完全相同。
+func structToMap(value any) (map[string]any, error) {
+
+	text, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w：请求参数序列化失败（%v）", types.ErrInvalidRequest, err)
+	}
+
+	params := make(map[string]any)
+	if err = json.Unmarshal(text, &params); err != nil {
+		return nil, fmt.Errorf("%w：请求参数解析失败（%v）", types.ErrInvalidRequest, err)
+	}
+
+	return params, nil
+}
+
+// decodeEnvelope - 解析平台信封 {code,msg,data}；code!=200 归一为 *types.APIError
 func decodeEnvelope(raw []byte, resp any) error {
 
 	var envelope struct {
@@ -231,7 +260,7 @@ func decodeEnvelope(raw []byte, resp any) error {
 	}
 
 	if envelope.Code != 200 {
-		return &APIError{Code: envelope.Code, Msg: envelope.Msg, Raw: raw}
+		return &types.APIError{Code: envelope.Code, Msg: envelope.Msg, Raw: raw}
 	}
 
 	if resp == nil || len(envelope.Data) == 0 || string(envelope.Data) == "null" {

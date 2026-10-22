@@ -1,7 +1,6 @@
-package openpay
+package types
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -112,8 +111,8 @@ type TradeCreateRequest struct {
 	Remark string `json:"remark"`
 }
 
-// normalize - 注入服务端默认值（签名前必须执行）
-func (this *TradeCreateRequest) normalize() {
+// Normalize - 注入服务端默认值（签名前必须执行）
+func (this *TradeCreateRequest) Normalize() {
 
 	if this.Currency == "" {
 		this.Currency = defaultCurrency
@@ -152,37 +151,6 @@ func (this *TradeCreateResult) UnmarshalData(raw []byte) error {
 	return nil
 }
 
-// CreateTrade - 统一下单
-/**
- * @param ctx context.Context - 调用上下文（超时由客户端整体超时兜底）
- * @param req *TradeCreateRequest - 下单请求
- * @return *TradeCreateResult - 订单行 + 可用网关 + 商户信息
- * @return error - ErrInvalidRequest / ErrTransport / ErrInvalidSign / *APIError
- * @example：
- * 	res, err := client.CreateTrade(ctx, &openpay.TradeCreateRequest{
- * 	    Amount: 12.30, ChannelCode: "ALIPAY_PC", OutTradeNo: "OUT20260815001",
- * 	})
- */
-func (this *Client) CreateTrade(ctx context.Context, req *TradeCreateRequest) (*TradeCreateResult, error) {
-
-	if req == nil {
-		return nil, fmt.Errorf("%w：下单请求不能为空", ErrInvalidRequest)
-	}
-	if req.ChannelCode == "" {
-		return nil, fmt.Errorf("%w：channelCode 不能为空（取 ListChannels 返回的通道编码）", ErrInvalidRequest)
-	}
-	if req.Amount < 0.01 {
-		return nil, fmt.Errorf("%w：amount 必须大于等于 0.01 元", ErrInvalidRequest)
-	}
-
-	result := &TradeCreateResult{}
-	if err := this.invoke(ctx, OpTradeCreate, req, result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
 // TradeQueryRequest - 商户查单请求
 // TradeNo 与 OutTradeNo 至少提供一个；两者同时提供时平台以 TradeNo 为准。
 type TradeQueryRequest struct {
@@ -190,27 +158,6 @@ type TradeQueryRequest struct {
 	TradeNo string `json:"tradeNo"`
 	// OutTradeNo - 商户订单号
 	OutTradeNo string `json:"outTradeNo"`
-}
-
-// QueryTrade - 商户查单
-/**
- * @param ctx context.Context - 调用上下文
- * @param req *TradeQueryRequest - 查单请求
- * @return *Trade - 订单行
- * @return error - ErrInvalidRequest / ErrTransport / ErrInvalidSign / *APIError
- */
-func (this *Client) QueryTrade(ctx context.Context, req *TradeQueryRequest) (*Trade, error) {
-
-	if req == nil || (req.TradeNo == "" && req.OutTradeNo == "") {
-		return nil, fmt.Errorf("%w：tradeNo 与 outTradeNo 至少提供一个", ErrInvalidRequest)
-	}
-
-	trade := &Trade{}
-	if err := this.invoke(ctx, OpTradeQuery, req, trade); err != nil {
-		return nil, err
-	}
-
-	return trade, nil
 }
 
 // CheckoutRequest - 收银请求（取支付链接）
@@ -225,8 +172,8 @@ type CheckoutRequest struct {
 	GenUrl bool `json:"genUrl"`
 }
 
-// normalize - 注入服务端默认值（签名前必须执行）
-func (this *CheckoutRequest) normalize() {
+// Normalize - 注入服务端默认值（签名前必须执行）
+func (this *CheckoutRequest) Normalize() {
 
 	if this.Scene == "" {
 		this.Scene = defaultScene
@@ -247,28 +194,6 @@ type CheckoutResult struct {
 	Gateways []Gateway `json:"gateways"`
 	// Merchant - 商户展示信息
 	Merchant MerchantBrief `json:"merchant"`
-}
-
-// GetCheckout - 收银/取支付链接
-// scene/way 不同则生成的链接不同；同一订单可多次调用获取最新链接。
-/**
- * @param ctx context.Context - 调用上下文
- * @param req *CheckoutRequest - 收银请求
- * @return *CheckoutResult - 订单行（含支付链接）+ 网关 + 商户信息
- * @return error - ErrInvalidRequest / ErrTransport / ErrInvalidSign / *APIError
- */
-func (this *Client) GetCheckout(ctx context.Context, req *CheckoutRequest) (*CheckoutResult, error) {
-
-	if req == nil || req.TradeNo == "" {
-		return nil, fmt.Errorf("%w：tradeNo 不能为空", ErrInvalidRequest)
-	}
-
-	result := &CheckoutResult{}
-	if err := this.invoke(ctx, OpCheckout, req, result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 // ============================= 交易 - 结束 =============================

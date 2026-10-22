@@ -301,7 +301,21 @@ A：本 SDK 统一 `float64` 元（与平台模型一致）。为避免二进制
 - 退款、关单、钱包、对账单等能力尚在平台蓝图阶段；SDK 方法签名稳定，能力上线后以新增方法方式扩展（不破坏现有接口）。
 - 契约源文件 `proto/openpay/merchant/v1/merchant.proto` 是唯一事实源；平台后端复制同一份文件生成服务端桩。
 
-## 12. 相关文档
+## 12. 代码结构
+
+商户只需 `import "github.com/inis-io/aide/openpay"` 一个包：根包用类型别名与函数转发导出全部公开面，
+内部实现按职责分区（只为可维护性，不增加接入成本）。
+
+| 路径 | 作用 |
+|---|---|
+| `openpay.go` | 唯一入口：包注释 + `Client` / `Option` / `NewClient` / `Close` + 六个业务方法 + 全部别名与转发 |
+| `types/` | 公开数据模型与错误模型（各请求/响应结构、`NotifyPayload`、`APIError`、哨兵错误；零依赖） |
+| `sign/` | 公开签名器：`Signer` 接口 + MD5 实现（`sign.New()`），供 `WithSigner` 使用 |
+| `notify/` | 公开 Webhook 报文解析与验签（`ParseNotify` / `VerifyNotify`，根包已转发） |
+| `internal/transport/` | 内部传输链路（HTTP / gRPC 实现与 `Operation` 常量），商户不直接使用 |
+| `proto/` | 契约源 `openpay/merchant/v1/merchant.proto` 与生成的客户端桩（已入库，商户免装 protoc） |
+
+## 13. 相关文档
 
 - 模块 AI 约定：[AGENTS.md](AGENTS.md)
 - 包注释与 API 文档：`go doc github.com/inis-io/aide/openpay`

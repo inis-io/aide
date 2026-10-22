@@ -1,7 +1,6 @@
-package openpay
+package types
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -79,8 +78,8 @@ type TransferRequest struct {
 	TransferSceneReportInfo string `json:"transferSceneReportInfo"`
 }
 
-// normalize - 注入服务端默认值（签名前必须执行）
-func (this *TransferRequest) normalize() {
+// Normalize - 注入服务端默认值（签名前必须执行）
+func (this *TransferRequest) Normalize() {
 
 	if this.Currency == "" {
 		this.Currency = defaultCurrency
@@ -115,37 +114,6 @@ func (this *TransferResult) UnmarshalData(raw []byte) error {
 	return nil
 }
 
-// SendTransfer - 转账发起
-// 平台可能返回「待审核」的业务结果：此时 Trans.Status 为待审核态但业务码仍为 200。
-/**
- * @param ctx context.Context - 调用上下文
- * @param req *TransferRequest - 转账请求
- * @return *TransferResult - 转账单行 + 商户信息
- * @return error - ErrInvalidRequest / ErrTransport / ErrInvalidSign / *APIError
- */
-func (this *Client) SendTransfer(ctx context.Context, req *TransferRequest) (*TransferResult, error) {
-
-	if req == nil {
-		return nil, fmt.Errorf("%w：转账请求不能为空", ErrInvalidRequest)
-	}
-	if req.ChannelCode == "" {
-		return nil, fmt.Errorf("%w：channelCode 不能为空（取 ListChannels 返回的通道编码）", ErrInvalidRequest)
-	}
-	if req.PayeeAccount == "" {
-		return nil, fmt.Errorf("%w：payeeAccount 不能为空", ErrInvalidRequest)
-	}
-	if req.Amount < 0.01 {
-		return nil, fmt.Errorf("%w：amount 必须大于等于 0.01 元", ErrInvalidRequest)
-	}
-
-	result := &TransferResult{}
-	if err := this.invoke(ctx, OpTransferSend, req, result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
 // TransferQueryRequest - 转账查询请求
 // TradeNo 与 OutTradeNo 至少提供一个。
 type TransferQueryRequest struct {
@@ -153,27 +121,6 @@ type TransferQueryRequest struct {
 	TradeNo string `json:"tradeNo"`
 	// OutTradeNo - 商户转账单号
 	OutTradeNo string `json:"outTradeNo"`
-}
-
-// QueryTransfer - 转账查询
-/**
- * @param ctx context.Context - 调用上下文
- * @param req *TransferQueryRequest - 查询请求
- * @return *Trans - 转账单行
- * @return error - ErrInvalidRequest / ErrTransport / ErrInvalidSign / *APIError
- */
-func (this *Client) QueryTransfer(ctx context.Context, req *TransferQueryRequest) (*Trans, error) {
-
-	if req == nil || (req.TradeNo == "" && req.OutTradeNo == "") {
-		return nil, fmt.Errorf("%w：tradeNo 与 outTradeNo 至少提供一个", ErrInvalidRequest)
-	}
-
-	trans := &Trans{}
-	if err := this.invoke(ctx, OpTransferQuery, req, trans); err != nil {
-		return nil, err
-	}
-
-	return trans, nil
 }
 
 // ============================= 转账 - 结束 =============================

@@ -1,4 +1,9 @@
-package openpay
+// Package types - inis-pay 开放平台 SDK 的公开数据模型与错误模型。
+//
+// 本包只描述「线与模型」：各能力的请求/响应结构体（字段按平台 JSON/契约 camelCase 命名）、
+// 默认值注入（Normalize）、业务错误（APIError）与哨兵错误。不含任何传输、签名或网络逻辑，
+// 因此可被根包、sign、notify、internal/transport 各层自由引用而不产生环。
+package types
 
 import (
 	"errors"

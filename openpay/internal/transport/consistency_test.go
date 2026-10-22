@@ -1,8 +1,10 @@
-package openpay
+package transport
 
 import (
 	"context"
 	"testing"
+
+	"github.com/inis-io/aide/openpay/types"
 )
 
 // ============================= 双链路一致性测试 - 开始 =============================
@@ -18,16 +20,16 @@ func TestSignatureConsistencyAcrossTransports(t *testing.T) {
 	server, capture := startHTTPPlatform(t, func(*httpCapture) (int, string) {
 		return 200, jsonReply(t, 200, "OK", map[string]any{"row": map[string]any{"tradeNo": "202608151200000001"}})
 	})
-	httpClient := startHTTPClient(t, server.URL)
-	if _, err := httpClient.CreateTrade(ctx, newTradeCreateRequest()); err != nil {
+	httpLink := startHTTPTransport(t, server.URL)
+	if err := httpLink.Invoke(ctx, OpTradeCreate, newTradeCreateRequest(), &types.TradeCreateResult{}); err != nil {
 		t.Fatalf("HTTP 下单失败：%v", err)
 	}
-	httpSign, _ := capture.body["sign"].(string)
+	httpSign, _ := capture.body[signField].(string)
 
 	// gRPC 链路：从假服务的 incoming metadata 中取签名
 	fake := &fakeMerchantService{secret: testSecret}
-	grpcClient := startFakeGRPC(t, fake)
-	if _, err := grpcClient.CreateTrade(ctx, newTradeCreateRequest()); err != nil {
+	grpcLink := startFakeGRPC(t, fake)
+	if err := grpcLink.Invoke(ctx, OpTradeCreate, newTradeCreateRequest(), &types.TradeCreateResult{}); err != nil {
 		t.Fatalf("gRPC 下单失败：%v", err)
 	}
 	grpcSign := fake.snapshot().sign
@@ -47,8 +49,8 @@ func TestSignatureConsistencyCheckout(t *testing.T) {
 	ctx := context.Background()
 
 	fake := &fakeMerchantService{secret: testSecret}
-	client := startFakeGRPC(t, fake)
-	if _, err := client.GetCheckout(ctx, &CheckoutRequest{TradeNo: "202608151200000001"}); err != nil {
+	grpcLink := startFakeGRPC(t, fake)
+	if err := grpcLink.Invoke(ctx, OpCheckout, &types.CheckoutRequest{TradeNo: "202608151200000001"}, &types.CheckoutResult{}); err != nil {
 		t.Fatalf("gRPC 收银失败：%v", err)
 	}
 
