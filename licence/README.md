@@ -983,11 +983,11 @@ fmt.Println(rows.Count, len(rows.Records))
 
 | 方法 | 签名 | HTTP | gRPC |
 |---|---|---|---|
-| 在售目录 | `lic.PlansCatalog(ctx)` | `GET /api/v1/plans/catalog` | `PlanRuntimeService.Catalog` |
-| 下单 | `lic.PlanOrderCreate(ctx, licence.PlanOrderCreateInput{…})` | `POST /api/v1/plan-orders/create` | `PlanRuntimeService.CreateOrder` |
-| 查单 | `lic.PlanOrderQuery(ctx, orderNo)` | `POST /api/v1/plan-orders/query` | `PlanRuntimeService.QueryOrder` |
-| 取消 | `lic.PlanOrderCancel(ctx, orderNo)` | `POST /api/v1/plan-orders/cancel` | `PlanRuntimeService.CancelOrder` |
-| 订单分页 | `lic.PlanOrderRows(ctx, page)` | `GET /api/v1/plan-orders/rows` | `PlanRuntimeService.OrderRows` |
+| 在售目录 | `lic.PlansCatalog(ctx)` | `GET /api/v1/plans/catalog` | `PlanRuntimeService.PlanCatalog` |
+| 下单 | `lic.PlanOrderCreate(ctx, licence.PlanOrderCreateInput{…})` | `POST /api/v1/plan-orders/create` | `PlanRuntimeService.PlanOrderCreate` |
+| 查单 | `lic.PlanOrderQuery(ctx, orderNo)` | `POST /api/v1/plan-orders/query` | `PlanRuntimeService.PlanOrderQuery` |
+| 取消 | `lic.PlanOrderCancel(ctx, orderNo)` | `POST /api/v1/plan-orders/cancel` | `PlanRuntimeService.PlanOrderCancel` |
+| 订单分页 | `lic.PlanOrderRows(ctx, page)` | `GET /api/v1/plan-orders/rows` | `PlanRuntimeService.PlanOrderRows` |
 
 要点：
 

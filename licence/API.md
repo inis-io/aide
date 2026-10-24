@@ -512,11 +512,11 @@ type llm.Error struct {
 
 | 方法 | 签名 | HTTP | gRPC |
 |---|---|---|---|
-| 在售目录 | `func (this *Client) PlansCatalog(ctx context.Context) (PlansCatalogResult, error)` | `GET /api/v1/plans/catalog` | `PlanRuntimeService.Catalog` |
-| 下单 | `func (this *Client) PlanOrderCreate(ctx context.Context, input PlanOrderCreateInput) (PlanOrderCreateResult, error)` | `POST /api/v1/plan-orders/create` | `PlanRuntimeService.CreateOrder` |
-| 查单 | `func (this *Client) PlanOrderQuery(ctx context.Context, orderNo string) (PlanOrder, error)` | `POST /api/v1/plan-orders/query` | `PlanRuntimeService.QueryOrder` |
-| 取消 | `func (this *Client) PlanOrderCancel(ctx context.Context, orderNo string) (PlanOrder, error)` | `POST /api/v1/plan-orders/cancel` | `PlanRuntimeService.CancelOrder` |
-| 订单分页 | `func (this *Client) PlanOrderRows(ctx context.Context, page int) (PlanOrderRowsResult, error)` | `GET /api/v1/plan-orders/rows` | `PlanRuntimeService.OrderRows` |
+| 在售目录 | `func (this *Client) PlansCatalog(ctx context.Context) (PlansCatalogResult, error)` | `GET /api/v1/plans/catalog` | `PlanRuntimeService.PlanCatalog` |
+| 下单 | `func (this *Client) PlanOrderCreate(ctx context.Context, input PlanOrderCreateInput) (PlanOrderCreateResult, error)` | `POST /api/v1/plan-orders/create` | `PlanRuntimeService.PlanOrderCreate` |
+| 查单 | `func (this *Client) PlanOrderQuery(ctx context.Context, orderNo string) (PlanOrder, error)` | `POST /api/v1/plan-orders/query` | `PlanRuntimeService.PlanOrderQuery` |
+| 取消 | `func (this *Client) PlanOrderCancel(ctx context.Context, orderNo string) (PlanOrder, error)` | `POST /api/v1/plan-orders/cancel` | `PlanRuntimeService.PlanOrderCancel` |
+| 订单分页 | `func (this *Client) PlanOrderRows(ctx context.Context, page int) (PlanOrderRowsResult, error)` | `GET /api/v1/plan-orders/rows` | `PlanRuntimeService.PlanOrderRows` |
 
 **类型与常量**（`runtime/plan.go`，根包门面同名别名）：
 
