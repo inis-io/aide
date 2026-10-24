@@ -1,6 +1,6 @@
 # openpay — inis-pay 开放聚合支付平台商户 SDK
 
-`openpay` 是商户侧调用 inis-pay 开放平台的 Go SDK：统一下单、商户查单、收银取支付链接、转账发起/查询、商户通道列表，以及平台支付结果异步通知（Webhook）的解析验签。
+`openpay` 是商户侧调用 inis-pay 开放平台的 Go SDK：统一下单、商户查单、收银取支付链接、转账发起/查询、商户通道列表与凭据验证，以及平台支付结果异步通知（Webhook）的解析验签。
 
 - 模块路径：`github.com/inis-io/aide/openpay`（独立 Go 模块，与 `aide` 主模块并列）
 - 直接依赖：`google.golang.org/grpc`、`google.golang.org/protobuf`（HTTP 链路零第三方依赖）
@@ -46,6 +46,16 @@ func main() {
 
 `NewClient` 只做参数校验与链路装配，不发起任何业务请求。`Client` 无内部可变状态，可并发使用。
 
+接入方保存凭据前建议先验证一次有效性（以只读的通道列表为探针，无资金副作用）：
+
+```go
+if _, err = client.VerifyCredentials(context.Background()); err != nil {
+	// ErrInvalidSign / *APIError：凭据无效（商户不存在或密钥错误）
+	// ErrTransport：平台暂不可达，本次无法判定
+	log.Fatalf("商户凭据验证失败：%v", err)
+}
+```
+
 ## 3. 选择链路：gRPC（默认）还是 HTTP
 
 | 维度 | gRPC（默认） | HTTP |
@@ -87,6 +97,7 @@ client, err = openpay.NewClient(mchId, secret,
 | `SendTransfer` | `MerchantService/SendTransfer` | `POST /api/trans/send` | ✅ | 转账发起 |
 | `QueryTransfer` | `MerchantService/QueryTransfer` | `GET /api/trans/query` | ✅ | 转账查询 |
 | `ListChannels` | `MerchantService/ListChannels` | `GET /api/merchant/channels` | ✅ | 商户可用通道 |
+| `VerifyCredentials` | 同 `ListChannels` | 同 `ListChannels` | ✅ | 验证商户凭据是否有效（以通道列表为探针，凭据有效时一并返回通道） |
 | `ParseNotify` / `VerifyNotify` | — | — | 本地验签 | Webhook 报文解析 + 验签（与链路无关） |
 
 ## 5. 常用示例

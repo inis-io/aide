@@ -1,7 +1,7 @@
 // Package openpay - inis-pay 开放聚合支付平台的商户 SDK。
 //
 // 商户通过本包调用平台开放能力：统一下单、商户查单、收银取链接、转账发起/查询、
-// 商户通道列表，并在自有服务端处理平台的支付结果异步通知（Webhook）。
+// 商户通道列表与凭据验证，并在自有服务端处理平台的支付结果异步通知（Webhook）。
 //
 // 商户只需 import 本包：所有请求/响应模型、签名器、通知解析与错误模型都以
 // 类型别名或函数转发的方式从这里导出，内部实现拆分在以下子包：
@@ -503,3 +503,26 @@ func (this *Client) ListChannels(ctx context.Context) ([]Channel, error) {
 }
 
 // ============================= 通道 - 结束 =============================
+
+// ============================= 凭据 - 开始 =============================
+
+// VerifyCredentials - 验证商户凭据（mchId + secret）是否有效
+// 以 ListChannels（唯一只读、无资金副作用的签名端点）为探针：err == nil 即凭据有效，
+// 并返回商户可用通道列表（不关心通道时可忽略返回值）。
+// 错误语义：ErrInvalidSign / *APIError（如商户不存在、签名验证失败）= 凭据无效；
+// ErrTransport = 平台暂不可达，本次无法判定凭据有效性。
+/**
+ * @param ctx context.Context - 调用上下文
+ * @return []Channel - 商户可用通道列表
+ * @return error - ErrTransport / ErrInvalidSign / *APIError
+ * @example：
+ * 	if _, err := client.VerifyCredentials(ctx); err != nil {
+ * 	    log.Fatal("商户凭据无效或平台不可达：", err)
+ * 	}
+ */
+func (this *Client) VerifyCredentials(ctx context.Context) ([]Channel, error) {
+
+	return this.ListChannels(ctx)
+}
+
+// ============================= 凭据 - 结束 =============================

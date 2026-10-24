@@ -13,7 +13,7 @@
 ## 目录结构
 
 ```
-├── openpay.go          # 唯一入口：包注释 + Client/Option/NewClient/Close + 六个业务方法 + 全部别名与转发
+├── openpay.go          # 唯一入口：包注释 + Client/Option/NewClient/Close + 七个业务方法（含 VerifyCredentials 凭据验证探针）+ 全部别名与转发
 ├── openpay_test.go     # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、HTTP 端到端
 ├── types/              # 公开：请求/响应模型 + 错误模型（零依赖）
 │   ├── trade.go        # Trade/Gateway/MerchantBrief/TradeCreate*/TradeQuery*/Checkout* + Normalize/UnmarshalData

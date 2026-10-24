@@ -227,7 +227,7 @@ func TestNotifyForwarding(t *testing.T) {
 	}
 }
 
-// TestClientEndToEndHTTP - 门面 → HTTP 链路端到端：六个业务方法全部走通
+// TestClientEndToEndHTTP - 门面 → HTTP 链路端到端：七个业务方法全部走通
 // （同时覆盖默认值注入、信封解析与 row → 模型映射）
 func TestClientEndToEndHTTP(t *testing.T) {
 
@@ -300,6 +300,10 @@ func TestClientEndToEndHTTP(t *testing.T) {
 	channels, err := client.ListChannels(ctx)
 	if err != nil || len(channels) != 1 || channels[0].Code != "ALIPAY_PC" {
 		t.Fatalf("通道列表失败：%v %+v", err, channels)
+	}
+	verified, err := client.VerifyCredentials(ctx)
+	if err != nil || len(verified) != 1 || verified[0].Code != "ALIPAY_PC" {
+		t.Fatalf("凭据验证失败：%v %+v", err, verified)
 	}
 }
 
