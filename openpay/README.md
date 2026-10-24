@@ -102,7 +102,7 @@ ctx := context.Background()
 created, err := client.CreateTrade(ctx, &openpay.TradeCreateRequest{
 	Amount:      12.30,                 // 元
 	ChannelCode: "ALIPAY_PC",           // 取 ListChannels 返回的通道编码
-	OutTradeNo:  "OUT20260815001",      // 商户订单号 ≤32，平台以此幂等
+	OutTradeNo:  "TP-20261024-0001",     // 商户订单号 ≤32，平台以此幂等；推荐「前缀-日期-序号」格式
 	Describe:    "测试订单",
 	NotifyUrl:   "https://merchant.example.com/openpay/notify",
 	ReturnUrl:   "https://merchant.example.com/pay/return",
@@ -131,7 +131,7 @@ fmt.Println(checkout.Trade.Url)
 ```go
 trade, err := client.QueryTrade(ctx, &openpay.TradeQueryRequest{
 	TradeNo: "202608151200000001",       // 与 OutTradeNo 至少填一个
-	// OutTradeNo: "OUT20260815001",
+	// OutTradeNo: "TP-20261024-0001",
 })
 if err != nil {
 	return err
@@ -150,7 +150,7 @@ sent, err := client.SendTransfer(ctx, &openpay.TransferRequest{
 	Amount:       88.80,
 	PayeeAccount: "payee@example.com",
 	PayeeName:    "张三",
-	OutTradeNo:   "TOUT20260815001",
+	OutTradeNo:   "TF-20261024-0001",
 	Describe:     "服务报酬",
 })
 if err != nil {
@@ -158,7 +158,7 @@ if err != nil {
 }
 
 trans, err := client.QueryTransfer(ctx, &openpay.TransferQueryRequest{
-	OutTradeNo: "TOUT20260815001",
+	OutTradeNo: "TF-20261024-0001",
 })
 ```
 
@@ -218,7 +218,7 @@ Webhook 处理铁律：
 ## 7. 错误处理
 
 ```go
-trade, err := client.QueryTrade(ctx, &openpay.TradeQueryRequest{OutTradeNo: "OUT20260815001"})
+trade, err := client.QueryTrade(ctx, &openpay.TradeQueryRequest{OutTradeNo: "TP-20261024-0001"})
 switch {
 case err == nil:
 	// 成功

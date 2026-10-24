@@ -66,7 +66,7 @@ type TransferRequest struct {
 	PayeeType string `json:"payeeType"`
 	// Describe - 转账描述（≤256）
 	Describe string `json:"describe"`
-	// OutTradeNo - 商户转账单号（≤32，商户内唯一，平台以此做幂等）
+	// OutTradeNo - 商户转账单号（≤32，商户内唯一，平台以此做幂等；推荐「前缀-日期-序号」格式，如 TP-20261024-0002，便于按日对账与人工识别）
 	OutTradeNo string `json:"outTradeNo"`
 	// NotifyUrl - 异步通知地址（平台当前不消费，预留）
 	NotifyUrl string `json:"notifyUrl"`

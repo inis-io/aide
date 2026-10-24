@@ -101,7 +101,7 @@ type TradeCreateRequest struct {
 	Describe string `json:"describe"`
 	// Expired - 订单有效期（秒，默认 900，参与签名）
 	Expired int64 `json:"expired"`
-	// OutTradeNo - 商户订单号（≤32，商户内唯一，平台以此做幂等）
+	// OutTradeNo - 商户订单号（≤32，商户内唯一，平台以此做幂等；推荐「前缀-日期-序号」格式，如 TP-20261024-0002，便于按日对账与人工识别）
 	OutTradeNo string `json:"outTradeNo"`
 	// NotifyUrl - 支付结果异步通知地址（公网可达 HTTPS）
 	NotifyUrl string `json:"notifyUrl"`
