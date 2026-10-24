@@ -380,9 +380,10 @@ message PlanCatalogRequest {
 message PlanCatalogOption {
   string billing = 1;       // 计费周期：monthly / yearly / buyout
   double price = 2;         // 标价（元）
-  double sale_price = 3;    // 生效价（元，已算入生效折扣/创始价）
-  string discount_tag = 4;  // 折扣标签（如 "8折·试用期内"，无折扣为空串）
+  double sale_price = 3;    // 货架展示价（元）：该实例视角下创始价/折扣互斥后的生效价，不含升级抵扣；下单金额以服务端结算为准
+  string discount_tag = 4;  // 折扣/创始标签（如 "8折·试用期内"、"创始价"，无折扣为空串）
   int32 founder_left = 5;   // 创始价剩余名额（-1 = 非创始价）
+  double credit_amount = 6; // 升级抵扣预览（元，0 = 无）：升级视角下旧套餐剩余价值的预估抵扣，随剩余期限逐日变化，结算以 PlanOrderCreate 为准
 }
 
 // PlanCatalogItem - 在售套餐目录项

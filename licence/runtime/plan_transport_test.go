@@ -64,7 +64,7 @@ func planCannedCatalogPlans() []map[string]any {
 			"options": []map[string]any{
 				{"billing": "monthly", "price": 99.0, "salePrice": 79.2, "discountTag": "8折·试用期内", "founderLeft": -1},
 				{"billing": "yearly", "price": 999.0, "salePrice": 999.0, "discountTag": "", "founderLeft": 37},
-				{"billing": "buyout", "price": 2999.0, "salePrice": 2999.0, "discountTag": "", "founderLeft": -1},
+				{"billing": "buyout", "price": 2999.0, "salePrice": 2999.0, "discountTag": "", "founderLeft": -1, "creditAmount": 300.0},
 			},
 		},
 	}
@@ -434,7 +434,7 @@ func (this *planFakeGRPCServer) PlanCatalog(ctx context.Context, request *licenc
 				Options: []*licencev1.PlanCatalogOption{
 					{Billing: "monthly", Price: 99, SalePrice: 79.2, DiscountTag: "8折·试用期内", FounderLeft: -1},
 					{Billing: "yearly", Price: 999, SalePrice: 999, DiscountTag: "", FounderLeft: 37},
-					{Billing: "buyout", Price: 2999, SalePrice: 2999, DiscountTag: "", FounderLeft: -1},
+					{Billing: "buyout", Price: 2999, SalePrice: 2999, DiscountTag: "", FounderLeft: -1, CreditAmount: 300},
 				},
 			},
 		},
@@ -555,8 +555,8 @@ func runPlanDual(t *testing.T, run func(t *testing.T, fake *planFake, client *Cl
 
 // ============================= 用例 =============================
 
-// TestPlanDualCatalog - 双协议在售目录：套餐/计费选项逐字段解析一致（含折扣标签与创始价名额），
-// 当前付费套餐快照解析；只读调用不带幂等键
+// TestPlanDualCatalog - 双协议在售目录：套餐/计费选项逐字段解析一致（含折扣标签、创始价名额
+// 与升级抵扣预览），当前付费套餐快照解析；只读调用不带幂等键
 func TestPlanDualCatalog(t *testing.T) {
 
 	runPlanDual(t, func(t *testing.T, fake *planFake, client *Client) {
@@ -591,6 +591,9 @@ func TestPlanDualCatalog(t *testing.T) {
 		}
 		if pro.Options[1].FounderLeft != 37 {
 			t.Fatalf("创始价剩余名额不符：%+v", pro.Options[1])
+		}
+		if pro.Options[2].CreditAmount != 300 || monthly.CreditAmount != 0 {
+			t.Fatalf("升级抵扣预览不符（buyout 应为 300，非升级视角应为 0）：%+v", pro.Options)
 		}
 		if result.CurrentPlan == nil || result.CurrentPlan.PlanCode != "pro" ||
 			result.CurrentPlan.Billing != "yearly" || result.CurrentPlan.ValidUntil != planCannedValidUntil {

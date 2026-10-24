@@ -523,7 +523,7 @@ type llm.Error struct {
 | 符号 | 说明 |
 |---|---|
 | `PlanCatalogItem` | 在售套餐目录项：`PlanCode` / `PlanName` / `Grade`（档位权重，升降级判定依据）/ `Badge` / `Summary` / `Entitlements`（`map[string]any`，与载荷权益表同语义）/ `Options` |
-| `PlanCatalogOption` | 计费选项：`Billing` / `Price`（标价，元）/ `SalePrice`（生效价，元，仅供展示）/ `DiscountTag` / `FounderLeft`（创始价剩余名额，-1 = 非创始价） |
+| `PlanCatalogOption` | 计费选项：`Billing` / `Price`（标价，元）/ `SalePrice`（货架价，元：标价算入创始价或折扣后的展示价，创始价与折扣互斥、命中其一不再叠加，不含升级抵扣，仅供展示；下单金额以 `PlanOrderCreate` 结算为准）/ `DiscountTag` / `FounderLeft`（创始价剩余名额，-1 = 非创始价）/ `CreditAmount`（升级抵扣预览，元，0 = 无；仅升级视角下大于 0，随旧套餐剩余期限逐日变化，仅供展示，结算以 `PlanOrderCreate` 为准） |
 | `PlanCurrentSnapshot` | 当前生效付费套餐快照：`PlanCode` / `PlanName` / `Billing` / `ValidUntil`（RFC3339） |
 | `PlansCatalogResult` | 目录回执：`Plans` + `CurrentPlan`（无付费套餐或服务端返回空对象时归一为 `nil`） |
 | `PlanOrderCreateInput` | 下单入参：`PlanCode` / `Billing` / `RequestId`（幂等键，可选） |

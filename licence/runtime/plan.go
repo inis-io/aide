@@ -72,12 +72,17 @@ type PlanCatalogOption struct {
 	Billing string `json:"billing"`
 	// Price - 标价（元）
 	Price float64 `json:"price"`
-	// SalePrice - 生效价（元，已算入生效折扣/创始价；下单金额以服务端结算为准）
+	// SalePrice - 货架展示价（元）：按该实例视角算入生效的创始价或折扣
+	// （创始价与常规折扣/召回互斥，命中其一即不再叠加），不含升级抵扣；
+	// 仅供展示，下单金额以 PlanOrderCreate 服务端结算为准
 	SalePrice float64 `json:"salePrice"`
-	// DiscountTag - 折扣标签（如 "8折·试用期内"，无折扣为空串）
+	// DiscountTag - 折扣/创始标签（如 "8折·试用期内"、"创始价"，无折扣为空串）
 	DiscountTag string `json:"discountTag"`
 	// FounderLeft - 创始价剩余名额（-1 = 该选项非创始价）
 	FounderLeft int `json:"founderLeft"`
+	// CreditAmount - 升级抵扣预览（元，0 = 无）：升级视角下旧套餐剩余价值的预估抵扣，
+	// 随剩余期限逐日变化，仅供展示参考，结算以 PlanOrderCreate 为准
+	CreditAmount float64 `json:"creditAmount"`
 }
 
 // PlanCatalogItem - 在售套餐目录项

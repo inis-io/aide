@@ -2693,11 +2693,12 @@ func (*PlanCatalogRequest) Descriptor() ([]byte, []int) {
 // PlanCatalogOption - 套餐计费选项
 type PlanCatalogOption struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Billing       string                 `protobuf:"bytes,1,opt,name=billing,proto3" json:"billing,omitempty"`                             // 计费周期：monthly / yearly / buyout
-	Price         float64                `protobuf:"fixed64,2,opt,name=price,proto3" json:"price,omitempty"`                               // 标价（元）
-	SalePrice     float64                `protobuf:"fixed64,3,opt,name=sale_price,json=salePrice,proto3" json:"sale_price,omitempty"`      // 生效价（元，已算入生效折扣/创始价）
-	DiscountTag   string                 `protobuf:"bytes,4,opt,name=discount_tag,json=discountTag,proto3" json:"discount_tag,omitempty"`  // 折扣标签（如 "8折·试用期内"，无折扣为空串）
-	FounderLeft   int32                  `protobuf:"varint,5,opt,name=founder_left,json=founderLeft,proto3" json:"founder_left,omitempty"` // 创始价剩余名额（-1 = 非创始价）
+	Billing       string                 `protobuf:"bytes,1,opt,name=billing,proto3" json:"billing,omitempty"`                                 // 计费周期：monthly / yearly / buyout
+	Price         float64                `protobuf:"fixed64,2,opt,name=price,proto3" json:"price,omitempty"`                                   // 标价（元）
+	SalePrice     float64                `protobuf:"fixed64,3,opt,name=sale_price,json=salePrice,proto3" json:"sale_price,omitempty"`          // 货架展示价（元）：该实例视角下创始价/折扣互斥后的生效价，不含升级抵扣；下单金额以服务端结算为准
+	DiscountTag   string                 `protobuf:"bytes,4,opt,name=discount_tag,json=discountTag,proto3" json:"discount_tag,omitempty"`      // 折扣/创始标签（如 "8折·试用期内"、"创始价"，无折扣为空串）
+	FounderLeft   int32                  `protobuf:"varint,5,opt,name=founder_left,json=founderLeft,proto3" json:"founder_left,omitempty"`     // 创始价剩余名额（-1 = 非创始价）
+	CreditAmount  float64                `protobuf:"fixed64,6,opt,name=credit_amount,json=creditAmount,proto3" json:"credit_amount,omitempty"` // 升级抵扣预览（元，0 = 无）：升级视角下旧套餐剩余价值的预估抵扣，随剩余期限逐日变化，结算以 PlanOrderCreate 为准
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2763,6 +2764,13 @@ func (x *PlanCatalogOption) GetDiscountTag() string {
 func (x *PlanCatalogOption) GetFounderLeft() int32 {
 	if x != nil {
 		return x.FounderLeft
+	}
+	return 0
+}
+
+func (x *PlanCatalogOption) GetCreditAmount() float64 {
+	if x != nil {
+		return x.CreditAmount
 	}
 	return 0
 }
@@ -3738,14 +3746,15 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x06groups\x18\x02 \x01(\v2,.licenhub.licence.v1.ConfigPushbackDiffStatsR\x06groups\x12F\n" +
 	"\aconfigs\x18\x03 \x01(\v2,.licenhub.licence.v1.ConfigPushbackDiffStatsR\aconfigs\x12\x1b\n" +
 	"\tpushed_at\x18\x04 \x01(\tR\bpushedAt\"\x14\n" +
-	"\x12PlanCatalogRequest\"\xa8\x01\n" +
+	"\x12PlanCatalogRequest\"\xcd\x01\n" +
 	"\x11PlanCatalogOption\x12\x18\n" +
 	"\abilling\x18\x01 \x01(\tR\abilling\x12\x14\n" +
 	"\x05price\x18\x02 \x01(\x01R\x05price\x12\x1d\n" +
 	"\n" +
 	"sale_price\x18\x03 \x01(\x01R\tsalePrice\x12!\n" +
 	"\fdiscount_tag\x18\x04 \x01(\tR\vdiscountTag\x12!\n" +
-	"\ffounder_left\x18\x05 \x01(\x05R\vfounderLeft\"\x80\x02\n" +
+	"\ffounder_left\x18\x05 \x01(\x05R\vfounderLeft\x12#\n" +
+	"\rcredit_amount\x18\x06 \x01(\x01R\fcreditAmount\"\x80\x02\n" +
 	"\x0fPlanCatalogItem\x12\x1b\n" +
 	"\tplan_code\x18\x01 \x01(\tR\bplanCode\x12\x1b\n" +
 	"\tplan_name\x18\x02 \x01(\tR\bplanName\x12\x14\n" +

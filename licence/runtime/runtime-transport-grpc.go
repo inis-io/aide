@@ -1599,6 +1599,7 @@ func planCatalogOptionMap(option *licencev1.PlanCatalogOption) map[string]any {
 	return map[string]any{
 		"billing": option.GetBilling(), "price": option.GetPrice(), "salePrice": option.GetSalePrice(),
 		"discountTag": option.GetDiscountTag(), "founderLeft": option.GetFounderLeft(),
+		"creditAmount": option.GetCreditAmount(),
 	}
 }
 
