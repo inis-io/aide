@@ -572,6 +572,30 @@ type WalletLog struct {
 	CreateAt int64 `json:"createAt"`
 }
 
+// BalanceLogRow - 余额流水行（平台 service/apis.BalanceLogRow）
+// 嵌入 WalletLog 保持 JSON 扁平输出（流水字段不变，仅追加三个归属用户展示字段）；
+// 用户缺失（已删除/无权查看）时展示字段为空串，由调用方回退 #ID。
+type BalanceLogRow struct {
+	WalletLog
+	// UserAccount - 归属用户账号
+	UserAccount string `json:"userAccount"`
+	// UserNickname - 归属用户昵称
+	UserNickname string `json:"userNickname"`
+	// UserAvatar - 归属用户头像
+	UserAvatar string `json:"userAvatar"`
+}
+
+// AccountRow - 余额账户行（平台 service/apis.AccountRow，口径同 BalanceLogRow）
+type AccountRow struct {
+	WalletAccount
+	// UserAccount - 归属用户账号
+	UserAccount string `json:"userAccount"`
+	// UserNickname - 归属用户昵称
+	UserNickname string `json:"userNickname"`
+	// UserAvatar - 归属用户头像
+	UserAvatar string `json:"userAvatar"`
+}
+
 // WalletState - 钱包变更结果（平台 service/apis.BalanceState，Adjust 接口的 data）
 type WalletState struct {
 	// UserId - 归属用户ID

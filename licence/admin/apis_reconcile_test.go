@@ -624,6 +624,10 @@ var apisShapeFiles = []apisShapeFile{
 	{sdkType: "ApisBill", serverType: "ApisBill", serverFile: "backend/app/models/basic/apis-billing.go"},
 	{sdkType: "WalletAccount", serverType: "WalletAccount", serverFile: "backend/app/models/basic/wallet.go"},
 	{sdkType: "WalletLog", serverType: "WalletLog", serverFile: "backend/app/models/basic/wallet.go"},
+
+	// 输出：余额管理视图（内嵌钱包模型 + 归属用户展示字段）
+	{sdkType: "BalanceLogRow", serverType: "BalanceLogRow", serverFile: "backend/app/service/apis/balance.go"},
+	{sdkType: "AccountRow", serverType: "AccountRow", serverFile: "backend/app/service/apis/balance.go"},
 	{sdkType: "ApisUsageRecord", serverType: "ApisUsageRecord", serverFile: "backend/app/models/basic/apis-usage.go"},
 	{sdkType: "ApisUsageDaily", serverType: "ApisUsageDaily", serverFile: "backend/app/models/basic/apis-usage.go"},
 

@@ -591,10 +591,10 @@ func (this *ApisResource) GetWalletSpent(ctx context.Context) (*WalletSpentResul
 }
 
 // FindWalletLogs - 钱包流水分页（member 强制本人；平台侧按数据范围）：GET /api/wallet-accounts/logs
-// 权限码 wallet.account.read。
-func (this *ApisResource) FindWalletLogs(ctx context.Context, params *WalletLogQuery) (*Page[WalletLog], error) {
+// 权限码 wallet.account.read；返回行追加归属用户展示字段（userAccount/userNickname/userAvatar）。
+func (this *ApisResource) FindWalletLogs(ctx context.Context, params *WalletLogQuery) (*Page[BalanceLogRow], error) {
 
-	var result Page[WalletLog]
+	var result Page[BalanceLogRow]
 	if err := this.client.get(ctx, "/api/wallet-accounts/logs", params, &result); err != nil {
 		return nil, err
 	}
@@ -638,10 +638,10 @@ func (this *ApisResource) SetWalletStatus(ctx context.Context, userId int, statu
 }
 
 // FindManageWallets - 钱包账户运营分页（平台侧，按用户/状态筛选）：GET /api/wallet-accounts/manage/find
-// 权限码 wallet.account.manage。
-func (this *ApisResource) FindManageWallets(ctx context.Context, params *WalletAccountQuery) (*Page[WalletAccount], error) {
+// 权限码 wallet.account.manage；返回行追加归属用户展示字段（userAccount/userNickname/userAvatar）。
+func (this *ApisResource) FindManageWallets(ctx context.Context, params *WalletAccountQuery) (*Page[AccountRow], error) {
 
-	var result Page[WalletAccount]
+	var result Page[AccountRow]
 	if err := this.client.get(ctx, "/api/wallet-accounts/manage/find", params, &result); err != nil {
 		return nil, err
 	}
@@ -773,10 +773,10 @@ func (this *ApisResource) ExportMonitorBills(ctx context.Context, params *ApisBi
 
 // FindMonitorBalanceLogs - 钱包流水监控分页（平台全量，按用户/类型/单号筛选）：
 // GET /api/apis-monitor/logs/find
-// 权限码 apis.monitor.read。
-func (this *ApisResource) FindMonitorBalanceLogs(ctx context.Context, params *WalletLogQuery) (*Page[WalletLog], error) {
+// 权限码 apis.monitor.read；返回行追加归属用户展示字段（userAccount/userNickname/userAvatar）。
+func (this *ApisResource) FindMonitorBalanceLogs(ctx context.Context, params *WalletLogQuery) (*Page[BalanceLogRow], error) {
 
-	var result Page[WalletLog]
+	var result Page[BalanceLogRow]
 	if err := this.client.get(ctx, "/api/apis-monitor/logs/find", params, &result); err != nil {
 		return nil, err
 	}
