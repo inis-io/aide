@@ -36,6 +36,7 @@ type (
 	Envelope     = LicenceProtocol.Envelope
 	LicenceClass = LicenceProtocol.LicenceClass
 	Payload      = LicenceProtocol.Payload
+	PayloadPlan  = LicenceProtocol.PayloadPlan
 )
 
 var CompareVersion = LicenceProtocol.CompareVersion
@@ -183,4 +184,34 @@ type (
 	StarPromoteOrderCancelResult = LicenceRuntime.StarPromoteOrderCancelResult
 	StarReportPromoteStatsInput  = LicenceRuntime.StarReportPromoteStatsInput
 	StarReportOutcomeInput       = LicenceRuntime.StarReportOutcomeInput
+)
+
+// ============================= 项目套餐目录与订单（镜像 runtime 包） =============================
+
+const (
+	PlanBillingBuyout  = LicenceRuntime.PlanBillingBuyout
+	PlanBillingMonthly = LicenceRuntime.PlanBillingMonthly
+	PlanBillingYearly  = LicenceRuntime.PlanBillingYearly
+
+	PlanOrderStatusPending   = LicenceRuntime.PlanOrderStatusPending
+	PlanOrderStatusPaid      = LicenceRuntime.PlanOrderStatusPaid
+	PlanOrderStatusCancelled = LicenceRuntime.PlanOrderStatusCancelled
+	PlanOrderStatusClosed    = LicenceRuntime.PlanOrderStatusClosed
+
+	PlanOrderTypePurchase = LicenceRuntime.PlanOrderTypePurchase
+	PlanOrderTypeRenew    = LicenceRuntime.PlanOrderTypeRenew
+	PlanOrderTypeUpgrade  = LicenceRuntime.PlanOrderTypeUpgrade
+)
+
+var ErrPlanNotActivated = LicenceRuntime.ErrPlanNotActivated
+
+type (
+	PlanCatalogItem       = LicenceRuntime.PlanCatalogItem
+	PlanCatalogOption     = LicenceRuntime.PlanCatalogOption
+	PlanCurrentSnapshot   = LicenceRuntime.PlanCurrentSnapshot
+	PlanOrder             = LicenceRuntime.PlanOrder
+	PlanOrderCreateInput  = LicenceRuntime.PlanOrderCreateInput
+	PlanOrderCreateResult = LicenceRuntime.PlanOrderCreateResult
+	PlanOrderRowsResult   = LicenceRuntime.PlanOrderRowsResult
+	PlansCatalogResult    = LicenceRuntime.PlansCatalogResult
 )

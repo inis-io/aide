@@ -51,6 +51,19 @@ type Payload struct {
 	BindingPolicy string `json:"bindingPolicy"`
 	// SeatLimit - 席位上限；single 固定为 1，seats 至少为 2
 	SeatLimit int `json:"seatLimit"`
+	// Plan - 当前生效付费套餐快照（购买/升级/续费支付成功后由平台追加签发；
+	// nil = 免费授权/无套餐。omitempty 保证存量载荷（无该字段）canonical 字节不变，golden 向量不受追加影响）
+	Plan *PayloadPlan `json:"plan,omitempty"`
+}
+
+// PayloadPlan - 载荷套餐快照（字段顺序即签名内容，同样只许追加）
+type PayloadPlan struct {
+	// Code - 套餐编码
+	Code string `json:"code"`
+	// Name - 套餐名称
+	Name string `json:"name"`
+	// Billing - 计费周期（monthly / yearly / buyout）
+	Billing string `json:"billing"`
 }
 
 // normalizePayload - 为历史无席位字段信封补齐 single/1 解释。

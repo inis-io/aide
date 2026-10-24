@@ -32,7 +32,7 @@
 ├── logx/        # 日志：zap + lumberjack 结构化日志，按级别分文件精确收录，单例 + 独立实例（**嵌套独立模块**）
 ├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理（**嵌套独立模块**，依赖 logx）
 ├── pay/         # 支付能力工厂（**嵌套独立模块** `github.com/inis-io/aide/pay`，有自己的 go.mod，不参与父模块 `go build ./...`）：支付协议 + 统一 Driver + 多网关 Pool，providers/ 内置支付宝 / 微信 V3 / PayPal 适配，约定详见 pay/AGENTS.md
-├── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：根包 = 纯门面别名层（下游 `import licence` 零改动）；实现子包 `runtime/`（运行面客户端：激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储 + 在线更新 + SaaS 租户）、`protocol/`（契约镜像：信封/签发验签/状态码/版本范围/canonical 助手）；另有 `admin/`（管理面 AdminClient）、`updater/`（自更新执行器）、`callback/`（回调接收 + 事件订阅）、`config/`（配置校验引擎，licen-hub backend 复用）、`apis/`（API 商城 typed 方法包，按能力子包分类：根包挂载 `lic.Apis.IPLocate.Query` / `lic.Apis.Email.Send` 能力子资源并 re-export 共享件，`Invoke`/`Usage` 跨能力方法留根包，共享核心件在 `apis/core`；另有 `apis/llm` LLM 网关独立轻客户端——sk-key Bearer 认证、不挂 `lic.Apis`、只依赖标准库）
+├── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：根包 = 纯门面别名层（下游 `import licence` 零改动）；实现子包 `runtime/`（运行面客户端：激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储 + 在线更新 + SaaS 租户 + 项目套餐目录与订单）、`protocol/`（契约镜像：信封/签发验签/状态码/版本范围/canonical 助手）；另有 `admin/`（管理面 AdminClient）、`updater/`（自更新执行器）、`callback/`（回调接收 + 事件订阅）、`config/`（配置校验引擎，licen-hub backend 复用）、`apis/`（API 商城 typed 方法包，按能力子包分类：根包挂载 `lic.Apis.IPLocate.Query` / `lic.Apis.Email.Send` 能力子资源并 re-export 共享件，`Invoke`/`Usage` 跨能力方法留根包，共享核心件在 `apis/core`；另有 `apis/llm` LLM 网关独立轻客户端——sk-key Bearer 认证、不挂 `lic.Apis`、只依赖标准库）
 └── openpay/     # inis-pay 开放平台商户 SDK（**嵌套独立模块** `github.com/inis-io/aide/openpay`，有自己的 go.mod，不参与父模块 `go build ./...`）：根目录只有门面入口 `openpay.go`（`Client` + 七个业务方法（含 `VerifyCredentials` 凭据验证探针）+ 全部类型别名/转发），实现分区 `types/`（零依赖模型与错误）+ `sign/`（公开签名器，与服务端 `utils.Md5.GenSign` 逐字节等价）+ `notify/`（Webhook 验签）+ `internal/transport/`（HTTP/gRPC 双链路，默认 gRPC，`WithTransportHTTP()` 切换）；`proto/openpay/merchant/v1/merchant.proto` 为契约唯一出处，生成桩提交入库，约定详见 openpay/AGENTS.md
 ```
 
@@ -101,7 +101,7 @@
 
 > 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
 
-- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，86 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/发放兑换/配置回推；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（按能力
+- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，138 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/发放兑换/配置回推/项目套餐目录与订单；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（按能力
   子包分类：`core/` 共享核心件 + `iplocate`/`email` 能力子包，根包挂载能力子资源并 re-export
   共享件，`Invoke`/`Usage` 跨能力方法留根包））。依赖方向：根包（门面）→ `runtime`/`protocol`；`runtime` → `protocol`/`config`/`apis`；`admin`/`updater`/`callback` → `runtime` + `protocol`，编译期保证无环；详见 `licence/AGENTS.md`。
 - **纯函数层**（`protocol/` 包：`envelope.go` / `sign.go` / `licence.go`）：`Issue`（签发）、`VerifyEnvelope`/`VerifyRaw`（验签）、`Parse`/`ParseEnvelope`（解析）、`GenerateKeyPair`、`Nonce`。信封格式（`Envelope`/`Payload`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**

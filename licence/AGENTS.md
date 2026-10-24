@@ -6,8 +6,8 @@
 ## 模块定位与当前状态
 
 - 本目录是 Licen Hub 的 Go SDK，按职责拆为「门面根包 + 实现子包」：
-  根包 = 纯门面（`doc.go` + `facade.go`，86 个导出符号全部以别名镜像，无任何实现）；
-  `runtime/` = 运行面 `Client` + 传输/指纹/安全存储/SaaS/在线更新/发放兑换/配置回推；
+  根包 = 纯门面（`doc.go` + `facade.go`，138 个导出符号全部以别名镜像，无任何实现）；
+  `runtime/` = 运行面 `Client` + 传输/指纹/安全存储/SaaS/在线更新/发放兑换/配置回推/项目套餐目录与订单；
   `protocol/` = 平台契约镜像层（信封/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
@@ -26,7 +26,7 @@
 ```text
 licence/
 ├── doc.go + facade.go # 根包 licence：纯门面别名（客户项目接入的唯一必引包）
-├── runtime/          # 运行面 Client、传输（HTTP/gRPC）、指纹、存储、SaaS、更新、发放、回推
+├── runtime/          # 运行面 Client、传输（HTTP/gRPC）、指纹、存储、SaaS、更新、发放、回推、套餐目录与订单
 ├── protocol/         # 平台契约镜像层（信封/签名/状态码/版本范围；licen-hub backend 直接 import）
 ├── admin/            # 管理面 AdminClient（admin.go + admin-types.go/apis-types.go + admin-transport*.go + 15 个资源文件）
 ├── updater/          # 在线更新执行器（自更新 swap/unpack/restart/state）

@@ -352,3 +352,117 @@ message ConfigPushbackDefinitionsResponse {
   ConfigPushbackDiffStats configs = 3;
   string pushed_at = 4;
 }
+
+// PlanRuntimeService - 项目套餐运行面（在售目录查询 + 套餐订单：购买/升级/续费下单、查单、取消、订单分页）。
+// 与 activate/validate 同套实例签名防重放（activation-sign-v1，凭证锚定部署实例）；
+// 金额在线上一律 double 元（服务端内部为万分，边界换算由服务端负责）；
+// 失败语义与星链/API 商城同口径：业务拒绝经 errdetails.ErrorInfo.Reason 携带业务码
+// （INVALID_ARGUMENT / NOT_FOUND / INVALID_STATE / CONFLICT 等），SDK 归一为与 HTTP 失败信封同形的 {code,msg,detail}。
+service PlanRuntimeService {
+  // PlanCatalog - 在售套餐目录（含当前生效付费套餐快照，无付费套餐时 current_plan 缺省）
+  rpc PlanCatalog(PlanCatalogRequest) returns (PlanCatalogResponse);
+  // PlanOrderCreate - 套餐下单（购买/升级/续费由服务端按当前套餐自动判定；
+  // 幂等键 = request_id，同时经 metadata x-request-id 透传，重试返回既有订单）
+  rpc PlanOrderCreate(PlanOrderCreateRequest) returns (PlanOrderCreateResponse);
+  // PlanOrderQuery - 查单（按订单号，仅本实例订单；他实例订单模糊 NotFound）
+  rpc PlanOrderQuery(PlanOrderQueryRequest) returns (PlanOrderResponse);
+  // PlanOrderCancel - 取消订单（仅 pending；非 pending 返回 FailedPrecondition/INVALID_STATE）
+  rpc PlanOrderCancel(PlanOrderCancelRequest) returns (PlanOrderResponse);
+  // PlanOrderRows - 本实例订单分页（create_at 倒序）
+  rpc PlanOrderRows(PlanOrderRowsRequest) returns (PlanOrderRowsResponse);
+}
+
+// PlanCatalogRequest - 在售套餐目录请求（凭证锚定许可证与实例，无额外入参）
+message PlanCatalogRequest {
+}
+
+// PlanCatalogOption - 套餐计费选项
+message PlanCatalogOption {
+  string billing = 1;       // 计费周期：monthly / yearly / buyout
+  double price = 2;         // 标价（元）
+  double sale_price = 3;    // 生效价（元，已算入生效折扣/创始价）
+  string discount_tag = 4;  // 折扣标签（如 "8折·试用期内"，无折扣为空串）
+  int32 founder_left = 5;   // 创始价剩余名额（-1 = 非创始价）
+}
+
+// PlanCatalogItem - 在售套餐目录项
+message PlanCatalogItem {
+  string plan_code = 1;
+  string plan_name = 2;
+  int32 grade = 3;                // 档位权重（0-1000，升降级判定依据）
+  string badge = 4;               // 营销角标
+  string summary = 5;             // 一句话卖点
+  bytes entitlements_json = 6;    // 权益表 JSON 原文（map：模块编码 → bool/数值），原样透传不重序列化
+  repeated PlanCatalogOption options = 7;
+}
+
+// PlanCurrentSnapshot - 当前生效付费套餐快照
+message PlanCurrentSnapshot {
+  string plan_code = 1;
+  string plan_name = 2;
+  string billing = 3;
+  string valid_until = 4;  // RFC3339，与许可证载荷期限字段同格式
+}
+
+// PlanCatalogResponse - 在售套餐目录响应
+message PlanCatalogResponse {
+  repeated PlanCatalogItem plans = 1;
+  PlanCurrentSnapshot current_plan = 2;  // 无付费套餐时为 null
+}
+
+// PlanOrderCreateRequest - 套餐下单请求
+message PlanOrderCreateRequest {
+  string plan_code = 1;
+  string billing = 2;     // 计费周期：monthly / yearly / buyout
+  string request_id = 3;  // 幂等键（SDK 缺省自动生成 req_ 前缀；服务端按实例+request_id 去重）
+}
+
+// PlanOrderCreateResponse - 套餐下单回执
+message PlanOrderCreateResponse {
+  string order_no = 1;
+  double amount = 2;      // 应付金额（元）
+  string pay_url = 3;     // inis-pay 收银台链接
+  int64 expired_at = 4;   // 收银台过期时间（毫秒）
+}
+
+// PlanOrderQueryRequest - 查单请求
+message PlanOrderQueryRequest {
+  string order_no = 1;
+}
+
+// PlanOrderCancelRequest - 取消订单请求（幂等键取 order_no，经 metadata x-request-id 透传）
+message PlanOrderCancelRequest {
+  string order_no = 1;
+}
+
+// PlanOrderItem - 套餐订单条目（query/cancel/rows 共用）
+message PlanOrderItem {
+  string order_no = 1;
+  string order_type = 2;  // purchase / upgrade / renew
+  string plan_code = 3;
+  string plan_name = 4;
+  string billing = 5;
+  double amount = 6;      // 金额（元）
+  string status = 7;      // pending / paid / cancelled / closed
+  string pay_url = 8;     // 收银台链接（仅 pending 有值）
+  int64 paid_at = 9;      // 支付时间（毫秒，0 = 未支付）
+  int64 create_at = 10;   // 下单时间（毫秒）
+}
+
+// PlanOrderResponse - 单订单响应（query/cancel 共用）
+message PlanOrderResponse {
+  PlanOrderItem order = 1;
+}
+
+// PlanOrderRowsRequest - 订单分页请求
+message PlanOrderRowsRequest {
+  int32 page = 1;   // 页码（1 起）
+  int32 limit = 2;  // 每页条数（0 = 服务端默认）
+}
+
+// PlanOrderRowsResponse - 订单分页响应
+message PlanOrderRowsResponse {
+  repeated PlanOrderItem records = 1;
+  int64 count = 2;
+  int32 page = 3;
+}

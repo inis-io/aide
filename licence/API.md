@@ -15,6 +15,7 @@
 5. [实例指纹](#5-实例指纹)
 6. [安全存储接口](#6-安全存储接口)
 7. [运行面客户端 Client](#7-运行面客户端-client)
+   - [项目套餐（在售目录与套餐订单）](#76-项目套餐在售目录与套餐订单)
 8. [在线更新模块](#8-在线更新模块)
 9. [SaaS 多租户接口](#9-saas-多租户接口)
 10. [管理面客户端 AdminClient](#10-管理面客户端-adminclient)
@@ -126,6 +127,7 @@ type GRPCOptions struct {
 | `EventSaasTenantReissued` | `saas.tenant.reissued` | 套餐权益变更联动重签（plan-propagate）或平台纠错重签后租户信封已刷新（features/limits/menuCodes），回调 `data` 含 `{tenantId, tenantCode, planId, planCode, action?}` |
 | `EventPlatformConfigUpdated` | `platform.config.updated` | 平台配置值已更新，回调 `data` 含 `{configKey, projectId}` |
 | `EventPlatformConfigDefinitionChanged` | `platform.config.definition.changed` | 平台配置项定义已变更，回调 `data` 含 `{configKey, version}`（新增/修改）；删除/恢复路径当前为 `{configIds}`（批量删）或 `{configId}`（逐项），口径待统一，下游应以事件为失效信号、按 `PlatformConfigSync` 拉全量收敛 |
+| `EventLicensePlanChanged` | `license.plan.changed` | 许可证套餐已变更（套餐订单支付成功 / 平台侧套餐调整联动重签），回调 `data` 含 `{planCode, planName, billing, validUntil}`；收到后应调 `Current` 拉取重签信封，载荷 `plan` 快照（`PayloadPlan`，见 §3.1）即新套餐 |
 
 ---
 
@@ -155,6 +157,9 @@ type GRPCOptions struct {
 | `IssuedAt` | `string` | 签发时间（RFC3339） |
 | `KeyVersion` | `string` | 签名密钥版本（选公钥用） |
 | `Nonce` | `string` | 防重放随机值 |
+| `BindingPolicy` | `string` | 绑定策略：`single`（单机）/ `seats`（多机席位），历史无该字段的信封按 `single` 缺省解释 |
+| `SeatLimit` | `int` | 席位上限（`single` 固定为 1，`seats` 至少为 2） |
+| `Plan` | `*PayloadPlan` | 当前生效付费套餐快照（`plan,omitempty`：`{code, name, billing}`；`nil` = 免费授权/无套餐，不进 canonical，存量签名不受影响） |
 
 #### `Envelope` - 签名信封
 
@@ -494,6 +499,54 @@ type llm.Error struct {
   方法末参 `requestId ...string` 单次覆盖；重试必须复用同一值（同一 X-Request-Id 重放不重复扣费）。
 - **契约出处**：licen-hub `docs/plan/apis/10-LLM网关客户端接入与SDK封装设计方案.md`（错误码表 §3.3）；
   服务端为 `backend/app/api/control/apis/runtime/llm-runtime.go`。
+
+---
+
+### 7.6 项目套餐（在售目录与套餐订单）
+
+项目套餐（付费授权档位）的运行面自助链路挂在已激活的根 `Client` 上，五个 typed 方法与运行面同套
+双协议传输与 `activation-sign-v1` 请求签名。licen-hub 为收款商户（inis-pay 收银台）：下单返回
+收银台链接，客户在收银台完成支付；SDK 只负责下单/查单/取消。支付成功由平台发出
+`license.plan.changed` 回调事件并联动重签许可证信封（载荷追加 `plan` 快照，见 §3.1 `Payload.Plan`），
+客户端收到事件后调 `Current` 拉取新信封即生效。
+
+| 方法 | 签名 | HTTP | gRPC |
+|---|---|---|---|
+| 在售目录 | `func (this *Client) PlansCatalog(ctx context.Context) (PlansCatalogResult, error)` | `GET /api/v1/plans/catalog` | `PlanRuntimeService.Catalog` |
+| 下单 | `func (this *Client) PlanOrderCreate(ctx context.Context, input PlanOrderCreateInput) (PlanOrderCreateResult, error)` | `POST /api/v1/plan-orders/create` | `PlanRuntimeService.CreateOrder` |
+| 查单 | `func (this *Client) PlanOrderQuery(ctx context.Context, orderNo string) (PlanOrder, error)` | `POST /api/v1/plan-orders/query` | `PlanRuntimeService.QueryOrder` |
+| 取消 | `func (this *Client) PlanOrderCancel(ctx context.Context, orderNo string) (PlanOrder, error)` | `POST /api/v1/plan-orders/cancel` | `PlanRuntimeService.CancelOrder` |
+| 订单分页 | `func (this *Client) PlanOrderRows(ctx context.Context, page int) (PlanOrderRowsResult, error)` | `GET /api/v1/plan-orders/rows` | `PlanRuntimeService.OrderRows` |
+
+**类型与常量**（`runtime/plan.go`，根包门面同名别名）：
+
+| 符号 | 说明 |
+|---|---|
+| `PlanCatalogItem` | 在售套餐目录项：`PlanCode` / `PlanName` / `Grade`（档位权重，升降级判定依据）/ `Badge` / `Summary` / `Entitlements`（`map[string]any`，与载荷权益表同语义）/ `Options` |
+| `PlanCatalogOption` | 计费选项：`Billing` / `Price`（标价，元）/ `SalePrice`（生效价，元，仅供展示）/ `DiscountTag` / `FounderLeft`（创始价剩余名额，-1 = 非创始价） |
+| `PlanCurrentSnapshot` | 当前生效付费套餐快照：`PlanCode` / `PlanName` / `Billing` / `ValidUntil`（RFC3339） |
+| `PlansCatalogResult` | 目录回执：`Plans` + `CurrentPlan`（无付费套餐或服务端返回空对象时归一为 `nil`） |
+| `PlanOrderCreateInput` | 下单入参：`PlanCode` / `Billing` / `RequestId`（幂等键，可选） |
+| `PlanOrderCreateResult` | 下单回执：`OrderNo` / `Amount`（元）/ `PayUrl`（收银台链接）/ `ExpiredAt`（毫秒）/ `RequestId`（实际用键回显） |
+| `PlanOrder` | 订单条目：`OrderNo` / `OrderType` / `PlanCode` / `PlanName` / `Billing` / `Amount` / `Status` / `PayUrl`（仅 pending 有值）/ `PaidAt` / `CreateAt`（毫秒） |
+| `PlanOrderRowsResult` | 分页回执：`Records`（createAt 倒序）/ `Count` / `Page` |
+| `PlanBillingMonthly` / `PlanBillingYearly` / `PlanBillingBuyout` | 计费周期：`monthly` / `yearly` / `buyout` |
+| `PlanOrderTypePurchase` / `PlanOrderTypeUpgrade` / `PlanOrderTypeRenew` | 订单类型：新购 / 升级 / 续费（由服务端按当前套餐自动判定） |
+| `PlanOrderStatusPending` / `PlanOrderStatusPaid` / `PlanOrderStatusCancelled` / `PlanOrderStatusClosed` | 订单状态机：仅 `pending` 可取消；`closed` = 超期未支付由服务端关单 |
+| `ErrPlanNotActivated` | 未激活闸门错误：根 `Client` 未激活或授权状态非放行态时五个方法本地直接返回（不发请求） |
+
+要点：
+
+- **幂等键**：下单幂等键 = `requestId`（显式传入优先，缺省自动生成 `req_` 前缀键，请求体与
+  `X-Request-Id` 头 / metadata `x-request-id` 双通道同值，服务端防呆校验两者一致；同一实例同一
+  requestId 重复下单返回既有订单）；取消幂等键 = 订单号；catalog / query / rows 只读不带键。
+- **金额语义**：线上一律 `float64` 元（服务端内部为万分，边界换算由服务端负责）。
+- **错误归一**：信封为 `{code:0,msg:"ok",data:…}` / `{code:"业务码",msg,detail}`，统一经
+  `apis/core.ParseEnvelope` 解析为 `*apis.Error`（如非 pending 取消返回 `INVALID_STATE`，他实例
+  订单按 `NOT_FOUND` 模糊处理）；传输/网络错误原样返回。
+- **入参校验**：`planCode` / `orderNo` 非空、`billing` 枚举、`page ≥ 1` 均在本地完成，不合法零请求。
+- **契约出处**：`proto/licence/v1/runtime.proto` 的 `PlanRuntimeService` + 同目录
+  `protocol-matrix.yaml` 套餐运行面五行（domain `license_plan`，create/cancel 为 write）。
 
 ---
 
@@ -1270,7 +1323,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 | 文件 / 子包 | 能力 |
 |---|---|
-| `doc.go` / `facade.go` | 根包纯门面：86 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
+| `doc.go` / `facade.go` | 根包纯门面：138 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
 | `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` | 平台契约镜像层：信封结构、签发、验签、密钥对、nonce、canonical 助手（licen-hub backend 直接 import） |
 | `protocol/status.go` | 运行面状态码与本地时间判定 |
 | `protocol/version-range.go` | 版本范围表达式判定 |
@@ -1284,6 +1337,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
 | `runtime/provision.go` | 自助发放 `Provision` 与兑换码兑换 `Redeem`（HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
+| `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
 | `callback/` | 回调接收端 `CallbackHandler`（验签、防重放、幂等分发）+ 事件订阅器 `EventSubscriber`（水位推进，HTTP/gRPC 双传输） |
 | `updater/` | 在线更新执行器 `Updater`（自更新 swap/unpack/restart/state，`EventUpdates()` 事件触发检查） |

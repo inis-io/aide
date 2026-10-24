@@ -1090,3 +1090,281 @@ var ConfigPushbackRuntimeService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "licence/v1/runtime.proto",
 }
+
+const (
+	PlanRuntimeService_PlanCatalog_FullMethodName     = "/licenhub.licence.v1.PlanRuntimeService/PlanCatalog"
+	PlanRuntimeService_PlanOrderCreate_FullMethodName = "/licenhub.licence.v1.PlanRuntimeService/PlanOrderCreate"
+	PlanRuntimeService_PlanOrderQuery_FullMethodName  = "/licenhub.licence.v1.PlanRuntimeService/PlanOrderQuery"
+	PlanRuntimeService_PlanOrderCancel_FullMethodName = "/licenhub.licence.v1.PlanRuntimeService/PlanOrderCancel"
+	PlanRuntimeService_PlanOrderRows_FullMethodName   = "/licenhub.licence.v1.PlanRuntimeService/PlanOrderRows"
+)
+
+// PlanRuntimeServiceClient is the client API for PlanRuntimeService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// PlanRuntimeService - 项目套餐运行面（在售目录查询 + 套餐订单：购买/升级/续费下单、查单、取消、订单分页）。
+// 与 activate/validate 同套实例签名防重放（activation-sign-v1，凭证锚定部署实例）；
+// 金额在线上一律 double 元（服务端内部为万分，边界换算由服务端负责）；
+// 失败语义与星链/API 商城同口径：业务拒绝经 errdetails.ErrorInfo.Reason 携带业务码
+// （INVALID_ARGUMENT / NOT_FOUND / INVALID_STATE / CONFLICT 等），SDK 归一为与 HTTP 失败信封同形的 {code,msg,detail}。
+type PlanRuntimeServiceClient interface {
+	// PlanCatalog - 在售套餐目录（含当前生效付费套餐快照，无付费套餐时 current_plan 缺省）
+	PlanCatalog(ctx context.Context, in *PlanCatalogRequest, opts ...grpc.CallOption) (*PlanCatalogResponse, error)
+	// PlanOrderCreate - 套餐下单（购买/升级/续费由服务端按当前套餐自动判定；
+	// 幂等键 = request_id，同时经 metadata x-request-id 透传，重试返回既有订单）
+	PlanOrderCreate(ctx context.Context, in *PlanOrderCreateRequest, opts ...grpc.CallOption) (*PlanOrderCreateResponse, error)
+	// PlanOrderQuery - 查单（按订单号，仅本实例订单；他实例订单模糊 NotFound）
+	PlanOrderQuery(ctx context.Context, in *PlanOrderQueryRequest, opts ...grpc.CallOption) (*PlanOrderResponse, error)
+	// PlanOrderCancel - 取消订单（仅 pending；非 pending 返回 FailedPrecondition/INVALID_STATE）
+	PlanOrderCancel(ctx context.Context, in *PlanOrderCancelRequest, opts ...grpc.CallOption) (*PlanOrderResponse, error)
+	// PlanOrderRows - 本实例订单分页（create_at 倒序）
+	PlanOrderRows(ctx context.Context, in *PlanOrderRowsRequest, opts ...grpc.CallOption) (*PlanOrderRowsResponse, error)
+}
+
+type planRuntimeServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewPlanRuntimeServiceClient(cc grpc.ClientConnInterface) PlanRuntimeServiceClient {
+	return &planRuntimeServiceClient{cc}
+}
+
+func (c *planRuntimeServiceClient) PlanCatalog(ctx context.Context, in *PlanCatalogRequest, opts ...grpc.CallOption) (*PlanCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlanCatalogResponse)
+	err := c.cc.Invoke(ctx, PlanRuntimeService_PlanCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *planRuntimeServiceClient) PlanOrderCreate(ctx context.Context, in *PlanOrderCreateRequest, opts ...grpc.CallOption) (*PlanOrderCreateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlanOrderCreateResponse)
+	err := c.cc.Invoke(ctx, PlanRuntimeService_PlanOrderCreate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *planRuntimeServiceClient) PlanOrderQuery(ctx context.Context, in *PlanOrderQueryRequest, opts ...grpc.CallOption) (*PlanOrderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlanOrderResponse)
+	err := c.cc.Invoke(ctx, PlanRuntimeService_PlanOrderQuery_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *planRuntimeServiceClient) PlanOrderCancel(ctx context.Context, in *PlanOrderCancelRequest, opts ...grpc.CallOption) (*PlanOrderResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlanOrderResponse)
+	err := c.cc.Invoke(ctx, PlanRuntimeService_PlanOrderCancel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *planRuntimeServiceClient) PlanOrderRows(ctx context.Context, in *PlanOrderRowsRequest, opts ...grpc.CallOption) (*PlanOrderRowsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlanOrderRowsResponse)
+	err := c.cc.Invoke(ctx, PlanRuntimeService_PlanOrderRows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PlanRuntimeServiceServer is the server API for PlanRuntimeService service.
+// All implementations must embed UnimplementedPlanRuntimeServiceServer
+// for forward compatibility.
+//
+// PlanRuntimeService - 项目套餐运行面（在售目录查询 + 套餐订单：购买/升级/续费下单、查单、取消、订单分页）。
+// 与 activate/validate 同套实例签名防重放（activation-sign-v1，凭证锚定部署实例）；
+// 金额在线上一律 double 元（服务端内部为万分，边界换算由服务端负责）；
+// 失败语义与星链/API 商城同口径：业务拒绝经 errdetails.ErrorInfo.Reason 携带业务码
+// （INVALID_ARGUMENT / NOT_FOUND / INVALID_STATE / CONFLICT 等），SDK 归一为与 HTTP 失败信封同形的 {code,msg,detail}。
+type PlanRuntimeServiceServer interface {
+	// PlanCatalog - 在售套餐目录（含当前生效付费套餐快照，无付费套餐时 current_plan 缺省）
+	PlanCatalog(context.Context, *PlanCatalogRequest) (*PlanCatalogResponse, error)
+	// PlanOrderCreate - 套餐下单（购买/升级/续费由服务端按当前套餐自动判定；
+	// 幂等键 = request_id，同时经 metadata x-request-id 透传，重试返回既有订单）
+	PlanOrderCreate(context.Context, *PlanOrderCreateRequest) (*PlanOrderCreateResponse, error)
+	// PlanOrderQuery - 查单（按订单号，仅本实例订单；他实例订单模糊 NotFound）
+	PlanOrderQuery(context.Context, *PlanOrderQueryRequest) (*PlanOrderResponse, error)
+	// PlanOrderCancel - 取消订单（仅 pending；非 pending 返回 FailedPrecondition/INVALID_STATE）
+	PlanOrderCancel(context.Context, *PlanOrderCancelRequest) (*PlanOrderResponse, error)
+	// PlanOrderRows - 本实例订单分页（create_at 倒序）
+	PlanOrderRows(context.Context, *PlanOrderRowsRequest) (*PlanOrderRowsResponse, error)
+	mustEmbedUnimplementedPlanRuntimeServiceServer()
+}
+
+// UnimplementedPlanRuntimeServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedPlanRuntimeServiceServer struct{}
+
+func (UnimplementedPlanRuntimeServiceServer) PlanCatalog(context.Context, *PlanCatalogRequest) (*PlanCatalogResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlanCatalog not implemented")
+}
+func (UnimplementedPlanRuntimeServiceServer) PlanOrderCreate(context.Context, *PlanOrderCreateRequest) (*PlanOrderCreateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlanOrderCreate not implemented")
+}
+func (UnimplementedPlanRuntimeServiceServer) PlanOrderQuery(context.Context, *PlanOrderQueryRequest) (*PlanOrderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlanOrderQuery not implemented")
+}
+func (UnimplementedPlanRuntimeServiceServer) PlanOrderCancel(context.Context, *PlanOrderCancelRequest) (*PlanOrderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlanOrderCancel not implemented")
+}
+func (UnimplementedPlanRuntimeServiceServer) PlanOrderRows(context.Context, *PlanOrderRowsRequest) (*PlanOrderRowsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlanOrderRows not implemented")
+}
+func (UnimplementedPlanRuntimeServiceServer) mustEmbedUnimplementedPlanRuntimeServiceServer() {}
+func (UnimplementedPlanRuntimeServiceServer) testEmbeddedByValue()                            {}
+
+// UnsafePlanRuntimeServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to PlanRuntimeServiceServer will
+// result in compilation errors.
+type UnsafePlanRuntimeServiceServer interface {
+	mustEmbedUnimplementedPlanRuntimeServiceServer()
+}
+
+func RegisterPlanRuntimeServiceServer(s grpc.ServiceRegistrar, srv PlanRuntimeServiceServer) {
+	// If the following call pancis, it indicates UnimplementedPlanRuntimeServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&PlanRuntimeService_ServiceDesc, srv)
+}
+
+func _PlanRuntimeService_PlanCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlanCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanRuntimeServiceServer).PlanCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanRuntimeService_PlanCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanRuntimeServiceServer).PlanCatalog(ctx, req.(*PlanCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlanRuntimeService_PlanOrderCreate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlanOrderCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanRuntimeServiceServer).PlanOrderCreate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanRuntimeService_PlanOrderCreate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanRuntimeServiceServer).PlanOrderCreate(ctx, req.(*PlanOrderCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlanRuntimeService_PlanOrderQuery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlanOrderQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanRuntimeServiceServer).PlanOrderQuery(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanRuntimeService_PlanOrderQuery_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanRuntimeServiceServer).PlanOrderQuery(ctx, req.(*PlanOrderQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlanRuntimeService_PlanOrderCancel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlanOrderCancelRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanRuntimeServiceServer).PlanOrderCancel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanRuntimeService_PlanOrderCancel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanRuntimeServiceServer).PlanOrderCancel(ctx, req.(*PlanOrderCancelRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PlanRuntimeService_PlanOrderRows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlanOrderRowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PlanRuntimeServiceServer).PlanOrderRows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PlanRuntimeService_PlanOrderRows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PlanRuntimeServiceServer).PlanOrderRows(ctx, req.(*PlanOrderRowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// PlanRuntimeService_ServiceDesc is the grpc.ServiceDesc for PlanRuntimeService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var PlanRuntimeService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "licenhub.licence.v1.PlanRuntimeService",
+	HandlerType: (*PlanRuntimeServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "PlanCatalog",
+			Handler:    _PlanRuntimeService_PlanCatalog_Handler,
+		},
+		{
+			MethodName: "PlanOrderCreate",
+			Handler:    _PlanRuntimeService_PlanOrderCreate_Handler,
+		},
+		{
+			MethodName: "PlanOrderQuery",
+			Handler:    _PlanRuntimeService_PlanOrderQuery_Handler,
+		},
+		{
+			MethodName: "PlanOrderCancel",
+			Handler:    _PlanRuntimeService_PlanOrderCancel_Handler,
+		},
+		{
+			MethodName: "PlanOrderRows",
+			Handler:    _PlanRuntimeService_PlanOrderRows_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "licence/v1/runtime.proto",
+}

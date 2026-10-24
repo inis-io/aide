@@ -2653,6 +2653,831 @@ func (x *ConfigPushbackDefinitionsResponse) GetPushedAt() string {
 	return ""
 }
 
+// PlanCatalogRequest - 在售套餐目录请求（凭证锚定许可证与实例，无额外入参）
+type PlanCatalogRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanCatalogRequest) Reset() {
+	*x = PlanCatalogRequest{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCatalogRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCatalogRequest) ProtoMessage() {}
+
+func (x *PlanCatalogRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCatalogRequest.ProtoReflect.Descriptor instead.
+func (*PlanCatalogRequest) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{38}
+}
+
+// PlanCatalogOption - 套餐计费选项
+type PlanCatalogOption struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Billing       string                 `protobuf:"bytes,1,opt,name=billing,proto3" json:"billing,omitempty"`                             // 计费周期：monthly / yearly / buyout
+	Price         float64                `protobuf:"fixed64,2,opt,name=price,proto3" json:"price,omitempty"`                               // 标价（元）
+	SalePrice     float64                `protobuf:"fixed64,3,opt,name=sale_price,json=salePrice,proto3" json:"sale_price,omitempty"`      // 生效价（元，已算入生效折扣/创始价）
+	DiscountTag   string                 `protobuf:"bytes,4,opt,name=discount_tag,json=discountTag,proto3" json:"discount_tag,omitempty"`  // 折扣标签（如 "8折·试用期内"，无折扣为空串）
+	FounderLeft   int32                  `protobuf:"varint,5,opt,name=founder_left,json=founderLeft,proto3" json:"founder_left,omitempty"` // 创始价剩余名额（-1 = 非创始价）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanCatalogOption) Reset() {
+	*x = PlanCatalogOption{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCatalogOption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCatalogOption) ProtoMessage() {}
+
+func (x *PlanCatalogOption) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCatalogOption.ProtoReflect.Descriptor instead.
+func (*PlanCatalogOption) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *PlanCatalogOption) GetBilling() string {
+	if x != nil {
+		return x.Billing
+	}
+	return ""
+}
+
+func (x *PlanCatalogOption) GetPrice() float64 {
+	if x != nil {
+		return x.Price
+	}
+	return 0
+}
+
+func (x *PlanCatalogOption) GetSalePrice() float64 {
+	if x != nil {
+		return x.SalePrice
+	}
+	return 0
+}
+
+func (x *PlanCatalogOption) GetDiscountTag() string {
+	if x != nil {
+		return x.DiscountTag
+	}
+	return ""
+}
+
+func (x *PlanCatalogOption) GetFounderLeft() int32 {
+	if x != nil {
+		return x.FounderLeft
+	}
+	return 0
+}
+
+// PlanCatalogItem - 在售套餐目录项
+type PlanCatalogItem struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	PlanCode         string                 `protobuf:"bytes,1,opt,name=plan_code,json=planCode,proto3" json:"plan_code,omitempty"`
+	PlanName         string                 `protobuf:"bytes,2,opt,name=plan_name,json=planName,proto3" json:"plan_name,omitempty"`
+	Grade            int32                  `protobuf:"varint,3,opt,name=grade,proto3" json:"grade,omitempty"`                                              // 档位权重（0-1000，升降级判定依据）
+	Badge            string                 `protobuf:"bytes,4,opt,name=badge,proto3" json:"badge,omitempty"`                                               // 营销角标
+	Summary          string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`                                           // 一句话卖点
+	EntitlementsJson []byte                 `protobuf:"bytes,6,opt,name=entitlements_json,json=entitlementsJson,proto3" json:"entitlements_json,omitempty"` // 权益表 JSON 原文（map：模块编码 → bool/数值），原样透传不重序列化
+	Options          []*PlanCatalogOption   `protobuf:"bytes,7,rep,name=options,proto3" json:"options,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PlanCatalogItem) Reset() {
+	*x = PlanCatalogItem{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCatalogItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCatalogItem) ProtoMessage() {}
+
+func (x *PlanCatalogItem) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCatalogItem.ProtoReflect.Descriptor instead.
+func (*PlanCatalogItem) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *PlanCatalogItem) GetPlanCode() string {
+	if x != nil {
+		return x.PlanCode
+	}
+	return ""
+}
+
+func (x *PlanCatalogItem) GetPlanName() string {
+	if x != nil {
+		return x.PlanName
+	}
+	return ""
+}
+
+func (x *PlanCatalogItem) GetGrade() int32 {
+	if x != nil {
+		return x.Grade
+	}
+	return 0
+}
+
+func (x *PlanCatalogItem) GetBadge() string {
+	if x != nil {
+		return x.Badge
+	}
+	return ""
+}
+
+func (x *PlanCatalogItem) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *PlanCatalogItem) GetEntitlementsJson() []byte {
+	if x != nil {
+		return x.EntitlementsJson
+	}
+	return nil
+}
+
+func (x *PlanCatalogItem) GetOptions() []*PlanCatalogOption {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+// PlanCurrentSnapshot - 当前生效付费套餐快照
+type PlanCurrentSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlanCode      string                 `protobuf:"bytes,1,opt,name=plan_code,json=planCode,proto3" json:"plan_code,omitempty"`
+	PlanName      string                 `protobuf:"bytes,2,opt,name=plan_name,json=planName,proto3" json:"plan_name,omitempty"`
+	Billing       string                 `protobuf:"bytes,3,opt,name=billing,proto3" json:"billing,omitempty"`
+	ValidUntil    string                 `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"` // RFC3339，与许可证载荷期限字段同格式
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanCurrentSnapshot) Reset() {
+	*x = PlanCurrentSnapshot{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCurrentSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCurrentSnapshot) ProtoMessage() {}
+
+func (x *PlanCurrentSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCurrentSnapshot.ProtoReflect.Descriptor instead.
+func (*PlanCurrentSnapshot) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *PlanCurrentSnapshot) GetPlanCode() string {
+	if x != nil {
+		return x.PlanCode
+	}
+	return ""
+}
+
+func (x *PlanCurrentSnapshot) GetPlanName() string {
+	if x != nil {
+		return x.PlanName
+	}
+	return ""
+}
+
+func (x *PlanCurrentSnapshot) GetBilling() string {
+	if x != nil {
+		return x.Billing
+	}
+	return ""
+}
+
+func (x *PlanCurrentSnapshot) GetValidUntil() string {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return ""
+}
+
+// PlanCatalogResponse - 在售套餐目录响应
+type PlanCatalogResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Plans         []*PlanCatalogItem     `protobuf:"bytes,1,rep,name=plans,proto3" json:"plans,omitempty"`
+	CurrentPlan   *PlanCurrentSnapshot   `protobuf:"bytes,2,opt,name=current_plan,json=currentPlan,proto3" json:"current_plan,omitempty"` // 无付费套餐时为 null
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanCatalogResponse) Reset() {
+	*x = PlanCatalogResponse{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanCatalogResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanCatalogResponse) ProtoMessage() {}
+
+func (x *PlanCatalogResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanCatalogResponse.ProtoReflect.Descriptor instead.
+func (*PlanCatalogResponse) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *PlanCatalogResponse) GetPlans() []*PlanCatalogItem {
+	if x != nil {
+		return x.Plans
+	}
+	return nil
+}
+
+func (x *PlanCatalogResponse) GetCurrentPlan() *PlanCurrentSnapshot {
+	if x != nil {
+		return x.CurrentPlan
+	}
+	return nil
+}
+
+// PlanOrderCreateRequest - 套餐下单请求
+type PlanOrderCreateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PlanCode      string                 `protobuf:"bytes,1,opt,name=plan_code,json=planCode,proto3" json:"plan_code,omitempty"`
+	Billing       string                 `protobuf:"bytes,2,opt,name=billing,proto3" json:"billing,omitempty"`                      // 计费周期：monthly / yearly / buyout
+	RequestId     string                 `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // 幂等键（SDK 缺省自动生成 req_ 前缀；服务端按实例+request_id 去重）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderCreateRequest) Reset() {
+	*x = PlanOrderCreateRequest{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderCreateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderCreateRequest) ProtoMessage() {}
+
+func (x *PlanOrderCreateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderCreateRequest.ProtoReflect.Descriptor instead.
+func (*PlanOrderCreateRequest) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *PlanOrderCreateRequest) GetPlanCode() string {
+	if x != nil {
+		return x.PlanCode
+	}
+	return ""
+}
+
+func (x *PlanOrderCreateRequest) GetBilling() string {
+	if x != nil {
+		return x.Billing
+	}
+	return ""
+}
+
+func (x *PlanOrderCreateRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+// PlanOrderCreateResponse - 套餐下单回执
+type PlanOrderCreateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderNo       string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
+	Amount        float64                `protobuf:"fixed64,2,opt,name=amount,proto3" json:"amount,omitempty"`                       // 应付金额（元）
+	PayUrl        string                 `protobuf:"bytes,3,opt,name=pay_url,json=payUrl,proto3" json:"pay_url,omitempty"`           // inis-pay 收银台链接
+	ExpiredAt     int64                  `protobuf:"varint,4,opt,name=expired_at,json=expiredAt,proto3" json:"expired_at,omitempty"` // 收银台过期时间（毫秒）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderCreateResponse) Reset() {
+	*x = PlanOrderCreateResponse{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderCreateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderCreateResponse) ProtoMessage() {}
+
+func (x *PlanOrderCreateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderCreateResponse.ProtoReflect.Descriptor instead.
+func (*PlanOrderCreateResponse) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *PlanOrderCreateResponse) GetOrderNo() string {
+	if x != nil {
+		return x.OrderNo
+	}
+	return ""
+}
+
+func (x *PlanOrderCreateResponse) GetAmount() float64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *PlanOrderCreateResponse) GetPayUrl() string {
+	if x != nil {
+		return x.PayUrl
+	}
+	return ""
+}
+
+func (x *PlanOrderCreateResponse) GetExpiredAt() int64 {
+	if x != nil {
+		return x.ExpiredAt
+	}
+	return 0
+}
+
+// PlanOrderQueryRequest - 查单请求
+type PlanOrderQueryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderNo       string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderQueryRequest) Reset() {
+	*x = PlanOrderQueryRequest{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderQueryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderQueryRequest) ProtoMessage() {}
+
+func (x *PlanOrderQueryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderQueryRequest.ProtoReflect.Descriptor instead.
+func (*PlanOrderQueryRequest) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *PlanOrderQueryRequest) GetOrderNo() string {
+	if x != nil {
+		return x.OrderNo
+	}
+	return ""
+}
+
+// PlanOrderCancelRequest - 取消订单请求（幂等键取 order_no，经 metadata x-request-id 透传）
+type PlanOrderCancelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderNo       string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderCancelRequest) Reset() {
+	*x = PlanOrderCancelRequest{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderCancelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderCancelRequest) ProtoMessage() {}
+
+func (x *PlanOrderCancelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderCancelRequest.ProtoReflect.Descriptor instead.
+func (*PlanOrderCancelRequest) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *PlanOrderCancelRequest) GetOrderNo() string {
+	if x != nil {
+		return x.OrderNo
+	}
+	return ""
+}
+
+// PlanOrderItem - 套餐订单条目（query/cancel/rows 共用）
+type PlanOrderItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderNo       string                 `protobuf:"bytes,1,opt,name=order_no,json=orderNo,proto3" json:"order_no,omitempty"`
+	OrderType     string                 `protobuf:"bytes,2,opt,name=order_type,json=orderType,proto3" json:"order_type,omitempty"` // purchase / upgrade / renew
+	PlanCode      string                 `protobuf:"bytes,3,opt,name=plan_code,json=planCode,proto3" json:"plan_code,omitempty"`
+	PlanName      string                 `protobuf:"bytes,4,opt,name=plan_name,json=planName,proto3" json:"plan_name,omitempty"`
+	Billing       string                 `protobuf:"bytes,5,opt,name=billing,proto3" json:"billing,omitempty"`
+	Amount        float64                `protobuf:"fixed64,6,opt,name=amount,proto3" json:"amount,omitempty"`                     // 金额（元）
+	Status        string                 `protobuf:"bytes,7,opt,name=status,proto3" json:"status,omitempty"`                       // pending / paid / cancelled / closed
+	PayUrl        string                 `protobuf:"bytes,8,opt,name=pay_url,json=payUrl,proto3" json:"pay_url,omitempty"`         // 收银台链接（仅 pending 有值）
+	PaidAt        int64                  `protobuf:"varint,9,opt,name=paid_at,json=paidAt,proto3" json:"paid_at,omitempty"`        // 支付时间（毫秒，0 = 未支付）
+	CreateAt      int64                  `protobuf:"varint,10,opt,name=create_at,json=createAt,proto3" json:"create_at,omitempty"` // 下单时间（毫秒）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderItem) Reset() {
+	*x = PlanOrderItem{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderItem) ProtoMessage() {}
+
+func (x *PlanOrderItem) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderItem.ProtoReflect.Descriptor instead.
+func (*PlanOrderItem) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *PlanOrderItem) GetOrderNo() string {
+	if x != nil {
+		return x.OrderNo
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetOrderType() string {
+	if x != nil {
+		return x.OrderType
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetPlanCode() string {
+	if x != nil {
+		return x.PlanCode
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetPlanName() string {
+	if x != nil {
+		return x.PlanName
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetBilling() string {
+	if x != nil {
+		return x.Billing
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetAmount() float64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *PlanOrderItem) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetPayUrl() string {
+	if x != nil {
+		return x.PayUrl
+	}
+	return ""
+}
+
+func (x *PlanOrderItem) GetPaidAt() int64 {
+	if x != nil {
+		return x.PaidAt
+	}
+	return 0
+}
+
+func (x *PlanOrderItem) GetCreateAt() int64 {
+	if x != nil {
+		return x.CreateAt
+	}
+	return 0
+}
+
+// PlanOrderResponse - 单订单响应（query/cancel 共用）
+type PlanOrderResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Order         *PlanOrderItem         `protobuf:"bytes,1,opt,name=order,proto3" json:"order,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderResponse) Reset() {
+	*x = PlanOrderResponse{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderResponse) ProtoMessage() {}
+
+func (x *PlanOrderResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderResponse.ProtoReflect.Descriptor instead.
+func (*PlanOrderResponse) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *PlanOrderResponse) GetOrder() *PlanOrderItem {
+	if x != nil {
+		return x.Order
+	}
+	return nil
+}
+
+// PlanOrderRowsRequest - 订单分页请求
+type PlanOrderRowsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Page          int32                  `protobuf:"varint,1,opt,name=page,proto3" json:"page,omitempty"`   // 页码（1 起）
+	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"` // 每页条数（0 = 服务端默认）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderRowsRequest) Reset() {
+	*x = PlanOrderRowsRequest{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderRowsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderRowsRequest) ProtoMessage() {}
+
+func (x *PlanOrderRowsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderRowsRequest.ProtoReflect.Descriptor instead.
+func (*PlanOrderRowsRequest) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *PlanOrderRowsRequest) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
+func (x *PlanOrderRowsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+// PlanOrderRowsResponse - 订单分页响应
+type PlanOrderRowsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Records       []*PlanOrderItem       `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	Page          int32                  `protobuf:"varint,3,opt,name=page,proto3" json:"page,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlanOrderRowsResponse) Reset() {
+	*x = PlanOrderRowsResponse{}
+	mi := &file_licence_v1_runtime_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlanOrderRowsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlanOrderRowsResponse) ProtoMessage() {}
+
+func (x *PlanOrderRowsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_licence_v1_runtime_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlanOrderRowsResponse.ProtoReflect.Descriptor instead.
+func (*PlanOrderRowsResponse) Descriptor() ([]byte, []int) {
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *PlanOrderRowsResponse) GetRecords() []*PlanOrderItem {
+	if x != nil {
+		return x.Records
+	}
+	return nil
+}
+
+func (x *PlanOrderRowsResponse) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *PlanOrderRowsResponse) GetPage() int32 {
+	if x != nil {
+		return x.Page
+	}
+	return 0
+}
+
 var File_licence_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_licence_v1_runtime_proto_rawDesc = "" +
@@ -2912,7 +3737,69 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\bbatch_id\x18\x01 \x01(\x04R\abatchId\x12D\n" +
 	"\x06groups\x18\x02 \x01(\v2,.licenhub.licence.v1.ConfigPushbackDiffStatsR\x06groups\x12F\n" +
 	"\aconfigs\x18\x03 \x01(\v2,.licenhub.licence.v1.ConfigPushbackDiffStatsR\aconfigs\x12\x1b\n" +
-	"\tpushed_at\x18\x04 \x01(\tR\bpushedAt2\xd6\x03\n" +
+	"\tpushed_at\x18\x04 \x01(\tR\bpushedAt\"\x14\n" +
+	"\x12PlanCatalogRequest\"\xa8\x01\n" +
+	"\x11PlanCatalogOption\x12\x18\n" +
+	"\abilling\x18\x01 \x01(\tR\abilling\x12\x14\n" +
+	"\x05price\x18\x02 \x01(\x01R\x05price\x12\x1d\n" +
+	"\n" +
+	"sale_price\x18\x03 \x01(\x01R\tsalePrice\x12!\n" +
+	"\fdiscount_tag\x18\x04 \x01(\tR\vdiscountTag\x12!\n" +
+	"\ffounder_left\x18\x05 \x01(\x05R\vfounderLeft\"\x80\x02\n" +
+	"\x0fPlanCatalogItem\x12\x1b\n" +
+	"\tplan_code\x18\x01 \x01(\tR\bplanCode\x12\x1b\n" +
+	"\tplan_name\x18\x02 \x01(\tR\bplanName\x12\x14\n" +
+	"\x05grade\x18\x03 \x01(\x05R\x05grade\x12\x14\n" +
+	"\x05badge\x18\x04 \x01(\tR\x05badge\x12\x18\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\x12+\n" +
+	"\x11entitlements_json\x18\x06 \x01(\fR\x10entitlementsJson\x12@\n" +
+	"\aoptions\x18\a \x03(\v2&.licenhub.licence.v1.PlanCatalogOptionR\aoptions\"\x8a\x01\n" +
+	"\x13PlanCurrentSnapshot\x12\x1b\n" +
+	"\tplan_code\x18\x01 \x01(\tR\bplanCode\x12\x1b\n" +
+	"\tplan_name\x18\x02 \x01(\tR\bplanName\x12\x18\n" +
+	"\abilling\x18\x03 \x01(\tR\abilling\x12\x1f\n" +
+	"\vvalid_until\x18\x04 \x01(\tR\n" +
+	"validUntil\"\x9e\x01\n" +
+	"\x13PlanCatalogResponse\x12:\n" +
+	"\x05plans\x18\x01 \x03(\v2$.licenhub.licence.v1.PlanCatalogItemR\x05plans\x12K\n" +
+	"\fcurrent_plan\x18\x02 \x01(\v2(.licenhub.licence.v1.PlanCurrentSnapshotR\vcurrentPlan\"n\n" +
+	"\x16PlanOrderCreateRequest\x12\x1b\n" +
+	"\tplan_code\x18\x01 \x01(\tR\bplanCode\x12\x18\n" +
+	"\abilling\x18\x02 \x01(\tR\abilling\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\"\x84\x01\n" +
+	"\x17PlanOrderCreateResponse\x12\x19\n" +
+	"\border_no\x18\x01 \x01(\tR\aorderNo\x12\x16\n" +
+	"\x06amount\x18\x02 \x01(\x01R\x06amount\x12\x17\n" +
+	"\apay_url\x18\x03 \x01(\tR\x06payUrl\x12\x1d\n" +
+	"\n" +
+	"expired_at\x18\x04 \x01(\x03R\texpiredAt\"2\n" +
+	"\x15PlanOrderQueryRequest\x12\x19\n" +
+	"\border_no\x18\x01 \x01(\tR\aorderNo\"3\n" +
+	"\x16PlanOrderCancelRequest\x12\x19\n" +
+	"\border_no\x18\x01 \x01(\tR\aorderNo\"\x9c\x02\n" +
+	"\rPlanOrderItem\x12\x19\n" +
+	"\border_no\x18\x01 \x01(\tR\aorderNo\x12\x1d\n" +
+	"\n" +
+	"order_type\x18\x02 \x01(\tR\torderType\x12\x1b\n" +
+	"\tplan_code\x18\x03 \x01(\tR\bplanCode\x12\x1b\n" +
+	"\tplan_name\x18\x04 \x01(\tR\bplanName\x12\x18\n" +
+	"\abilling\x18\x05 \x01(\tR\abilling\x12\x16\n" +
+	"\x06amount\x18\x06 \x01(\x01R\x06amount\x12\x16\n" +
+	"\x06status\x18\a \x01(\tR\x06status\x12\x17\n" +
+	"\apay_url\x18\b \x01(\tR\x06payUrl\x12\x17\n" +
+	"\apaid_at\x18\t \x01(\x03R\x06paidAt\x12\x1b\n" +
+	"\tcreate_at\x18\n" +
+	" \x01(\x03R\bcreateAt\"M\n" +
+	"\x11PlanOrderResponse\x128\n" +
+	"\x05order\x18\x01 \x01(\v2\".licenhub.licence.v1.PlanOrderItemR\x05order\"@\n" +
+	"\x14PlanOrderRowsRequest\x12\x12\n" +
+	"\x04page\x18\x01 \x01(\x05R\x04page\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\x7f\n" +
+	"\x15PlanOrderRowsResponse\x12<\n" +
+	"\arecords\x18\x01 \x03(\v2\".licenhub.licence.v1.PlanOrderItemR\arecords\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\x12\x12\n" +
+	"\x04page\x18\x03 \x01(\x05R\x04page2\xd6\x03\n" +
 	"\x15LicenseRuntimeService\x12V\n" +
 	"\bActivate\x12$.licenhub.licence.v1.ActivateRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12V\n" +
 	"\bValidate\x12$.licenhub.licence.v1.ValidateRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12[\n" +
@@ -2936,7 +3823,13 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\tSubscribe\x12*.licenhub.licence.v1.EventSubscribeRequest\x1a!.licenhub.licence.v1.EventMessage0\x012\x8a\x02\n" +
 	"\x1cConfigPushbackRuntimeService\x12g\n" +
 	"\x04Push\x12..licenhub.licence.v1.ConfigPushbackPushRequest\x1a/.licenhub.licence.v1.ConfigPushbackPushResponse\x12\x80\x01\n" +
-	"\x0fPushDefinitions\x125.licenhub.licence.v1.ConfigPushbackDefinitionsRequest\x1a6.licenhub.licence.v1.ConfigPushbackDefinitionsResponseB<Z:github.com/inis-io/aide/licence/proto/licence/v1;licencev1b\x06proto3"
+	"\x0fPushDefinitions\x125.licenhub.licence.v1.ConfigPushbackDefinitionsRequest\x1a6.licenhub.licence.v1.ConfigPushbackDefinitionsResponse2\x9a\x04\n" +
+	"\x12PlanRuntimeService\x12`\n" +
+	"\vPlanCatalog\x12'.licenhub.licence.v1.PlanCatalogRequest\x1a(.licenhub.licence.v1.PlanCatalogResponse\x12l\n" +
+	"\x0fPlanOrderCreate\x12+.licenhub.licence.v1.PlanOrderCreateRequest\x1a,.licenhub.licence.v1.PlanOrderCreateResponse\x12d\n" +
+	"\x0ePlanOrderQuery\x12*.licenhub.licence.v1.PlanOrderQueryRequest\x1a&.licenhub.licence.v1.PlanOrderResponse\x12f\n" +
+	"\x0fPlanOrderCancel\x12+.licenhub.licence.v1.PlanOrderCancelRequest\x1a&.licenhub.licence.v1.PlanOrderResponse\x12f\n" +
+	"\rPlanOrderRows\x12).licenhub.licence.v1.PlanOrderRowsRequest\x1a*.licenhub.licence.v1.PlanOrderRowsResponseB<Z:github.com/inis-io/aide/licence/proto/licence/v1;licencev1b\x06proto3"
 
 var (
 	file_licence_v1_runtime_proto_rawDescOnce sync.Once
@@ -2950,7 +3843,7 @@ func file_licence_v1_runtime_proto_rawDescGZIP() []byte {
 	return file_licence_v1_runtime_proto_rawDescData
 }
 
-var file_licence_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
+var file_licence_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_licence_v1_runtime_proto_goTypes = []any{
 	(*ActivateRequest)(nil),                   // 0: licenhub.licence.v1.ActivateRequest
 	(*ValidateRequest)(nil),                   // 1: licenhub.licence.v1.ValidateRequest
@@ -2990,62 +3883,90 @@ var file_licence_v1_runtime_proto_goTypes = []any{
 	(*ConfigPushbackDefinitionsRequest)(nil),  // 35: licenhub.licence.v1.ConfigPushbackDefinitionsRequest
 	(*ConfigPushbackDiffStats)(nil),           // 36: licenhub.licence.v1.ConfigPushbackDiffStats
 	(*ConfigPushbackDefinitionsResponse)(nil), // 37: licenhub.licence.v1.ConfigPushbackDefinitionsResponse
-	nil, // 38: licenhub.licence.v1.ValidateRequest.UsageEntry
-	nil, // 39: licenhub.licence.v1.TenantValidateRequest.UsageEntry
-	nil, // 40: licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
+	(*PlanCatalogRequest)(nil),                // 38: licenhub.licence.v1.PlanCatalogRequest
+	(*PlanCatalogOption)(nil),                 // 39: licenhub.licence.v1.PlanCatalogOption
+	(*PlanCatalogItem)(nil),                   // 40: licenhub.licence.v1.PlanCatalogItem
+	(*PlanCurrentSnapshot)(nil),               // 41: licenhub.licence.v1.PlanCurrentSnapshot
+	(*PlanCatalogResponse)(nil),               // 42: licenhub.licence.v1.PlanCatalogResponse
+	(*PlanOrderCreateRequest)(nil),            // 43: licenhub.licence.v1.PlanOrderCreateRequest
+	(*PlanOrderCreateResponse)(nil),           // 44: licenhub.licence.v1.PlanOrderCreateResponse
+	(*PlanOrderQueryRequest)(nil),             // 45: licenhub.licence.v1.PlanOrderQueryRequest
+	(*PlanOrderCancelRequest)(nil),            // 46: licenhub.licence.v1.PlanOrderCancelRequest
+	(*PlanOrderItem)(nil),                     // 47: licenhub.licence.v1.PlanOrderItem
+	(*PlanOrderResponse)(nil),                 // 48: licenhub.licence.v1.PlanOrderResponse
+	(*PlanOrderRowsRequest)(nil),              // 49: licenhub.licence.v1.PlanOrderRowsRequest
+	(*PlanOrderRowsResponse)(nil),             // 50: licenhub.licence.v1.PlanOrderRowsResponse
+	nil,                                       // 51: licenhub.licence.v1.ValidateRequest.UsageEntry
+	nil,                                       // 52: licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	nil,                                       // 53: licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
 }
 var file_licence_v1_runtime_proto_depIdxs = []int32{
-	38, // 0: licenhub.licence.v1.ValidateRequest.usage:type_name -> licenhub.licence.v1.ValidateRequest.UsageEntry
+	51, // 0: licenhub.licence.v1.ValidateRequest.usage:type_name -> licenhub.licence.v1.ValidateRequest.UsageEntry
 	14, // 1: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
 	13, // 2: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
 	13, // 3: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
 	17, // 4: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
-	39, // 5: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	52, // 5: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
 	26, // 6: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
-	40, // 7: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
+	53, // 7: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
 	33, // 8: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
 	34, // 9: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
 	36, // 10: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
 	36, // 11: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	0,  // 12: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
-	1,  // 13: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
-	2,  // 14: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
-	3,  // 15: licenhub.licence.v1.LicenseRuntimeService.Provision:input_type -> licenhub.licence.v1.ProvisionRequest
-	4,  // 16: licenhub.licence.v1.LicenseRuntimeService.Redeem:input_type -> licenhub.licence.v1.RedeemRequest
-	7,  // 17: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
-	9,  // 18: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
-	10, // 19: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
-	12, // 20: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
-	16, // 21: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
-	19, // 22: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
-	20, // 23: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
-	24, // 24: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
-	27, // 25: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
-	29, // 26: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
-	31, // 27: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
-	35, // 28: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
-	6,  // 29: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
-	6,  // 30: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
-	6,  // 31: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
-	5,  // 32: licenhub.licence.v1.LicenseRuntimeService.Provision:output_type -> licenhub.licence.v1.ProvisionResponse
-	5,  // 33: licenhub.licence.v1.LicenseRuntimeService.Redeem:output_type -> licenhub.licence.v1.ProvisionResponse
-	8,  // 34: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
-	11, // 35: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
-	11, // 36: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
-	15, // 37: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
-	18, // 38: licenhub.licence.v1.SaasRuntimeService.Search:output_type -> licenhub.licence.v1.TenantSearchResponse
-	21, // 39: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
-	21, // 40: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
-	25, // 41: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
-	28, // 42: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:output_type -> licenhub.licence.v1.ConfigConsumptionReportResponse
-	30, // 43: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
-	32, // 44: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:output_type -> licenhub.licence.v1.ConfigPushbackPushResponse
-	37, // 45: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:output_type -> licenhub.licence.v1.ConfigPushbackDefinitionsResponse
-	29, // [29:46] is the sub-list for method output_type
-	12, // [12:29] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	39, // 12: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
+	40, // 13: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
+	41, // 14: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
+	47, // 15: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
+	47, // 16: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
+	0,  // 17: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
+	1,  // 18: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
+	2,  // 19: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
+	3,  // 20: licenhub.licence.v1.LicenseRuntimeService.Provision:input_type -> licenhub.licence.v1.ProvisionRequest
+	4,  // 21: licenhub.licence.v1.LicenseRuntimeService.Redeem:input_type -> licenhub.licence.v1.RedeemRequest
+	7,  // 22: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
+	9,  // 23: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
+	10, // 24: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
+	12, // 25: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
+	16, // 26: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
+	19, // 27: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
+	20, // 28: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
+	24, // 29: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
+	27, // 30: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
+	29, // 31: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
+	31, // 32: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
+	35, // 33: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
+	38, // 34: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
+	43, // 35: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
+	45, // 36: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
+	46, // 37: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
+	49, // 38: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
+	6,  // 39: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
+	6,  // 40: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
+	6,  // 41: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
+	5,  // 42: licenhub.licence.v1.LicenseRuntimeService.Provision:output_type -> licenhub.licence.v1.ProvisionResponse
+	5,  // 43: licenhub.licence.v1.LicenseRuntimeService.Redeem:output_type -> licenhub.licence.v1.ProvisionResponse
+	8,  // 44: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
+	11, // 45: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
+	11, // 46: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
+	15, // 47: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
+	18, // 48: licenhub.licence.v1.SaasRuntimeService.Search:output_type -> licenhub.licence.v1.TenantSearchResponse
+	21, // 49: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
+	21, // 50: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
+	25, // 51: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
+	28, // 52: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:output_type -> licenhub.licence.v1.ConfigConsumptionReportResponse
+	30, // 53: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
+	32, // 54: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:output_type -> licenhub.licence.v1.ConfigPushbackPushResponse
+	37, // 55: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:output_type -> licenhub.licence.v1.ConfigPushbackDefinitionsResponse
+	42, // 56: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:output_type -> licenhub.licence.v1.PlanCatalogResponse
+	44, // 57: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:output_type -> licenhub.licence.v1.PlanOrderCreateResponse
+	48, // 58: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:output_type -> licenhub.licence.v1.PlanOrderResponse
+	48, // 59: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:output_type -> licenhub.licence.v1.PlanOrderResponse
+	50, // 60: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:output_type -> licenhub.licence.v1.PlanOrderRowsResponse
+	39, // [39:61] is the sub-list for method output_type
+	17, // [17:39] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_licence_v1_runtime_proto_init() }
@@ -3059,9 +3980,9 @@ func file_licence_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_licence_v1_runtime_proto_rawDesc), len(file_licence_v1_runtime_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   41,
+			NumMessages:   54,
 			NumExtensions: 0,
-			NumServices:   6,
+			NumServices:   7,
 		},
 		GoTypes:           file_licence_v1_runtime_proto_goTypes,
 		DependencyIndexes: file_licence_v1_runtime_proto_depIdxs,

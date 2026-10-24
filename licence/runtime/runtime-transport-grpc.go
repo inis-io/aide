@@ -41,6 +41,7 @@ type grpcRuntimeTransport struct {
 	platformConfig licencev1.PlatformConfigRuntimeServiceClient
 	event          licencev1.EventRuntimeServiceClient
 	pushback       licencev1.ConfigPushbackRuntimeServiceClient
+	plan           licencev1.PlanRuntimeServiceClient
 	apis           apisv1.ApisRuntimeServiceClient
 	starDirectory  starv1.StarDirectoryServiceClient
 	starIndex      starv1.StarIndexServiceClient
@@ -63,6 +64,7 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 		platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn),
 		event:          licencev1.NewEventRuntimeServiceClient(conn),
 		pushback:       licencev1.NewConfigPushbackRuntimeServiceClient(conn),
+		plan:           licencev1.NewPlanRuntimeServiceClient(conn),
 		apis:           apisv1.NewApisRuntimeServiceClient(conn),
 		starDirectory:  starv1.NewStarDirectoryServiceClient(conn),
 		starIndex:      starv1.NewStarIndexServiceClient(conn),
@@ -1521,6 +1523,222 @@ func (this *grpcRuntimeTransport) roundTripStar(ctx context.Context, method, pat
 			return starFailureEnvelope(err)
 		}
 		return starEnvelope(map[string]any{"reportNo": input.ReportNo})
+	}
+	return this.roundTripPlan(ctx, method, path, requestURI, body, withSign)
+}
+
+// ============================= gRPC 扩展传输（项目套餐运行面） =============================
+
+// 套餐运行面 5 条 RPC 的传输绑定（proto/licence/v1/protocol-matrix.yaml 套餐段第 2/3 列一一对应）：
+// 业务语义在 runtime/plan.go 只写一份（HTTP 同形 JSON 体），本段只做 proto ↔ 信封翻译；
+// 失败经 planFailureEnvelope 合成与 HTTP 失败信封同形的 {code,msg,detail}（业务码取
+// errdetails.ErrorInfo.Reason，与 licen-hub 服务端 serviceError 同口径）。
+// 金额双协议一律 double 元；entitlements 为 JSON 原文 bytes 透传，不经 protobuf 重序列化。
+
+// planOrderCreateBody - 套餐下单请求体（requestId 与凭证族的关系：体字段 + metadata 双通道同值）
+type planOrderCreateBody struct {
+	PlanCode  string `json:"planCode"`
+	Billing   string `json:"billing"`
+	RequestId string `json:"requestId"`
+}
+
+// planOrderNoBody - 查单/取消请求体
+type planOrderNoBody struct {
+	OrderNo string `json:"orderNo"`
+}
+
+// planEnvelope - 套餐运行面成功信封：{code:0, msg:"ok", data:…}（与 licen-hub 套餐运行面
+// runtimeJSON 同形）；业务层只解析 data。
+func planEnvelope(data map[string]any) (int, []byte, error) {
+	return marshalMap(map[string]any{"code": 0, "msg": "ok", "data": data})
+}
+
+// planFailureEnvelope - gRPC 业务错误 → 与 HTTP 失败信封同形的 JSON + HTTP 等价状态码。
+// 口径与 apisFailureEnvelope/starFailureEnvelope 完全一致（业务码以 errdetails.ErrorInfo.Reason
+// 为准，未挂 ErrorInfo 时按 apisCodeByGRPCStatus 反推）；仅错误文本前缀为 plan。
+// Canceled / DeadlineExceeded / Unavailable 同样原样透传（客户端取消与传输故障不伪装业务码）。
+func planFailureEnvelope(err error) (int, []byte, error) {
+
+	grpcStatus := status.Convert(err)
+	switch grpcStatus.Code() {
+	case codes.Canceled:
+		return 0, nil, fmt.Errorf("plan: 调用已取消：%w", context.Canceled)
+	case codes.DeadlineExceeded:
+		return 0, nil, fmt.Errorf("plan: 调用已超时：%w", context.DeadlineExceeded)
+	case codes.Unavailable:
+		return 0, nil, err
+	}
+	code := apisCodeByGRPCStatus(grpcStatus.Code())
+	detail := map[string]any{}
+	for _, item := range grpcStatus.Details() {
+		info, ok := item.(*errdetails.ErrorInfo)
+		if !ok {
+			continue
+		}
+		if info.GetReason() != "" {
+			code = info.GetReason()
+		}
+		for key, value := range info.GetMetadata() {
+			detail[key] = value
+		}
+		break
+	}
+	body := map[string]any{"code": code, "msg": grpcStatus.Message()}
+	if len(detail) > 0 {
+		body["detail"] = detail
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return apis.HTTPStatusByCode(code), raw, nil
+}
+
+// planCatalogOptionMap - 计费选项 proto → 信封条目（camelCase 键与 HTTP 侧目录项逐字一致）
+func planCatalogOptionMap(option *licencev1.PlanCatalogOption) map[string]any {
+	return map[string]any{
+		"billing": option.GetBilling(), "price": option.GetPrice(), "salePrice": option.GetSalePrice(),
+		"discountTag": option.GetDiscountTag(), "founderLeft": option.GetFounderLeft(),
+	}
+}
+
+// planCatalogItemMap - 目录项 proto → 信封条目（entitlements 为 JSON 原文透传，缺省补空对象）
+func planCatalogItemMap(item *licencev1.PlanCatalogItem) map[string]any {
+
+	options := make([]map[string]any, 0, len(item.GetOptions()))
+	for _, option := range item.GetOptions() {
+		options = append(options, planCatalogOptionMap(option))
+	}
+	var entitlements any = map[string]any{}
+	if len(item.GetEntitlementsJson()) > 0 {
+		entitlements = json.RawMessage(item.GetEntitlementsJson())
+	}
+	return map[string]any{
+		"planCode": item.GetPlanCode(), "planName": item.GetPlanName(), "grade": item.GetGrade(),
+		"badge": item.GetBadge(), "summary": item.GetSummary(),
+		"entitlements": entitlements, "options": options,
+	}
+}
+
+// planOrderItemMap - 订单 proto → 信封条目（10 字段恒全量输出，与 HTTP 侧订单对象同形）
+func planOrderItemMap(item *licencev1.PlanOrderItem) map[string]any {
+
+	if item == nil {
+		return nil
+	}
+	return map[string]any{
+		"orderNo": item.GetOrderNo(), "orderType": item.GetOrderType(),
+		"planCode": item.GetPlanCode(), "planName": item.GetPlanName(), "billing": item.GetBilling(),
+		"amount": item.GetAmount(), "status": item.GetStatus(), "payUrl": item.GetPayUrl(),
+		"paidAt": item.GetPaidAt(), "createAt": item.GetCreateAt(),
+	}
+}
+
+// roundTripPlan - 项目套餐运行面 gRPC 分支（RoundTrip → roundTripExtended → roundTripStar → 本函数）。
+func (this *grpcRuntimeTransport) roundTripPlan(ctx context.Context, method, path, requestURI string, body []byte, withSign bool) (int, []byte, error) {
+	switch method + " " + path {
+	case http.MethodGet + " /api/v1/plans/catalog":
+		request := &licencev1.PlanCatalogRequest{}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlanRuntimeService_PlanCatalog_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.plan.PlanCatalog(callCtx, request)
+		if err != nil {
+			return planFailureEnvelope(err)
+		}
+		plans := make([]map[string]any, 0, len(response.GetPlans()))
+		for _, item := range response.GetPlans() {
+			plans = append(plans, planCatalogItemMap(item))
+		}
+		data := map[string]any{"plans": plans, "currentPlan": nil}
+		if current := response.GetCurrentPlan(); current != nil {
+			data["currentPlan"] = map[string]any{
+				"planCode": current.GetPlanCode(), "planName": current.GetPlanName(),
+				"billing": current.GetBilling(), "validUntil": current.GetValidUntil(),
+			}
+		}
+		return planEnvelope(data)
+
+	case http.MethodPost + " /api/v1/plan-orders/create":
+		var input planOrderCreateBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.PlanOrderCreateRequest{
+			PlanCode: input.PlanCode, Billing: input.Billing, RequestId: input.RequestId,
+		}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlanRuntimeService_PlanOrderCreate_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.plan.PlanOrderCreate(callCtx, request)
+		if err != nil {
+			return planFailureEnvelope(err)
+		}
+		return planEnvelope(map[string]any{
+			"orderNo": response.GetOrderNo(), "amount": response.GetAmount(),
+			"payUrl": response.GetPayUrl(), "expiredAt": response.GetExpiredAt(),
+		})
+
+	case http.MethodPost + " /api/v1/plan-orders/query":
+		var input planOrderNoBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.PlanOrderQueryRequest{OrderNo: input.OrderNo}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlanRuntimeService_PlanOrderQuery_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.plan.PlanOrderQuery(callCtx, request)
+		if err != nil {
+			return planFailureEnvelope(err)
+		}
+		return planEnvelope(planOrderItemMap(response.GetOrder()))
+
+	case http.MethodPost + " /api/v1/plan-orders/cancel":
+		var input planOrderNoBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.PlanOrderCancelRequest{OrderNo: input.OrderNo}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlanRuntimeService_PlanOrderCancel_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.plan.PlanOrderCancel(callCtx, request)
+		if err != nil {
+			return planFailureEnvelope(err)
+		}
+		return planEnvelope(planOrderItemMap(response.GetOrder()))
+
+	case http.MethodGet + " /api/v1/plan-orders/rows":
+		parsed, err := url.ParseRequestURI(requestURI)
+		if err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.PlanOrderRowsRequest{Page: int32(cast.ToInt(parsed.Query().Get("page")))}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.PlanRuntimeService_PlanOrderRows_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.plan.PlanOrderRows(callCtx, request)
+		if err != nil {
+			return planFailureEnvelope(err)
+		}
+		records := make([]map[string]any, 0, len(response.GetRecords()))
+		for _, item := range response.GetRecords() {
+			records = append(records, planOrderItemMap(item))
+		}
+		return planEnvelope(map[string]any{
+			"records": records, "count": response.GetCount(), "page": response.GetPage(),
+		})
 	}
 	return 0, nil, errorsNewUnsupported(method, requestURI)
 }

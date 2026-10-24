@@ -120,6 +120,9 @@ const (
 	EventStarDirectoryChanged = "star.directory.changed"
 	// EventStarArbitrationVerdict - 星链仲裁裁决（举报处置结果落定）
 	EventStarArbitrationVerdict = "star.arbitration.verdict"
+	// EventLicensePlanChanged - 许可证套餐已变更（套餐订单支付成功 / 平台侧套餐调整联动重签），
+	// data: {planCode, planName, billing, validUntil}；收到后调 Current 拉取重签信封即可获得 payload.plan 快照
+	EventLicensePlanChanged = "license.plan.changed"
 )
 
 // CallbackEvent - 分发给业务回调的事件对象
