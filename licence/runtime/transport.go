@@ -32,9 +32,11 @@ type validateBody struct {
 	ClientTime      int64            `json:"clientTime,omitempty"`
 }
 
-// provisionBody - 装机免费自动申领请求体（契约 §6.1；templateCode/provisionToken 官方二进制内写死）
+// provisionBody - 装机自动申领请求体（契约 §6.1；projectNo/provisionToken 官方二进制内写死）
+// tenantId 缺省 0 = 普通装机申领，>0 = SaaS 子租户发证（omitempty 不上送零值）。
 type provisionBody struct {
-	TemplateCode    string `json:"templateCode"`
+	ProjectNo       string `json:"projectNo"`
+	TenantId        int64  `json:"tenantId,omitempty"`
 	ProvisionToken  string `json:"provisionToken"`
 	InstallSN       string `json:"installSN"`
 	FingerprintHash string `json:"fingerprintHash,omitempty"`
@@ -42,16 +44,7 @@ type provisionBody struct {
 	ClientTime      int64  `json:"clientTime,omitempty"`
 }
 
-// redeemBody - 商业激活码兑换请求体（契约 §6.2）
-type redeemBody struct {
-	Code            string `json:"code"`
-	InstallSN       string `json:"installSN"`
-	FingerprintHash string `json:"fingerprintHash,omitempty"`
-	DeviceName      string `json:"deviceName,omitempty"`
-	ClientTime      int64  `json:"clientTime,omitempty"`
-}
-
-// provisionResponse - 装机自动申领/激活码兑换统一响应（契约 §6；status 为业务状态码）
+// provisionResponse - 装机自动申领统一响应（契约 §6；status 为业务状态码）
 type provisionResponse struct {
 	Status        string `json:"status"`
 	ServerTime    int64  `json:"serverTime"`

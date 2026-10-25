@@ -126,17 +126,15 @@ type (
 var MarshalManifestPayload = LicenceRuntime.MarshalManifestPayload
 var ParseManifest = LicenceRuntime.ParseManifest
 
-// ============================= 自助发放与兑换（镜像 runtime 包） =============================
+// ============================= 装机自动申领（镜像 runtime 包） =============================
 
 type (
 	ProvisionError   = LicenceRuntime.ProvisionError
 	ProvisionOptions = LicenceRuntime.ProvisionOptions
 	ProvisionResult  = LicenceRuntime.ProvisionResult
-	RedeemOptions    = LicenceRuntime.RedeemOptions
 )
 
-var Provision = LicenceRuntime.Provision
-var Redeem = LicenceRuntime.Redeem
+var ProvisionByPlan = LicenceRuntime.ProvisionByPlan
 
 // ============================= 配置回推与定义反推（镜像 runtime 包） =============================
 

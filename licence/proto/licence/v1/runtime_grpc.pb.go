@@ -19,11 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LicenseRuntimeService_Activate_FullMethodName  = "/licenhub.licence.v1.LicenseRuntimeService/Activate"
-	LicenseRuntimeService_Validate_FullMethodName  = "/licenhub.licence.v1.LicenseRuntimeService/Validate"
-	LicenseRuntimeService_Current_FullMethodName   = "/licenhub.licence.v1.LicenseRuntimeService/Current"
-	LicenseRuntimeService_Provision_FullMethodName = "/licenhub.licence.v1.LicenseRuntimeService/Provision"
-	LicenseRuntimeService_Redeem_FullMethodName    = "/licenhub.licence.v1.LicenseRuntimeService/Redeem"
+	LicenseRuntimeService_Activate_FullMethodName        = "/licenhub.licence.v1.LicenseRuntimeService/Activate"
+	LicenseRuntimeService_Validate_FullMethodName        = "/licenhub.licence.v1.LicenseRuntimeService/Validate"
+	LicenseRuntimeService_Current_FullMethodName         = "/licenhub.licence.v1.LicenseRuntimeService/Current"
+	LicenseRuntimeService_ProvisionByPlan_FullMethodName = "/licenhub.licence.v1.LicenseRuntimeService/ProvisionByPlan"
 )
 
 // LicenseRuntimeServiceClient is the client API for LicenseRuntimeService service.
@@ -35,10 +34,11 @@ type LicenseRuntimeServiceClient interface {
 	Activate(ctx context.Context, in *ActivateRequest, opts ...grpc.CallOption) (*RuntimeResponse, error)
 	Validate(ctx context.Context, in *ValidateRequest, opts ...grpc.CallOption) (*RuntimeResponse, error)
 	Current(ctx context.Context, in *CurrentLicenseRequest, opts ...grpc.CallOption) (*RuntimeResponse, error)
-	// Provision - 装机免费自动申领（匿名 Public；官方二进制内写死模板编码与签发令牌）
-	Provision(ctx context.Context, in *ProvisionRequest, opts ...grpc.CallOption) (*ProvisionResponse, error)
-	// Redeem - 商业激活码兑换（匿名 Public）
-	Redeem(ctx context.Context, in *RedeemRequest, opts ...grpc.CallOption) (*ProvisionResponse, error)
+	// ProvisionByPlan - 装机自动申领（匿名 Public；官方二进制内写死项目编号与项目级签发令牌，
+	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发）。
+	// 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已整体下线，
+	// 旧客户端按模板编码申领一律返回 TEMPLATE_DEPRECATED。
+	ProvisionByPlan(ctx context.Context, in *ProvisionRequest, opts ...grpc.CallOption) (*ProvisionResponse, error)
 }
 
 type licenseRuntimeServiceClient struct {
@@ -79,20 +79,10 @@ func (c *licenseRuntimeServiceClient) Current(ctx context.Context, in *CurrentLi
 	return out, nil
 }
 
-func (c *licenseRuntimeServiceClient) Provision(ctx context.Context, in *ProvisionRequest, opts ...grpc.CallOption) (*ProvisionResponse, error) {
+func (c *licenseRuntimeServiceClient) ProvisionByPlan(ctx context.Context, in *ProvisionRequest, opts ...grpc.CallOption) (*ProvisionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ProvisionResponse)
-	err := c.cc.Invoke(ctx, LicenseRuntimeService_Provision_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *licenseRuntimeServiceClient) Redeem(ctx context.Context, in *RedeemRequest, opts ...grpc.CallOption) (*ProvisionResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ProvisionResponse)
-	err := c.cc.Invoke(ctx, LicenseRuntimeService_Redeem_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, LicenseRuntimeService_ProvisionByPlan_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -108,10 +98,11 @@ type LicenseRuntimeServiceServer interface {
 	Activate(context.Context, *ActivateRequest) (*RuntimeResponse, error)
 	Validate(context.Context, *ValidateRequest) (*RuntimeResponse, error)
 	Current(context.Context, *CurrentLicenseRequest) (*RuntimeResponse, error)
-	// Provision - 装机免费自动申领（匿名 Public；官方二进制内写死模板编码与签发令牌）
-	Provision(context.Context, *ProvisionRequest) (*ProvisionResponse, error)
-	// Redeem - 商业激活码兑换（匿名 Public）
-	Redeem(context.Context, *RedeemRequest) (*ProvisionResponse, error)
+	// ProvisionByPlan - 装机自动申领（匿名 Public；官方二进制内写死项目编号与项目级签发令牌，
+	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发）。
+	// 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已整体下线，
+	// 旧客户端按模板编码申领一律返回 TEMPLATE_DEPRECATED。
+	ProvisionByPlan(context.Context, *ProvisionRequest) (*ProvisionResponse, error)
 	mustEmbedUnimplementedLicenseRuntimeServiceServer()
 }
 
@@ -131,11 +122,8 @@ func (UnimplementedLicenseRuntimeServiceServer) Validate(context.Context, *Valid
 func (UnimplementedLicenseRuntimeServiceServer) Current(context.Context, *CurrentLicenseRequest) (*RuntimeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Current not implemented")
 }
-func (UnimplementedLicenseRuntimeServiceServer) Provision(context.Context, *ProvisionRequest) (*ProvisionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Provision not implemented")
-}
-func (UnimplementedLicenseRuntimeServiceServer) Redeem(context.Context, *RedeemRequest) (*ProvisionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Redeem not implemented")
+func (UnimplementedLicenseRuntimeServiceServer) ProvisionByPlan(context.Context, *ProvisionRequest) (*ProvisionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ProvisionByPlan not implemented")
 }
 func (UnimplementedLicenseRuntimeServiceServer) mustEmbedUnimplementedLicenseRuntimeServiceServer() {}
 func (UnimplementedLicenseRuntimeServiceServer) testEmbeddedByValue()                               {}
@@ -212,38 +200,20 @@ func _LicenseRuntimeService_Current_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LicenseRuntimeService_Provision_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _LicenseRuntimeService_ProvisionByPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ProvisionRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LicenseRuntimeServiceServer).Provision(ctx, in)
+		return srv.(LicenseRuntimeServiceServer).ProvisionByPlan(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: LicenseRuntimeService_Provision_FullMethodName,
+		FullMethod: LicenseRuntimeService_ProvisionByPlan_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LicenseRuntimeServiceServer).Provision(ctx, req.(*ProvisionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _LicenseRuntimeService_Redeem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RedeemRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LicenseRuntimeServiceServer).Redeem(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LicenseRuntimeService_Redeem_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LicenseRuntimeServiceServer).Redeem(ctx, req.(*RedeemRequest))
+		return srv.(LicenseRuntimeServiceServer).ProvisionByPlan(ctx, req.(*ProvisionRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -268,12 +238,8 @@ var LicenseRuntimeService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _LicenseRuntimeService_Current_Handler,
 		},
 		{
-			MethodName: "Provision",
-			Handler:    _LicenseRuntimeService_Provision_Handler,
-		},
-		{
-			MethodName: "Redeem",
-			Handler:    _LicenseRuntimeService_Redeem_Handler,
+			MethodName: "ProvisionByPlan",
+			Handler:    _LicenseRuntimeService_ProvisionByPlan_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

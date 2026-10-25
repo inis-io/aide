@@ -101,7 +101,7 @@
 
 > 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
 
-- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，138 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/发放兑换/配置回推/项目套餐目录与订单；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（按能力
+- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，138 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/装机自动申领（`ProvisionByPlan`）/配置回推/项目套餐目录与订单；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（按能力
   子包分类：`core/` 共享核心件 + `iplocate`/`email` 能力子包，根包挂载能力子资源并 re-export
   共享件，`Invoke`/`Usage` 跨能力方法留根包））。依赖方向：根包（门面）→ `runtime`/`protocol`；`runtime` → `protocol`/`config`/`apis`；`admin`/`updater`/`callback` → `runtime` + `protocol`，编译期保证无环；详见 `licence/AGENTS.md`。
 - **纯函数层**（`protocol/` 包：`envelope.go` / `sign.go` / `licence.go`）：`Issue`（签发）、`VerifyEnvelope`/`VerifyRaw`（验签）、`Parse`/`ParseEnvelope`（解析）、`GenerateKeyPair`、`Nonce`。信封格式（`Envelope`/`Payload`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**

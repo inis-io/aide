@@ -9,10 +9,11 @@ service LicenseRuntimeService {
   rpc Activate(ActivateRequest) returns (RuntimeResponse);
   rpc Validate(ValidateRequest) returns (RuntimeResponse);
   rpc Current(CurrentLicenseRequest) returns (RuntimeResponse);
-  // Provision - 装机免费自动申领（匿名 Public；官方二进制内写死模板编码与签发令牌）
-  rpc Provision(ProvisionRequest) returns (ProvisionResponse);
-  // Redeem - 商业激活码兑换（匿名 Public）
-  rpc Redeem(RedeemRequest) returns (ProvisionResponse);
+  // ProvisionByPlan - 装机自动申领（匿名 Public；官方二进制内写死项目编号与项目级签发令牌，
+  // 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发）。
+  // 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已整体下线，
+  // 旧客户端按模板编码申领一律返回 TEMPLATE_DEPRECATED。
+  rpc ProvisionByPlan(ProvisionRequest) returns (ProvisionResponse);
 }
 
 // UpdateRuntimeService - 在线更新运行面。
@@ -78,27 +79,34 @@ message CurrentLicenseRequest {
   string license_no = 1;
 }
 
-// ProvisionRequest - 装机免费自动申领请求。
-// template_code 与 provision_token 由官方二进制内写死；install_sn 为安装唯一标识。
+// ProvisionRequest - 装机自动申领请求。
+// project_no 与 provision_token 由官方二进制内写死（项目级令牌）；install_sn 为安装唯一标识。
+// 历史字段 template_code（模板编码）随授权模板体系下线删除，字段号 1 与字段名永久 reserved。
 message ProvisionRequest {
-  string template_code = 1;
+  reserved 1;
+  reserved "template_code";
+  // project_no - 项目编号（必填，官方二进制内写死）
+  string project_no = 7;
+  // tenant_id - 0 = 普通装机申领；>0 = SaaS 子租户发证（平台按项目 tenant_issue_plan_id 档位签发）
+  int64 tenant_id = 8;
+  // provision_token - 项目级签发令牌（必填，匿名申领凭证，官方二进制内写死）
   string provision_token = 2;
+  // install_sn - 安装唯一标识（必填，同项目下唯一）
   string install_sn = 3;
+  // fingerprint_hash - 机器指纹哈希（可选，项目开启 provision_enforce_fingerprint 时强制）
   string fingerprint_hash = 4;
+  // device_name - 机器名称（可选，缺省取 os.Hostname）
   string device_name = 5;
+  // client_time - 客户端当前时间（毫秒，可选）
   int64 client_time = 6;
 }
 
-// RedeemRequest - 商业激活码兑换请求。
-message RedeemRequest {
-  string code = 1;
-  string install_sn = 2;
-  string fingerprint_hash = 3;
-  string device_name = 4;
-  int64 client_time = 5;
-}
+// RedeemRequest（商业激活码兑换请求）已随「激活码体系整体下线」删除：激活码兑换不再存在。
+// proto3 不支持文件级消息名 reserved，故在此以注释锁定历史占用——消息名 RedeemRequest 与
+// 字段号 code=1 / install_sn=2 / fingerprint_hash=3 / device_name=4 / client_time=5
+// 均禁止被任何新消息复用；同一 RPC 语义禁止以「兑换」形态重新引入。
 
-// ProvisionResponse - 装机自动申领/激活码兑换统一响应。
+// ProvisionResponse - 装机自动申领统一响应。
 message ProvisionResponse {
   string status = 1;
   int64 server_time = 2;

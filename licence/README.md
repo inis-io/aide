@@ -11,7 +11,7 @@
 1. [开始前：你需要从平台方拿到什么](#1-开始前你需要从平台方拿到什么)
 2. [安装](#2-安装)
 3. [快速开始：许可证激活与授权校验（运行面）](#3-快速开始许可证激活与授权校验运行面)
-   - [装机自动申领与激活码兑换（Provision / Redeem）](#31-装机自动申领与激活码兑换provision--redeem)
+   - [装机自动申领（ProvisionByPlan）](#31-装机自动申领provisionbyplan)
 4. [授权状态与降级策略](#4-授权状态与降级策略)
    - [多机席位（一 Client 一机一席）](#41-多机席位一-client-一机一席)
 5. [在线更新（更新代理/自更新程序用）](#5-在线更新更新代理自更新程序用)
@@ -30,7 +30,7 @@
 15. [实例指纹](#15-实例指纹)
 16. [安全存储接口](#16-安全存储接口)
 17. [运行面客户端 Client](#17-运行面客户端-client)
-   - [装机自动申领与激活码兑换（包级函数）](#174-装机自动申领与激活码兑换包级函数)
+   - [装机自动申领（包级函数 ProvisionByPlan）](#174-装机自动申领包级函数-provisionbyplan)
    - [API 商城调用（`lic.Apis`）](#175-api-商城调用licapis)
    - [LLM 网关调用（`apis/llm` 独立客户端）](#176-llm-网关调用apisllm-独立客户端)
    - [项目套餐（在售目录与套餐订单）](#177-项目套餐在售目录与套餐订单)
@@ -165,28 +165,29 @@ func main() {
 - 断网/平台故障自动按本地缓存信封降级运行（宽限内 `GRACE`，耗尽 `EXPIRED`）；
 - 许可证被续期/调整权益后，新信封自动下发、验签、替换缓存。
 
-### 3.1 装机自动申领与激活码兑换（Provision / Redeem）
+### 3.1 装机自动申领（ProvisionByPlan）
 
-面向**私有化/交付装机**场景：客户机器上只跑你的程序，程序启动时调用包级函数自动拿证，**零人工/零管理端操作**。两种获取方式共用同一套参数与返回：
+面向**私有化/交付装机**场景：客户机器上只跑你的程序，程序启动时调用包级函数自动拿证，**零人工/零管理端操作**。申领的定位参数是**项目编号 + 项目级签发令牌**（都写死在官方二进制里），签发参数（许可证类型、环境、绑定策略、席位、期限、权益）由平台侧该项目配置的**套餐档位**决定，客户端不做任何选择：
 
-| 函数 | 适用 | 平台侧 |
+| 场景 | 用法 | 平台侧 |
 |---|---|---|
-| `Provision` | 免费版自动申领（装机即激活） | 管理员预置 `inis` 项目 + 免费自动授权模板；客户机器免密申领 |
-| `Redeem` | 商业版激活码兑换 | 管理员预置商用模板并向客户发放激活码；客户机器输入码即激活 |
+| 免费版/试用装机 | `ProvisionByPlan`（`TenantId` 缺省 0） | 项目「授权签发方式」设为 SDK 自动签发并指定免费/试用套餐档位；客户机器免密申领 |
+| SaaS 子租户发证 | `ProvisionByPlan` + `TenantId=n`（n > 0） | 项目配置子租户发证档位；按该档位为子租户签发 |
 
 ```go
-result, err := licence.Provision(ctx, licence.ProvisionOptions{
+result, err := licence.ProvisionByPlan(ctx, licence.ProvisionOptions{
     ServerURL:      "https://licen-hub.inis.cn", // 平台地址（官方二进制内写死）
-    TemplateCode:   "INIS-AUTO",                 // 免费模板编码（官方二进制内写死）
-    ProvisionToken: "tmpl-token",                // 签发令牌（官方二进制内写死，服务端常数时间比对）
+    ProjectNo:      "INIS",                      // 项目编号（官方二进制内写死）
+    ProvisionToken: "proj-token",                // 项目级签发令牌（官方二进制内写死，服务端常数时间比对）
 })
 if err != nil {
     // 业务拒绝是 *licence.ProvisionError，errors.As 后按 Status 降级
     var denied *licence.ProvisionError
     if errors.As(err, &denied) {
         switch denied.Status {
-        case "RATE_LIMITED":   /* 稍后重试 */
-        case "QUOTA_EXCEEDED": /* 今日发放额用完 */
+        case "RATE_LIMITED":        /* 稍后重试 */
+        case "QUOTA_EXCEEDED":      /* 今日发放额用完 */
+        case "TEMPLATE_DEPRECATED": /* 客户端过旧（仍在用模板编码申领），提示升级 */
         }
     }
     return err
@@ -204,9 +205,9 @@ if err = client.Start(ctx); err != nil {
 }
 ```
 
-**安装唯一标识（install.sn）**：申领/兑换按机器持久化一个 UUID v4 到 `StorageDir/install.sn`（默认 `./runtime/licence/install.sn`）。同机重装/换证复用一个 SN，平台据此幂等复用或有界续签；SDK 首次使用自动生成，也可用 `ProvisionOptions.InstallSN` 显式覆盖。该文件独立于按 licenseNo 命名的状态文件，跨许可证生命周期稳定。
+**安装唯一标识（install.sn）**：申领按机器持久化一个 UUID v4 到 `StorageDir/install.sn`（默认 `./runtime/licence/install.sn`）。同机重装/换证复用一个 SN，平台据此幂等复用或有界续签；SDK 首次使用自动生成，也可用 `ProvisionOptions.InstallSN` 显式覆盖。该文件独立于按 licenseNo 命名的状态文件，跨许可证生命周期稳定。
 
-> **商业版与免费版同一套后端能力**：`RedeemOptions` 内嵌 `ProvisionOptions`，除激活码外语义完全一致；免费自动激活额度不足时引导客户买码，程序内零改动切换。
+> **旧契约已移除，无宽限期**：授权模板与激活码体系整体下线，旧 `Provision`（模板编码 `TemplateCode` + 模板级令牌）与旧 `Redeem`（激活码兑换）方法一并删除。仍在用旧版 SDK 的客户端会收到 `TEMPLATE_DEPRECATED` 业务码，升级后把 `TemplateCode` 换成 `ProjectNo`（令牌换成项目级令牌）即可，其余参数与返回值不变；商业授权改走套餐在线购买（`PlansCatalog` / 套餐订单），不再有激活码兑换通道。
 
 ## 4. 授权状态与降级策略
 
@@ -745,15 +746,16 @@ if quotaGB, ok := client.GetFloat("max_storage_gb"); ok { /* 小数额度 */ }
 if !client.CheckVersion("2.3.1") { /* 当前版本不在授权范围 */ }
 ```
 
-### 17.4 装机自动申领与激活码兑换（包级函数 Provision / Redeem）
+### 17.4 装机自动申领（包级函数 ProvisionByPlan）
 
-> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用，拿证后再构造运行面客户端。传输层与运行面复用同一 HTTP/gRPC 双实现，申领/兑换为匿名凭证（`withSign=false`，不请求签名）；业务码统一放 200/nil-error 的 `status` 字段，两协议线格式一致。
+> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用，拿证后再构造运行面客户端。传输层与运行面复用同一 HTTP/gRPC 双实现，申领为匿名凭证（`withSign=false`，不请求签名）；业务码统一放 200/nil-error 的 `status` 字段，两协议线格式一致。契约：HTTP `POST /api/v1/licenses/provision` ↔ gRPC `LicenseRuntimeService/ProvisionByPlan`（请求字段 `project_no` / `tenant_id` / `provision_token` / `install_sn` / `fingerprint_hash` / `device_name` / `client_time`）。
 
 ```go
 type ProvisionOptions struct {
     ServerURL      string        // 平台地址（必填）
-    TemplateCode   string        // 模板编码（必填，官方二进制写死）
-    ProvisionToken string        // 签发令牌（必填，匿名申领凭证，官方二进制写死）
+    ProjectNo      string        // 项目编号（必填，官方二进制写死）
+    ProvisionToken string        // 项目级签发令牌（必填，匿名申领凭证，官方二进制写死）
+    TenantId       int64         // SaaS 子租户 ID（可选，0 = 普通装机申领；>0 = 子租户发证）
     StorageDir     string        // install.sn 持久化目录（默认 ./runtime/licence）
     InstallSN      string        // 安装唯一标识（可选，为空懒生成 UUID v4 并持久化）
     DeviceName     string        // 机器名称（可选，缺省取 os.Hostname）
@@ -761,28 +763,25 @@ type ProvisionOptions struct {
     GRPC           GRPCOptions   // gRPC 连接配置（仅 TransportGRPC 生效）
     HTTPTimeout    time.Duration // 单次请求超时（默认 15 秒）
 }
-type RedeemOptions struct {
-    ProvisionOptions
-    Code string // 激活码（必填）
-}
 type ProvisionResult struct {
     LicenseNo     string // 许可证编号（New 必填）
-    Salt          string // 指纹盐（New 必填，与申领模板一致）
+    Salt          string // 指纹盐（New 必填，与签发套餐档位一致）
     BindingPolicy string // single / seats
     SeatLimit     int
     ExpiresAt     int64  // 有效期截止（毫秒）
     Reissued      bool   // 同 SN 有界续签
 }
 type ProvisionError struct { // 业务拒绝，errors.As 断言
-    Status  string // PROVISION_DISABLED / TEMPLATE_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
+    Status  string // PROVISION_DISABLED / TEMPLATE_DEPRECATED / PLAN_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
     Message string // 平台提示
 }
 ```
 
 | 函数 | 签名 | 说明 |
 |---|---|---|
-| `Provision` | `func Provision(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error)` | 免费版装机自动申领；业务拒绝返回 `*ProvisionError` |
-| `Redeem` | `func Redeem(ctx context.Context, opts RedeemOptions) (ProvisionResult, error)` | 商业激活码兑换，语义同上 |
+| `ProvisionByPlan` | `func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error)` | 装机自动申领（项目编号 + 项目级令牌 + 套餐档位；`TenantId>0` 为 SaaS 子租户发证）；业务拒绝返回 `*ProvisionError` |
+
+`*ProvisionError` 的 `Status` 由服务端定义，SDK **不维护白名单**：除 `OK` 外的一切业务码（含服务端新增的 `TEMPLATE_DEPRECATED` 等）一律原样透传，调用方按需降级，SDK 不会因未知码 panic 或吞错。
 
 `install.sn` 生命周期：显式 `InstallSN` 优先；否则读 `StorageDir/install.sn` 幂等复用；不存在则懒生成 UUID v4 原子落盘（`MkdirAll 0700` + tmp/rename + `0600`）。卸载清理删除该文件属预期行为（重装生成新 SN，视为新装机）。
 
@@ -1751,7 +1750,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
-| `runtime/provision.go` | 自助发放 `Provision` 与兑换码兑换 `Redeem`（HTTP/gRPC 双协议） |
+| `runtime/provision.go` | 装机自动申领 `ProvisionByPlan`（项目编号 + 项目级令牌 + 套餐档位，可选 SaaS 子租户 `TenantId`；HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |

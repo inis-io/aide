@@ -233,18 +233,27 @@ func (x *CurrentLicenseRequest) GetLicenseNo() string {
 	return ""
 }
 
-// ProvisionRequest - 装机免费自动申领请求。
-// template_code 与 provision_token 由官方二进制内写死；install_sn 为安装唯一标识。
+// ProvisionRequest - 装机自动申领请求。
+// project_no 与 provision_token 由官方二进制内写死（项目级令牌）；install_sn 为安装唯一标识。
+// 历史字段 template_code（模板编码）随授权模板体系下线删除，字段号 1 与字段名永久 reserved。
 type ProvisionRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	TemplateCode    string                 `protobuf:"bytes,1,opt,name=template_code,json=templateCode,proto3" json:"template_code,omitempty"`
-	ProvisionToken  string                 `protobuf:"bytes,2,opt,name=provision_token,json=provisionToken,proto3" json:"provision_token,omitempty"`
-	InstallSn       string                 `protobuf:"bytes,3,opt,name=install_sn,json=installSn,proto3" json:"install_sn,omitempty"`
-	FingerprintHash string                 `protobuf:"bytes,4,opt,name=fingerprint_hash,json=fingerprintHash,proto3" json:"fingerprint_hash,omitempty"`
-	DeviceName      string                 `protobuf:"bytes,5,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
-	ClientTime      int64                  `protobuf:"varint,6,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// project_no - 项目编号（必填，官方二进制内写死）
+	ProjectNo string `protobuf:"bytes,7,opt,name=project_no,json=projectNo,proto3" json:"project_no,omitempty"`
+	// tenant_id - 0 = 普通装机申领；>0 = SaaS 子租户发证（平台按项目 tenant_issue_plan_id 档位签发）
+	TenantId int64 `protobuf:"varint,8,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// provision_token - 项目级签发令牌（必填，匿名申领凭证，官方二进制内写死）
+	ProvisionToken string `protobuf:"bytes,2,opt,name=provision_token,json=provisionToken,proto3" json:"provision_token,omitempty"`
+	// install_sn - 安装唯一标识（必填，同项目下唯一）
+	InstallSn string `protobuf:"bytes,3,opt,name=install_sn,json=installSn,proto3" json:"install_sn,omitempty"`
+	// fingerprint_hash - 机器指纹哈希（可选，项目开启 provision_enforce_fingerprint 时强制）
+	FingerprintHash string `protobuf:"bytes,4,opt,name=fingerprint_hash,json=fingerprintHash,proto3" json:"fingerprint_hash,omitempty"`
+	// device_name - 机器名称（可选，缺省取 os.Hostname）
+	DeviceName string `protobuf:"bytes,5,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
+	// client_time - 客户端当前时间（毫秒，可选）
+	ClientTime    int64 `protobuf:"varint,6,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProvisionRequest) Reset() {
@@ -277,11 +286,18 @@ func (*ProvisionRequest) Descriptor() ([]byte, []int) {
 	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ProvisionRequest) GetTemplateCode() string {
+func (x *ProvisionRequest) GetProjectNo() string {
 	if x != nil {
-		return x.TemplateCode
+		return x.ProjectNo
 	}
 	return ""
+}
+
+func (x *ProvisionRequest) GetTenantId() int64 {
+	if x != nil {
+		return x.TenantId
+	}
+	return 0
 }
 
 func (x *ProvisionRequest) GetProvisionToken() string {
@@ -319,84 +335,7 @@ func (x *ProvisionRequest) GetClientTime() int64 {
 	return 0
 }
 
-// RedeemRequest - 商业激活码兑换请求。
-type RedeemRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Code            string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
-	InstallSn       string                 `protobuf:"bytes,2,opt,name=install_sn,json=installSn,proto3" json:"install_sn,omitempty"`
-	FingerprintHash string                 `protobuf:"bytes,3,opt,name=fingerprint_hash,json=fingerprintHash,proto3" json:"fingerprint_hash,omitempty"`
-	DeviceName      string                 `protobuf:"bytes,4,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
-	ClientTime      int64                  `protobuf:"varint,5,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
-}
-
-func (x *RedeemRequest) Reset() {
-	*x = RedeemRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RedeemRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RedeemRequest) ProtoMessage() {}
-
-func (x *RedeemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RedeemRequest.ProtoReflect.Descriptor instead.
-func (*RedeemRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *RedeemRequest) GetCode() string {
-	if x != nil {
-		return x.Code
-	}
-	return ""
-}
-
-func (x *RedeemRequest) GetInstallSn() string {
-	if x != nil {
-		return x.InstallSn
-	}
-	return ""
-}
-
-func (x *RedeemRequest) GetFingerprintHash() string {
-	if x != nil {
-		return x.FingerprintHash
-	}
-	return ""
-}
-
-func (x *RedeemRequest) GetDeviceName() string {
-	if x != nil {
-		return x.DeviceName
-	}
-	return ""
-}
-
-func (x *RedeemRequest) GetClientTime() int64 {
-	if x != nil {
-		return x.ClientTime
-	}
-	return 0
-}
-
-// ProvisionResponse - 装机自动申领/激活码兑换统一响应。
+// ProvisionResponse - 装机自动申领统一响应。
 type ProvisionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
@@ -414,7 +353,7 @@ type ProvisionResponse struct {
 
 func (x *ProvisionResponse) Reset() {
 	*x = ProvisionResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[5]
+	mi := &file_licence_v1_runtime_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -426,7 +365,7 @@ func (x *ProvisionResponse) String() string {
 func (*ProvisionResponse) ProtoMessage() {}
 
 func (x *ProvisionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[5]
+	mi := &file_licence_v1_runtime_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -439,7 +378,7 @@ func (x *ProvisionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProvisionResponse.ProtoReflect.Descriptor instead.
 func (*ProvisionResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{5}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProvisionResponse) GetStatus() string {
@@ -523,7 +462,7 @@ type RuntimeResponse struct {
 
 func (x *RuntimeResponse) Reset() {
 	*x = RuntimeResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[6]
+	mi := &file_licence_v1_runtime_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -535,7 +474,7 @@ func (x *RuntimeResponse) String() string {
 func (*RuntimeResponse) ProtoMessage() {}
 
 func (x *RuntimeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[6]
+	mi := &file_licence_v1_runtime_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -548,7 +487,7 @@ func (x *RuntimeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeResponse.ProtoReflect.Descriptor instead.
 func (*RuntimeResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{6}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RuntimeResponse) GetStatus() string {
@@ -620,7 +559,7 @@ type UpdateCheckRequest struct {
 
 func (x *UpdateCheckRequest) Reset() {
 	*x = UpdateCheckRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[7]
+	mi := &file_licence_v1_runtime_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -632,7 +571,7 @@ func (x *UpdateCheckRequest) String() string {
 func (*UpdateCheckRequest) ProtoMessage() {}
 
 func (x *UpdateCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[7]
+	mi := &file_licence_v1_runtime_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -645,7 +584,7 @@ func (x *UpdateCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCheckRequest.ProtoReflect.Descriptor instead.
 func (*UpdateCheckRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{7}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *UpdateCheckRequest) GetLicenseNo() string {
@@ -696,7 +635,7 @@ type UpdateCheckResponse struct {
 
 func (x *UpdateCheckResponse) Reset() {
 	*x = UpdateCheckResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[8]
+	mi := &file_licence_v1_runtime_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -708,7 +647,7 @@ func (x *UpdateCheckResponse) String() string {
 func (*UpdateCheckResponse) ProtoMessage() {}
 
 func (x *UpdateCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[8]
+	mi := &file_licence_v1_runtime_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -721,7 +660,7 @@ func (x *UpdateCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateCheckResponse.ProtoReflect.Descriptor instead.
 func (*UpdateCheckResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{8}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UpdateCheckResponse) GetStatus() string {
@@ -775,7 +714,7 @@ type UpdateReportRequest struct {
 
 func (x *UpdateReportRequest) Reset() {
 	*x = UpdateReportRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[9]
+	mi := &file_licence_v1_runtime_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -787,7 +726,7 @@ func (x *UpdateReportRequest) String() string {
 func (*UpdateReportRequest) ProtoMessage() {}
 
 func (x *UpdateReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[9]
+	mi := &file_licence_v1_runtime_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -800,7 +739,7 @@ func (x *UpdateReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateReportRequest.ProtoReflect.Descriptor instead.
 func (*UpdateReportRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{9}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateReportRequest) GetLicenseNo() string {
@@ -870,7 +809,7 @@ type UpdateLogsRequest struct {
 
 func (x *UpdateLogsRequest) Reset() {
 	*x = UpdateLogsRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[10]
+	mi := &file_licence_v1_runtime_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -882,7 +821,7 @@ func (x *UpdateLogsRequest) String() string {
 func (*UpdateLogsRequest) ProtoMessage() {}
 
 func (x *UpdateLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[10]
+	mi := &file_licence_v1_runtime_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -895,7 +834,7 @@ func (x *UpdateLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLogsRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLogsRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{10}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateLogsRequest) GetLicenseNo() string {
@@ -931,7 +870,7 @@ type UpdateReportResponse struct {
 
 func (x *UpdateReportResponse) Reset() {
 	*x = UpdateReportResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[11]
+	mi := &file_licence_v1_runtime_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -943,7 +882,7 @@ func (x *UpdateReportResponse) String() string {
 func (*UpdateReportResponse) ProtoMessage() {}
 
 func (x *UpdateReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[11]
+	mi := &file_licence_v1_runtime_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -956,7 +895,7 @@ func (x *UpdateReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateReportResponse.ProtoReflect.Descriptor instead.
 func (*UpdateReportResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{11}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateReportResponse) GetStatus() string {
@@ -997,7 +936,7 @@ type TenantSyncRequest struct {
 
 func (x *TenantSyncRequest) Reset() {
 	*x = TenantSyncRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[12]
+	mi := &file_licence_v1_runtime_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +948,7 @@ func (x *TenantSyncRequest) String() string {
 func (*TenantSyncRequest) ProtoMessage() {}
 
 func (x *TenantSyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[12]
+	mi := &file_licence_v1_runtime_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +961,7 @@ func (x *TenantSyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantSyncRequest.ProtoReflect.Descriptor instead.
 func (*TenantSyncRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{12}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TenantSyncRequest) GetLicenseNo() string {
@@ -1049,7 +988,7 @@ type TenantManifest struct {
 
 func (x *TenantManifest) Reset() {
 	*x = TenantManifest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[13]
+	mi := &file_licence_v1_runtime_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1061,7 +1000,7 @@ func (x *TenantManifest) String() string {
 func (*TenantManifest) ProtoMessage() {}
 
 func (x *TenantManifest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[13]
+	mi := &file_licence_v1_runtime_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1074,7 +1013,7 @@ func (x *TenantManifest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantManifest.ProtoReflect.Descriptor instead.
 func (*TenantManifest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{13}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TenantManifest) GetVersion() int32 {
@@ -1102,7 +1041,7 @@ type TenantSyncItem struct {
 
 func (x *TenantSyncItem) Reset() {
 	*x = TenantSyncItem{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[14]
+	mi := &file_licence_v1_runtime_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1114,7 +1053,7 @@ func (x *TenantSyncItem) String() string {
 func (*TenantSyncItem) ProtoMessage() {}
 
 func (x *TenantSyncItem) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[14]
+	mi := &file_licence_v1_runtime_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1127,7 +1066,7 @@ func (x *TenantSyncItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantSyncItem.ProtoReflect.Descriptor instead.
 func (*TenantSyncItem) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{14}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TenantSyncItem) GetTenantCode() string {
@@ -1166,7 +1105,7 @@ type TenantSyncResponse struct {
 
 func (x *TenantSyncResponse) Reset() {
 	*x = TenantSyncResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[15]
+	mi := &file_licence_v1_runtime_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1178,7 +1117,7 @@ func (x *TenantSyncResponse) String() string {
 func (*TenantSyncResponse) ProtoMessage() {}
 
 func (x *TenantSyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[15]
+	mi := &file_licence_v1_runtime_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1191,7 +1130,7 @@ func (x *TenantSyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantSyncResponse.ProtoReflect.Descriptor instead.
 func (*TenantSyncResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{15}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TenantSyncResponse) GetStatus() string {
@@ -1253,7 +1192,7 @@ type TenantSearchRequest struct {
 
 func (x *TenantSearchRequest) Reset() {
 	*x = TenantSearchRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[16]
+	mi := &file_licence_v1_runtime_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1265,7 +1204,7 @@ func (x *TenantSearchRequest) String() string {
 func (*TenantSearchRequest) ProtoMessage() {}
 
 func (x *TenantSearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[16]
+	mi := &file_licence_v1_runtime_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1278,7 +1217,7 @@ func (x *TenantSearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantSearchRequest.ProtoReflect.Descriptor instead.
 func (*TenantSearchRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{16}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TenantSearchRequest) GetLicenseNo() string {
@@ -1305,7 +1244,7 @@ type TenantSearchItem struct {
 
 func (x *TenantSearchItem) Reset() {
 	*x = TenantSearchItem{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[17]
+	mi := &file_licence_v1_runtime_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1317,7 +1256,7 @@ func (x *TenantSearchItem) String() string {
 func (*TenantSearchItem) ProtoMessage() {}
 
 func (x *TenantSearchItem) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[17]
+	mi := &file_licence_v1_runtime_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1330,7 +1269,7 @@ func (x *TenantSearchItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantSearchItem.ProtoReflect.Descriptor instead.
 func (*TenantSearchItem) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{17}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TenantSearchItem) GetTenantCode() string {
@@ -1359,7 +1298,7 @@ type TenantSearchResponse struct {
 
 func (x *TenantSearchResponse) Reset() {
 	*x = TenantSearchResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[18]
+	mi := &file_licence_v1_runtime_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1371,7 +1310,7 @@ func (x *TenantSearchResponse) String() string {
 func (*TenantSearchResponse) ProtoMessage() {}
 
 func (x *TenantSearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[18]
+	mi := &file_licence_v1_runtime_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1384,7 +1323,7 @@ func (x *TenantSearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantSearchResponse.ProtoReflect.Descriptor instead.
 func (*TenantSearchResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{18}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TenantSearchResponse) GetStatus() string {
@@ -1428,7 +1367,7 @@ type TenantValidateRequest struct {
 
 func (x *TenantValidateRequest) Reset() {
 	*x = TenantValidateRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[19]
+	mi := &file_licence_v1_runtime_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1440,7 +1379,7 @@ func (x *TenantValidateRequest) String() string {
 func (*TenantValidateRequest) ProtoMessage() {}
 
 func (x *TenantValidateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[19]
+	mi := &file_licence_v1_runtime_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1453,7 +1392,7 @@ func (x *TenantValidateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantValidateRequest.ProtoReflect.Descriptor instead.
 func (*TenantValidateRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{19}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TenantValidateRequest) GetLicenseNo() string {
@@ -1501,7 +1440,7 @@ type TenantCurrentRequest struct {
 
 func (x *TenantCurrentRequest) Reset() {
 	*x = TenantCurrentRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[20]
+	mi := &file_licence_v1_runtime_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +1452,7 @@ func (x *TenantCurrentRequest) String() string {
 func (*TenantCurrentRequest) ProtoMessage() {}
 
 func (x *TenantCurrentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[20]
+	mi := &file_licence_v1_runtime_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1465,7 @@ func (x *TenantCurrentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantCurrentRequest.ProtoReflect.Descriptor instead.
 func (*TenantCurrentRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{20}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TenantCurrentRequest) GetLicenseNo() string {
@@ -1555,7 +1494,7 @@ type TenantResponse struct {
 
 func (x *TenantResponse) Reset() {
 	*x = TenantResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[21]
+	mi := &file_licence_v1_runtime_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1567,7 +1506,7 @@ func (x *TenantResponse) String() string {
 func (*TenantResponse) ProtoMessage() {}
 
 func (x *TenantResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[21]
+	mi := &file_licence_v1_runtime_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1580,7 +1519,7 @@ func (x *TenantResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantResponse.ProtoReflect.Descriptor instead.
 func (*TenantResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{21}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *TenantResponse) GetStatus() string {
@@ -1620,7 +1559,7 @@ type ProjectConfigSyncRequest struct {
 
 func (x *ProjectConfigSyncRequest) Reset() {
 	*x = ProjectConfigSyncRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[22]
+	mi := &file_licence_v1_runtime_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1632,7 +1571,7 @@ func (x *ProjectConfigSyncRequest) String() string {
 func (*ProjectConfigSyncRequest) ProtoMessage() {}
 
 func (x *ProjectConfigSyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[22]
+	mi := &file_licence_v1_runtime_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1645,7 +1584,7 @@ func (x *ProjectConfigSyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectConfigSyncRequest.ProtoReflect.Descriptor instead.
 func (*ProjectConfigSyncRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{22}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{21}
 }
 
 type ProjectConfigSyncResponse struct {
@@ -1656,7 +1595,7 @@ type ProjectConfigSyncResponse struct {
 
 func (x *ProjectConfigSyncResponse) Reset() {
 	*x = ProjectConfigSyncResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[23]
+	mi := &file_licence_v1_runtime_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1668,7 +1607,7 @@ func (x *ProjectConfigSyncResponse) String() string {
 func (*ProjectConfigSyncResponse) ProtoMessage() {}
 
 func (x *ProjectConfigSyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[23]
+	mi := &file_licence_v1_runtime_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1681,7 +1620,7 @@ func (x *ProjectConfigSyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectConfigSyncResponse.ProtoReflect.Descriptor instead.
 func (*ProjectConfigSyncResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{23}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{22}
 }
 
 type PlatformConfigSyncRequest struct {
@@ -1695,7 +1634,7 @@ type PlatformConfigSyncRequest struct {
 
 func (x *PlatformConfigSyncRequest) Reset() {
 	*x = PlatformConfigSyncRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[24]
+	mi := &file_licence_v1_runtime_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1707,7 +1646,7 @@ func (x *PlatformConfigSyncRequest) String() string {
 func (*PlatformConfigSyncRequest) ProtoMessage() {}
 
 func (x *PlatformConfigSyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[24]
+	mi := &file_licence_v1_runtime_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,7 +1659,7 @@ func (x *PlatformConfigSyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlatformConfigSyncRequest.ProtoReflect.Descriptor instead.
 func (*PlatformConfigSyncRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{24}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *PlatformConfigSyncRequest) GetLicenseNo() string {
@@ -1756,7 +1695,7 @@ type PlatformConfigSyncResponse struct {
 
 func (x *PlatformConfigSyncResponse) Reset() {
 	*x = PlatformConfigSyncResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[25]
+	mi := &file_licence_v1_runtime_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1768,7 +1707,7 @@ func (x *PlatformConfigSyncResponse) String() string {
 func (*PlatformConfigSyncResponse) ProtoMessage() {}
 
 func (x *PlatformConfigSyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[25]
+	mi := &file_licence_v1_runtime_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1781,7 +1720,7 @@ func (x *PlatformConfigSyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlatformConfigSyncResponse.ProtoReflect.Descriptor instead.
 func (*PlatformConfigSyncResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{25}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PlatformConfigSyncResponse) GetStatus() string {
@@ -1823,7 +1762,7 @@ type ConfigConsumptionItem struct {
 
 func (x *ConfigConsumptionItem) Reset() {
 	*x = ConfigConsumptionItem{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[26]
+	mi := &file_licence_v1_runtime_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1835,7 +1774,7 @@ func (x *ConfigConsumptionItem) String() string {
 func (*ConfigConsumptionItem) ProtoMessage() {}
 
 func (x *ConfigConsumptionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[26]
+	mi := &file_licence_v1_runtime_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1848,7 +1787,7 @@ func (x *ConfigConsumptionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigConsumptionItem.ProtoReflect.Descriptor instead.
 func (*ConfigConsumptionItem) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{26}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ConfigConsumptionItem) GetKey() string {
@@ -1876,7 +1815,7 @@ type ConfigConsumptionReportRequest struct {
 
 func (x *ConfigConsumptionReportRequest) Reset() {
 	*x = ConfigConsumptionReportRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[27]
+	mi := &file_licence_v1_runtime_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1888,7 +1827,7 @@ func (x *ConfigConsumptionReportRequest) String() string {
 func (*ConfigConsumptionReportRequest) ProtoMessage() {}
 
 func (x *ConfigConsumptionReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[27]
+	mi := &file_licence_v1_runtime_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1901,7 +1840,7 @@ func (x *ConfigConsumptionReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigConsumptionReportRequest.ProtoReflect.Descriptor instead.
 func (*ConfigConsumptionReportRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{27}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ConfigConsumptionReportRequest) GetLicenseNo() string {
@@ -1930,7 +1869,7 @@ type ConfigConsumptionReportResponse struct {
 
 func (x *ConfigConsumptionReportResponse) Reset() {
 	*x = ConfigConsumptionReportResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[28]
+	mi := &file_licence_v1_runtime_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1942,7 +1881,7 @@ func (x *ConfigConsumptionReportResponse) String() string {
 func (*ConfigConsumptionReportResponse) ProtoMessage() {}
 
 func (x *ConfigConsumptionReportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[28]
+	mi := &file_licence_v1_runtime_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1955,7 +1894,7 @@ func (x *ConfigConsumptionReportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigConsumptionReportResponse.ProtoReflect.Descriptor instead.
 func (*ConfigConsumptionReportResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{28}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ConfigConsumptionReportResponse) GetStatus() string {
@@ -1993,7 +1932,7 @@ type EventSubscribeRequest struct {
 
 func (x *EventSubscribeRequest) Reset() {
 	*x = EventSubscribeRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[29]
+	mi := &file_licence_v1_runtime_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2005,7 +1944,7 @@ func (x *EventSubscribeRequest) String() string {
 func (*EventSubscribeRequest) ProtoMessage() {}
 
 func (x *EventSubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[29]
+	mi := &file_licence_v1_runtime_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2018,7 +1957,7 @@ func (x *EventSubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventSubscribeRequest.ProtoReflect.Descriptor instead.
 func (*EventSubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{29}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *EventSubscribeRequest) GetLicenseNo() string {
@@ -2054,7 +1993,7 @@ type EventMessage struct {
 
 func (x *EventMessage) Reset() {
 	*x = EventMessage{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[30]
+	mi := &file_licence_v1_runtime_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2066,7 +2005,7 @@ func (x *EventMessage) String() string {
 func (*EventMessage) ProtoMessage() {}
 
 func (x *EventMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[30]
+	mi := &file_licence_v1_runtime_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2079,7 +2018,7 @@ func (x *EventMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventMessage.ProtoReflect.Descriptor instead.
 func (*EventMessage) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{30}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *EventMessage) GetEventId() int64 {
@@ -2109,7 +2048,7 @@ type ConfigPushbackPushRequest struct {
 
 func (x *ConfigPushbackPushRequest) Reset() {
 	*x = ConfigPushbackPushRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[31]
+	mi := &file_licence_v1_runtime_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2121,7 +2060,7 @@ func (x *ConfigPushbackPushRequest) String() string {
 func (*ConfigPushbackPushRequest) ProtoMessage() {}
 
 func (x *ConfigPushbackPushRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[31]
+	mi := &file_licence_v1_runtime_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2134,7 +2073,7 @@ func (x *ConfigPushbackPushRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigPushbackPushRequest.ProtoReflect.Descriptor instead.
 func (*ConfigPushbackPushRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{31}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ConfigPushbackPushRequest) GetTenantId() uint64 {
@@ -2173,7 +2112,7 @@ type ConfigPushbackPushResponse struct {
 
 func (x *ConfigPushbackPushResponse) Reset() {
 	*x = ConfigPushbackPushResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[32]
+	mi := &file_licence_v1_runtime_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2185,7 +2124,7 @@ func (x *ConfigPushbackPushResponse) String() string {
 func (*ConfigPushbackPushResponse) ProtoMessage() {}
 
 func (x *ConfigPushbackPushResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[32]
+	mi := &file_licence_v1_runtime_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2198,7 +2137,7 @@ func (x *ConfigPushbackPushResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigPushbackPushResponse.ProtoReflect.Descriptor instead.
 func (*ConfigPushbackPushResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{32}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ConfigPushbackPushResponse) GetBatchId() uint64 {
@@ -2258,7 +2197,7 @@ type ConfigDefinitionGroup struct {
 
 func (x *ConfigDefinitionGroup) Reset() {
 	*x = ConfigDefinitionGroup{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[33]
+	mi := &file_licence_v1_runtime_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2270,7 +2209,7 @@ func (x *ConfigDefinitionGroup) String() string {
 func (*ConfigDefinitionGroup) ProtoMessage() {}
 
 func (x *ConfigDefinitionGroup) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[33]
+	mi := &file_licence_v1_runtime_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2283,7 +2222,7 @@ func (x *ConfigDefinitionGroup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigDefinitionGroup.ProtoReflect.Descriptor instead.
 func (*ConfigDefinitionGroup) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{33}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ConfigDefinitionGroup) GetName() string {
@@ -2348,7 +2287,7 @@ type ConfigDefinitionItem struct {
 
 func (x *ConfigDefinitionItem) Reset() {
 	*x = ConfigDefinitionItem{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[34]
+	mi := &file_licence_v1_runtime_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2360,7 +2299,7 @@ func (x *ConfigDefinitionItem) String() string {
 func (*ConfigDefinitionItem) ProtoMessage() {}
 
 func (x *ConfigDefinitionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[34]
+	mi := &file_licence_v1_runtime_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2373,7 +2312,7 @@ func (x *ConfigDefinitionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigDefinitionItem.ProtoReflect.Descriptor instead.
 func (*ConfigDefinitionItem) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{34}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ConfigDefinitionItem) GetKey() string {
@@ -2466,7 +2405,7 @@ type ConfigPushbackDefinitionsRequest struct {
 
 func (x *ConfigPushbackDefinitionsRequest) Reset() {
 	*x = ConfigPushbackDefinitionsRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[35]
+	mi := &file_licence_v1_runtime_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2478,7 +2417,7 @@ func (x *ConfigPushbackDefinitionsRequest) String() string {
 func (*ConfigPushbackDefinitionsRequest) ProtoMessage() {}
 
 func (x *ConfigPushbackDefinitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[35]
+	mi := &file_licence_v1_runtime_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2491,7 +2430,7 @@ func (x *ConfigPushbackDefinitionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigPushbackDefinitionsRequest.ProtoReflect.Descriptor instead.
 func (*ConfigPushbackDefinitionsRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{35}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ConfigPushbackDefinitionsRequest) GetGroups() []*ConfigDefinitionGroup {
@@ -2528,7 +2467,7 @@ type ConfigPushbackDiffStats struct {
 
 func (x *ConfigPushbackDiffStats) Reset() {
 	*x = ConfigPushbackDiffStats{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[36]
+	mi := &file_licence_v1_runtime_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2540,7 +2479,7 @@ func (x *ConfigPushbackDiffStats) String() string {
 func (*ConfigPushbackDiffStats) ProtoMessage() {}
 
 func (x *ConfigPushbackDiffStats) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[36]
+	mi := &file_licence_v1_runtime_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2553,7 +2492,7 @@ func (x *ConfigPushbackDiffStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigPushbackDiffStats.ProtoReflect.Descriptor instead.
 func (*ConfigPushbackDiffStats) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{36}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ConfigPushbackDiffStats) GetCreated() int32 {
@@ -2597,7 +2536,7 @@ type ConfigPushbackDefinitionsResponse struct {
 
 func (x *ConfigPushbackDefinitionsResponse) Reset() {
 	*x = ConfigPushbackDefinitionsResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[37]
+	mi := &file_licence_v1_runtime_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2609,7 +2548,7 @@ func (x *ConfigPushbackDefinitionsResponse) String() string {
 func (*ConfigPushbackDefinitionsResponse) ProtoMessage() {}
 
 func (x *ConfigPushbackDefinitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[37]
+	mi := &file_licence_v1_runtime_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2622,7 +2561,7 @@ func (x *ConfigPushbackDefinitionsResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ConfigPushbackDefinitionsResponse.ProtoReflect.Descriptor instead.
 func (*ConfigPushbackDefinitionsResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{37}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ConfigPushbackDefinitionsResponse) GetBatchId() uint64 {
@@ -2662,7 +2601,7 @@ type PlanCatalogRequest struct {
 
 func (x *PlanCatalogRequest) Reset() {
 	*x = PlanCatalogRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[38]
+	mi := &file_licence_v1_runtime_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2674,7 +2613,7 @@ func (x *PlanCatalogRequest) String() string {
 func (*PlanCatalogRequest) ProtoMessage() {}
 
 func (x *PlanCatalogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[38]
+	mi := &file_licence_v1_runtime_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2687,7 +2626,7 @@ func (x *PlanCatalogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanCatalogRequest.ProtoReflect.Descriptor instead.
 func (*PlanCatalogRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{38}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{37}
 }
 
 // PlanCatalogOption - 套餐计费选项
@@ -2705,7 +2644,7 @@ type PlanCatalogOption struct {
 
 func (x *PlanCatalogOption) Reset() {
 	*x = PlanCatalogOption{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[39]
+	mi := &file_licence_v1_runtime_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2717,7 +2656,7 @@ func (x *PlanCatalogOption) String() string {
 func (*PlanCatalogOption) ProtoMessage() {}
 
 func (x *PlanCatalogOption) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[39]
+	mi := &file_licence_v1_runtime_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2730,7 +2669,7 @@ func (x *PlanCatalogOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanCatalogOption.ProtoReflect.Descriptor instead.
 func (*PlanCatalogOption) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{39}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PlanCatalogOption) GetBilling() string {
@@ -2791,7 +2730,7 @@ type PlanCatalogItem struct {
 
 func (x *PlanCatalogItem) Reset() {
 	*x = PlanCatalogItem{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[40]
+	mi := &file_licence_v1_runtime_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2803,7 +2742,7 @@ func (x *PlanCatalogItem) String() string {
 func (*PlanCatalogItem) ProtoMessage() {}
 
 func (x *PlanCatalogItem) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[40]
+	mi := &file_licence_v1_runtime_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2816,7 +2755,7 @@ func (x *PlanCatalogItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanCatalogItem.ProtoReflect.Descriptor instead.
 func (*PlanCatalogItem) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{40}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PlanCatalogItem) GetPlanCode() string {
@@ -2881,7 +2820,7 @@ type PlanCurrentSnapshot struct {
 
 func (x *PlanCurrentSnapshot) Reset() {
 	*x = PlanCurrentSnapshot{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[41]
+	mi := &file_licence_v1_runtime_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2893,7 +2832,7 @@ func (x *PlanCurrentSnapshot) String() string {
 func (*PlanCurrentSnapshot) ProtoMessage() {}
 
 func (x *PlanCurrentSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[41]
+	mi := &file_licence_v1_runtime_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2906,7 +2845,7 @@ func (x *PlanCurrentSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanCurrentSnapshot.ProtoReflect.Descriptor instead.
 func (*PlanCurrentSnapshot) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{41}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *PlanCurrentSnapshot) GetPlanCode() string {
@@ -2948,7 +2887,7 @@ type PlanCatalogResponse struct {
 
 func (x *PlanCatalogResponse) Reset() {
 	*x = PlanCatalogResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[42]
+	mi := &file_licence_v1_runtime_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2960,7 +2899,7 @@ func (x *PlanCatalogResponse) String() string {
 func (*PlanCatalogResponse) ProtoMessage() {}
 
 func (x *PlanCatalogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[42]
+	mi := &file_licence_v1_runtime_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2973,7 +2912,7 @@ func (x *PlanCatalogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanCatalogResponse.ProtoReflect.Descriptor instead.
 func (*PlanCatalogResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{42}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *PlanCatalogResponse) GetPlans() []*PlanCatalogItem {
@@ -3002,7 +2941,7 @@ type PlanOrderCreateRequest struct {
 
 func (x *PlanOrderCreateRequest) Reset() {
 	*x = PlanOrderCreateRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[43]
+	mi := &file_licence_v1_runtime_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3014,7 +2953,7 @@ func (x *PlanOrderCreateRequest) String() string {
 func (*PlanOrderCreateRequest) ProtoMessage() {}
 
 func (x *PlanOrderCreateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[43]
+	mi := &file_licence_v1_runtime_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3027,7 +2966,7 @@ func (x *PlanOrderCreateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderCreateRequest.ProtoReflect.Descriptor instead.
 func (*PlanOrderCreateRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{43}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *PlanOrderCreateRequest) GetPlanCode() string {
@@ -3064,7 +3003,7 @@ type PlanOrderCreateResponse struct {
 
 func (x *PlanOrderCreateResponse) Reset() {
 	*x = PlanOrderCreateResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[44]
+	mi := &file_licence_v1_runtime_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3076,7 +3015,7 @@ func (x *PlanOrderCreateResponse) String() string {
 func (*PlanOrderCreateResponse) ProtoMessage() {}
 
 func (x *PlanOrderCreateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[44]
+	mi := &file_licence_v1_runtime_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3089,7 +3028,7 @@ func (x *PlanOrderCreateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderCreateResponse.ProtoReflect.Descriptor instead.
 func (*PlanOrderCreateResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{44}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *PlanOrderCreateResponse) GetOrderNo() string {
@@ -3130,7 +3069,7 @@ type PlanOrderQueryRequest struct {
 
 func (x *PlanOrderQueryRequest) Reset() {
 	*x = PlanOrderQueryRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[45]
+	mi := &file_licence_v1_runtime_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3142,7 +3081,7 @@ func (x *PlanOrderQueryRequest) String() string {
 func (*PlanOrderQueryRequest) ProtoMessage() {}
 
 func (x *PlanOrderQueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[45]
+	mi := &file_licence_v1_runtime_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3155,7 +3094,7 @@ func (x *PlanOrderQueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderQueryRequest.ProtoReflect.Descriptor instead.
 func (*PlanOrderQueryRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{45}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *PlanOrderQueryRequest) GetOrderNo() string {
@@ -3175,7 +3114,7 @@ type PlanOrderCancelRequest struct {
 
 func (x *PlanOrderCancelRequest) Reset() {
 	*x = PlanOrderCancelRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[46]
+	mi := &file_licence_v1_runtime_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3187,7 +3126,7 @@ func (x *PlanOrderCancelRequest) String() string {
 func (*PlanOrderCancelRequest) ProtoMessage() {}
 
 func (x *PlanOrderCancelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[46]
+	mi := &file_licence_v1_runtime_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3200,7 +3139,7 @@ func (x *PlanOrderCancelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderCancelRequest.ProtoReflect.Descriptor instead.
 func (*PlanOrderCancelRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{46}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *PlanOrderCancelRequest) GetOrderNo() string {
@@ -3229,7 +3168,7 @@ type PlanOrderItem struct {
 
 func (x *PlanOrderItem) Reset() {
 	*x = PlanOrderItem{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[47]
+	mi := &file_licence_v1_runtime_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3241,7 +3180,7 @@ func (x *PlanOrderItem) String() string {
 func (*PlanOrderItem) ProtoMessage() {}
 
 func (x *PlanOrderItem) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[47]
+	mi := &file_licence_v1_runtime_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3254,7 +3193,7 @@ func (x *PlanOrderItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderItem.ProtoReflect.Descriptor instead.
 func (*PlanOrderItem) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{47}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *PlanOrderItem) GetOrderNo() string {
@@ -3337,7 +3276,7 @@ type PlanOrderResponse struct {
 
 func (x *PlanOrderResponse) Reset() {
 	*x = PlanOrderResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[48]
+	mi := &file_licence_v1_runtime_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3349,7 +3288,7 @@ func (x *PlanOrderResponse) String() string {
 func (*PlanOrderResponse) ProtoMessage() {}
 
 func (x *PlanOrderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[48]
+	mi := &file_licence_v1_runtime_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3362,7 +3301,7 @@ func (x *PlanOrderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderResponse.ProtoReflect.Descriptor instead.
 func (*PlanOrderResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{48}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *PlanOrderResponse) GetOrder() *PlanOrderItem {
@@ -3383,7 +3322,7 @@ type PlanOrderRowsRequest struct {
 
 func (x *PlanOrderRowsRequest) Reset() {
 	*x = PlanOrderRowsRequest{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[49]
+	mi := &file_licence_v1_runtime_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3395,7 +3334,7 @@ func (x *PlanOrderRowsRequest) String() string {
 func (*PlanOrderRowsRequest) ProtoMessage() {}
 
 func (x *PlanOrderRowsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[49]
+	mi := &file_licence_v1_runtime_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3408,7 +3347,7 @@ func (x *PlanOrderRowsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderRowsRequest.ProtoReflect.Descriptor instead.
 func (*PlanOrderRowsRequest) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{49}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *PlanOrderRowsRequest) GetPage() int32 {
@@ -3437,7 +3376,7 @@ type PlanOrderRowsResponse struct {
 
 func (x *PlanOrderRowsResponse) Reset() {
 	*x = PlanOrderRowsResponse{}
-	mi := &file_licence_v1_runtime_proto_msgTypes[50]
+	mi := &file_licence_v1_runtime_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3449,7 +3388,7 @@ func (x *PlanOrderRowsResponse) String() string {
 func (*PlanOrderRowsResponse) ProtoMessage() {}
 
 func (x *PlanOrderRowsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_licence_v1_runtime_proto_msgTypes[50]
+	mi := &file_licence_v1_runtime_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3462,7 +3401,7 @@ func (x *PlanOrderRowsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanOrderRowsResponse.ProtoReflect.Descriptor instead.
 func (*PlanOrderRowsResponse) Descriptor() ([]byte, []int) {
-	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{50}
+	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *PlanOrderRowsResponse) GetRecords() []*PlanOrderItem {
@@ -3517,9 +3456,11 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"6\n" +
 	"\x15CurrentLicenseRequest\x12\x1d\n" +
 	"\n" +
-	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\xec\x01\n" +
-	"\x10ProvisionRequest\x12#\n" +
-	"\rtemplate_code\x18\x01 \x01(\tR\ftemplateCode\x12'\n" +
+	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\x98\x02\n" +
+	"\x10ProvisionRequest\x12\x1d\n" +
+	"\n" +
+	"project_no\x18\a \x01(\tR\tprojectNo\x12\x1b\n" +
+	"\ttenant_id\x18\b \x01(\x03R\btenantId\x12'\n" +
 	"\x0fprovision_token\x18\x02 \x01(\tR\x0eprovisionToken\x12\x1d\n" +
 	"\n" +
 	"install_sn\x18\x03 \x01(\tR\tinstallSn\x12)\n" +
@@ -3527,16 +3468,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\vdevice_name\x18\x05 \x01(\tR\n" +
 	"deviceName\x12\x1f\n" +
 	"\vclient_time\x18\x06 \x01(\x03R\n" +
-	"clientTime\"\xaf\x01\n" +
-	"\rRedeemRequest\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\tR\x04code\x12\x1d\n" +
-	"\n" +
-	"install_sn\x18\x02 \x01(\tR\tinstallSn\x12)\n" +
-	"\x10fingerprint_hash\x18\x03 \x01(\tR\x0ffingerprintHash\x12\x1f\n" +
-	"\vdevice_name\x18\x04 \x01(\tR\n" +
-	"deviceName\x12\x1f\n" +
-	"\vclient_time\x18\x05 \x01(\x03R\n" +
-	"clientTime\"\x9a\x02\n" +
+	"clientTimeJ\x04\b\x01\x10\x02R\rtemplate_code\"\x9a\x02\n" +
 	"\x11ProvisionResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -3808,13 +3740,12 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x15PlanOrderRowsResponse\x12<\n" +
 	"\arecords\x18\x01 \x03(\v2\".licenhub.licence.v1.PlanOrderItemR\arecords\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12\x12\n" +
-	"\x04page\x18\x03 \x01(\x05R\x04page2\xd6\x03\n" +
+	"\x04page\x18\x03 \x01(\x05R\x04page2\x86\x03\n" +
 	"\x15LicenseRuntimeService\x12V\n" +
 	"\bActivate\x12$.licenhub.licence.v1.ActivateRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12V\n" +
 	"\bValidate\x12$.licenhub.licence.v1.ValidateRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12[\n" +
-	"\aCurrent\x12*.licenhub.licence.v1.CurrentLicenseRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12Z\n" +
-	"\tProvision\x12%.licenhub.licence.v1.ProvisionRequest\x1a&.licenhub.licence.v1.ProvisionResponse\x12T\n" +
-	"\x06Redeem\x12\".licenhub.licence.v1.RedeemRequest\x1a&.licenhub.licence.v1.ProvisionResponse2\xb2\x02\n" +
+	"\aCurrent\x12*.licenhub.licence.v1.CurrentLicenseRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12`\n" +
+	"\x0fProvisionByPlan\x12%.licenhub.licence.v1.ProvisionRequest\x1a&.licenhub.licence.v1.ProvisionResponse2\xb2\x02\n" +
 	"\x14UpdateRuntimeService\x12Z\n" +
 	"\x05Check\x12'.licenhub.licence.v1.UpdateCheckRequest\x1a(.licenhub.licence.v1.UpdateCheckResponse\x12]\n" +
 	"\x06Report\x12(.licenhub.licence.v1.UpdateReportRequest\x1a).licenhub.licence.v1.UpdateReportResponse\x12_\n" +
@@ -3852,127 +3783,124 @@ func file_licence_v1_runtime_proto_rawDescGZIP() []byte {
 	return file_licence_v1_runtime_proto_rawDescData
 }
 
-var file_licence_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
+var file_licence_v1_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_licence_v1_runtime_proto_goTypes = []any{
 	(*ActivateRequest)(nil),                   // 0: licenhub.licence.v1.ActivateRequest
 	(*ValidateRequest)(nil),                   // 1: licenhub.licence.v1.ValidateRequest
 	(*CurrentLicenseRequest)(nil),             // 2: licenhub.licence.v1.CurrentLicenseRequest
 	(*ProvisionRequest)(nil),                  // 3: licenhub.licence.v1.ProvisionRequest
-	(*RedeemRequest)(nil),                     // 4: licenhub.licence.v1.RedeemRequest
-	(*ProvisionResponse)(nil),                 // 5: licenhub.licence.v1.ProvisionResponse
-	(*RuntimeResponse)(nil),                   // 6: licenhub.licence.v1.RuntimeResponse
-	(*UpdateCheckRequest)(nil),                // 7: licenhub.licence.v1.UpdateCheckRequest
-	(*UpdateCheckResponse)(nil),               // 8: licenhub.licence.v1.UpdateCheckResponse
-	(*UpdateReportRequest)(nil),               // 9: licenhub.licence.v1.UpdateReportRequest
-	(*UpdateLogsRequest)(nil),                 // 10: licenhub.licence.v1.UpdateLogsRequest
-	(*UpdateReportResponse)(nil),              // 11: licenhub.licence.v1.UpdateReportResponse
-	(*TenantSyncRequest)(nil),                 // 12: licenhub.licence.v1.TenantSyncRequest
-	(*TenantManifest)(nil),                    // 13: licenhub.licence.v1.TenantManifest
-	(*TenantSyncItem)(nil),                    // 14: licenhub.licence.v1.TenantSyncItem
-	(*TenantSyncResponse)(nil),                // 15: licenhub.licence.v1.TenantSyncResponse
-	(*TenantSearchRequest)(nil),               // 16: licenhub.licence.v1.TenantSearchRequest
-	(*TenantSearchItem)(nil),                  // 17: licenhub.licence.v1.TenantSearchItem
-	(*TenantSearchResponse)(nil),              // 18: licenhub.licence.v1.TenantSearchResponse
-	(*TenantValidateRequest)(nil),             // 19: licenhub.licence.v1.TenantValidateRequest
-	(*TenantCurrentRequest)(nil),              // 20: licenhub.licence.v1.TenantCurrentRequest
-	(*TenantResponse)(nil),                    // 21: licenhub.licence.v1.TenantResponse
-	(*ProjectConfigSyncRequest)(nil),          // 22: licenhub.licence.v1.ProjectConfigSyncRequest
-	(*ProjectConfigSyncResponse)(nil),         // 23: licenhub.licence.v1.ProjectConfigSyncResponse
-	(*PlatformConfigSyncRequest)(nil),         // 24: licenhub.licence.v1.PlatformConfigSyncRequest
-	(*PlatformConfigSyncResponse)(nil),        // 25: licenhub.licence.v1.PlatformConfigSyncResponse
-	(*ConfigConsumptionItem)(nil),             // 26: licenhub.licence.v1.ConfigConsumptionItem
-	(*ConfigConsumptionReportRequest)(nil),    // 27: licenhub.licence.v1.ConfigConsumptionReportRequest
-	(*ConfigConsumptionReportResponse)(nil),   // 28: licenhub.licence.v1.ConfigConsumptionReportResponse
-	(*EventSubscribeRequest)(nil),             // 29: licenhub.licence.v1.EventSubscribeRequest
-	(*EventMessage)(nil),                      // 30: licenhub.licence.v1.EventMessage
-	(*ConfigPushbackPushRequest)(nil),         // 31: licenhub.licence.v1.ConfigPushbackPushRequest
-	(*ConfigPushbackPushResponse)(nil),        // 32: licenhub.licence.v1.ConfigPushbackPushResponse
-	(*ConfigDefinitionGroup)(nil),             // 33: licenhub.licence.v1.ConfigDefinitionGroup
-	(*ConfigDefinitionItem)(nil),              // 34: licenhub.licence.v1.ConfigDefinitionItem
-	(*ConfigPushbackDefinitionsRequest)(nil),  // 35: licenhub.licence.v1.ConfigPushbackDefinitionsRequest
-	(*ConfigPushbackDiffStats)(nil),           // 36: licenhub.licence.v1.ConfigPushbackDiffStats
-	(*ConfigPushbackDefinitionsResponse)(nil), // 37: licenhub.licence.v1.ConfigPushbackDefinitionsResponse
-	(*PlanCatalogRequest)(nil),                // 38: licenhub.licence.v1.PlanCatalogRequest
-	(*PlanCatalogOption)(nil),                 // 39: licenhub.licence.v1.PlanCatalogOption
-	(*PlanCatalogItem)(nil),                   // 40: licenhub.licence.v1.PlanCatalogItem
-	(*PlanCurrentSnapshot)(nil),               // 41: licenhub.licence.v1.PlanCurrentSnapshot
-	(*PlanCatalogResponse)(nil),               // 42: licenhub.licence.v1.PlanCatalogResponse
-	(*PlanOrderCreateRequest)(nil),            // 43: licenhub.licence.v1.PlanOrderCreateRequest
-	(*PlanOrderCreateResponse)(nil),           // 44: licenhub.licence.v1.PlanOrderCreateResponse
-	(*PlanOrderQueryRequest)(nil),             // 45: licenhub.licence.v1.PlanOrderQueryRequest
-	(*PlanOrderCancelRequest)(nil),            // 46: licenhub.licence.v1.PlanOrderCancelRequest
-	(*PlanOrderItem)(nil),                     // 47: licenhub.licence.v1.PlanOrderItem
-	(*PlanOrderResponse)(nil),                 // 48: licenhub.licence.v1.PlanOrderResponse
-	(*PlanOrderRowsRequest)(nil),              // 49: licenhub.licence.v1.PlanOrderRowsRequest
-	(*PlanOrderRowsResponse)(nil),             // 50: licenhub.licence.v1.PlanOrderRowsResponse
-	nil,                                       // 51: licenhub.licence.v1.ValidateRequest.UsageEntry
-	nil,                                       // 52: licenhub.licence.v1.TenantValidateRequest.UsageEntry
-	nil,                                       // 53: licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
+	(*ProvisionResponse)(nil),                 // 4: licenhub.licence.v1.ProvisionResponse
+	(*RuntimeResponse)(nil),                   // 5: licenhub.licence.v1.RuntimeResponse
+	(*UpdateCheckRequest)(nil),                // 6: licenhub.licence.v1.UpdateCheckRequest
+	(*UpdateCheckResponse)(nil),               // 7: licenhub.licence.v1.UpdateCheckResponse
+	(*UpdateReportRequest)(nil),               // 8: licenhub.licence.v1.UpdateReportRequest
+	(*UpdateLogsRequest)(nil),                 // 9: licenhub.licence.v1.UpdateLogsRequest
+	(*UpdateReportResponse)(nil),              // 10: licenhub.licence.v1.UpdateReportResponse
+	(*TenantSyncRequest)(nil),                 // 11: licenhub.licence.v1.TenantSyncRequest
+	(*TenantManifest)(nil),                    // 12: licenhub.licence.v1.TenantManifest
+	(*TenantSyncItem)(nil),                    // 13: licenhub.licence.v1.TenantSyncItem
+	(*TenantSyncResponse)(nil),                // 14: licenhub.licence.v1.TenantSyncResponse
+	(*TenantSearchRequest)(nil),               // 15: licenhub.licence.v1.TenantSearchRequest
+	(*TenantSearchItem)(nil),                  // 16: licenhub.licence.v1.TenantSearchItem
+	(*TenantSearchResponse)(nil),              // 17: licenhub.licence.v1.TenantSearchResponse
+	(*TenantValidateRequest)(nil),             // 18: licenhub.licence.v1.TenantValidateRequest
+	(*TenantCurrentRequest)(nil),              // 19: licenhub.licence.v1.TenantCurrentRequest
+	(*TenantResponse)(nil),                    // 20: licenhub.licence.v1.TenantResponse
+	(*ProjectConfigSyncRequest)(nil),          // 21: licenhub.licence.v1.ProjectConfigSyncRequest
+	(*ProjectConfigSyncResponse)(nil),         // 22: licenhub.licence.v1.ProjectConfigSyncResponse
+	(*PlatformConfigSyncRequest)(nil),         // 23: licenhub.licence.v1.PlatformConfigSyncRequest
+	(*PlatformConfigSyncResponse)(nil),        // 24: licenhub.licence.v1.PlatformConfigSyncResponse
+	(*ConfigConsumptionItem)(nil),             // 25: licenhub.licence.v1.ConfigConsumptionItem
+	(*ConfigConsumptionReportRequest)(nil),    // 26: licenhub.licence.v1.ConfigConsumptionReportRequest
+	(*ConfigConsumptionReportResponse)(nil),   // 27: licenhub.licence.v1.ConfigConsumptionReportResponse
+	(*EventSubscribeRequest)(nil),             // 28: licenhub.licence.v1.EventSubscribeRequest
+	(*EventMessage)(nil),                      // 29: licenhub.licence.v1.EventMessage
+	(*ConfigPushbackPushRequest)(nil),         // 30: licenhub.licence.v1.ConfigPushbackPushRequest
+	(*ConfigPushbackPushResponse)(nil),        // 31: licenhub.licence.v1.ConfigPushbackPushResponse
+	(*ConfigDefinitionGroup)(nil),             // 32: licenhub.licence.v1.ConfigDefinitionGroup
+	(*ConfigDefinitionItem)(nil),              // 33: licenhub.licence.v1.ConfigDefinitionItem
+	(*ConfigPushbackDefinitionsRequest)(nil),  // 34: licenhub.licence.v1.ConfigPushbackDefinitionsRequest
+	(*ConfigPushbackDiffStats)(nil),           // 35: licenhub.licence.v1.ConfigPushbackDiffStats
+	(*ConfigPushbackDefinitionsResponse)(nil), // 36: licenhub.licence.v1.ConfigPushbackDefinitionsResponse
+	(*PlanCatalogRequest)(nil),                // 37: licenhub.licence.v1.PlanCatalogRequest
+	(*PlanCatalogOption)(nil),                 // 38: licenhub.licence.v1.PlanCatalogOption
+	(*PlanCatalogItem)(nil),                   // 39: licenhub.licence.v1.PlanCatalogItem
+	(*PlanCurrentSnapshot)(nil),               // 40: licenhub.licence.v1.PlanCurrentSnapshot
+	(*PlanCatalogResponse)(nil),               // 41: licenhub.licence.v1.PlanCatalogResponse
+	(*PlanOrderCreateRequest)(nil),            // 42: licenhub.licence.v1.PlanOrderCreateRequest
+	(*PlanOrderCreateResponse)(nil),           // 43: licenhub.licence.v1.PlanOrderCreateResponse
+	(*PlanOrderQueryRequest)(nil),             // 44: licenhub.licence.v1.PlanOrderQueryRequest
+	(*PlanOrderCancelRequest)(nil),            // 45: licenhub.licence.v1.PlanOrderCancelRequest
+	(*PlanOrderItem)(nil),                     // 46: licenhub.licence.v1.PlanOrderItem
+	(*PlanOrderResponse)(nil),                 // 47: licenhub.licence.v1.PlanOrderResponse
+	(*PlanOrderRowsRequest)(nil),              // 48: licenhub.licence.v1.PlanOrderRowsRequest
+	(*PlanOrderRowsResponse)(nil),             // 49: licenhub.licence.v1.PlanOrderRowsResponse
+	nil,                                       // 50: licenhub.licence.v1.ValidateRequest.UsageEntry
+	nil,                                       // 51: licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	nil,                                       // 52: licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
 }
 var file_licence_v1_runtime_proto_depIdxs = []int32{
-	51, // 0: licenhub.licence.v1.ValidateRequest.usage:type_name -> licenhub.licence.v1.ValidateRequest.UsageEntry
-	14, // 1: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
-	13, // 2: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
-	13, // 3: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
-	17, // 4: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
-	52, // 5: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
-	26, // 6: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
-	53, // 7: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
-	33, // 8: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
-	34, // 9: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
-	36, // 10: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	36, // 11: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	39, // 12: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
-	40, // 13: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
-	41, // 14: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
-	47, // 15: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
-	47, // 16: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
+	50, // 0: licenhub.licence.v1.ValidateRequest.usage:type_name -> licenhub.licence.v1.ValidateRequest.UsageEntry
+	13, // 1: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
+	12, // 2: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	12, // 3: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	16, // 4: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
+	51, // 5: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	25, // 6: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
+	52, // 7: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
+	32, // 8: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
+	33, // 9: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
+	35, // 10: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
+	35, // 11: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
+	38, // 12: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
+	39, // 13: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
+	40, // 14: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
+	46, // 15: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
+	46, // 16: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
 	0,  // 17: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
 	1,  // 18: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
 	2,  // 19: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
-	3,  // 20: licenhub.licence.v1.LicenseRuntimeService.Provision:input_type -> licenhub.licence.v1.ProvisionRequest
-	4,  // 21: licenhub.licence.v1.LicenseRuntimeService.Redeem:input_type -> licenhub.licence.v1.RedeemRequest
-	7,  // 22: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
-	9,  // 23: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
-	10, // 24: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
-	12, // 25: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
-	16, // 26: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
-	19, // 27: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
-	20, // 28: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
-	24, // 29: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
-	27, // 30: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
-	29, // 31: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
-	31, // 32: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
-	35, // 33: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
-	38, // 34: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
-	43, // 35: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
-	45, // 36: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
-	46, // 37: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
-	49, // 38: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
-	6,  // 39: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
-	6,  // 40: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
-	6,  // 41: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
-	5,  // 42: licenhub.licence.v1.LicenseRuntimeService.Provision:output_type -> licenhub.licence.v1.ProvisionResponse
-	5,  // 43: licenhub.licence.v1.LicenseRuntimeService.Redeem:output_type -> licenhub.licence.v1.ProvisionResponse
-	8,  // 44: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
-	11, // 45: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
-	11, // 46: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
-	15, // 47: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
-	18, // 48: licenhub.licence.v1.SaasRuntimeService.Search:output_type -> licenhub.licence.v1.TenantSearchResponse
-	21, // 49: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
-	21, // 50: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
-	25, // 51: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
-	28, // 52: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:output_type -> licenhub.licence.v1.ConfigConsumptionReportResponse
-	30, // 53: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
-	32, // 54: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:output_type -> licenhub.licence.v1.ConfigPushbackPushResponse
-	37, // 55: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:output_type -> licenhub.licence.v1.ConfigPushbackDefinitionsResponse
-	42, // 56: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:output_type -> licenhub.licence.v1.PlanCatalogResponse
-	44, // 57: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:output_type -> licenhub.licence.v1.PlanOrderCreateResponse
-	48, // 58: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:output_type -> licenhub.licence.v1.PlanOrderResponse
-	48, // 59: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:output_type -> licenhub.licence.v1.PlanOrderResponse
-	50, // 60: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:output_type -> licenhub.licence.v1.PlanOrderRowsResponse
-	39, // [39:61] is the sub-list for method output_type
-	17, // [17:39] is the sub-list for method input_type
+	3,  // 20: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:input_type -> licenhub.licence.v1.ProvisionRequest
+	6,  // 21: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
+	8,  // 22: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
+	9,  // 23: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
+	11, // 24: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
+	15, // 25: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
+	18, // 26: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
+	19, // 27: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
+	23, // 28: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
+	26, // 29: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
+	28, // 30: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
+	30, // 31: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
+	34, // 32: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
+	37, // 33: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
+	42, // 34: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
+	44, // 35: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
+	45, // 36: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
+	48, // 37: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
+	5,  // 38: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
+	5,  // 39: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
+	5,  // 40: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
+	4,  // 41: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:output_type -> licenhub.licence.v1.ProvisionResponse
+	7,  // 42: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
+	10, // 43: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
+	10, // 44: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
+	14, // 45: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
+	17, // 46: licenhub.licence.v1.SaasRuntimeService.Search:output_type -> licenhub.licence.v1.TenantSearchResponse
+	20, // 47: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
+	20, // 48: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
+	24, // 49: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
+	27, // 50: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:output_type -> licenhub.licence.v1.ConfigConsumptionReportResponse
+	29, // 51: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
+	31, // 52: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:output_type -> licenhub.licence.v1.ConfigPushbackPushResponse
+	36, // 53: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:output_type -> licenhub.licence.v1.ConfigPushbackDefinitionsResponse
+	41, // 54: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:output_type -> licenhub.licence.v1.PlanCatalogResponse
+	43, // 55: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:output_type -> licenhub.licence.v1.PlanOrderCreateResponse
+	47, // 56: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:output_type -> licenhub.licence.v1.PlanOrderResponse
+	47, // 57: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:output_type -> licenhub.licence.v1.PlanOrderResponse
+	49, // 58: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:output_type -> licenhub.licence.v1.PlanOrderRowsResponse
+	38, // [38:59] is the sub-list for method output_type
+	17, // [17:38] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
 	17, // [17:17] is the sub-list for extension extendee
 	0,  // [0:17] is the sub-list for field type_name
@@ -3989,7 +3917,7 @@ func file_licence_v1_runtime_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_licence_v1_runtime_proto_rawDesc), len(file_licence_v1_runtime_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   54,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   7,
 		},

@@ -19,9 +19,9 @@ import (
 	"google.golang.org/grpc"
 )
 
-// ============================= 申领/兑换假平台（契约 §6 行为镜像） =============================
+// ============================= 申领假平台（契约 §6 行为镜像） =============================
 
-// fakeProvisionServer - 申领/兑换假平台：业务码放 status 字段，HTTP 200 传输。
+// fakeProvisionServer - 申领假平台：业务码放 status 字段，HTTP 200 传输。
 // respond 由测试注入：入参为请求体，返回业务状态码与附加字段。
 type fakeProvisionServer struct {
 	mu       sync.Mutex
@@ -68,22 +68,22 @@ func okProvisionResponse() map[string]any {
 
 // ============================= 端到端测试（HTTP 传输） =============================
 
-// TestProvisionHTTP - 公开 Provision（HTTP）：参数校验 → 懒生成 install.sn →
-// 双协议统一响应映射为结果；重复调用幂等复用同一 SN。
-func TestProvisionHTTP(t *testing.T) {
+// TestProvisionByPlanHTTP - 公开 ProvisionByPlan（HTTP）：参数校验 → 懒生成 install.sn →
+// 双协议统一响应映射为结果；重复调用幂等复用同一 SN；旧模板字段不再上送。
+func TestProvisionByPlanHTTP(t *testing.T) {
 
 	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
 		return "OK", okProvisionResponse()
 	})
 	dir := t.TempDir()
 	opts := ProvisionOptions{
-		ServerURL: server.server.URL, TemplateCode: "INIS-AUTO", ProvisionToken: "tmpl-token",
+		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
 		StorageDir: dir, DeviceName: "provision-device",
 	}
 
-	result, err := Provision(t.Context(), opts)
+	result, err := ProvisionByPlan(t.Context(), opts)
 	if err != nil {
-		t.Fatalf("Provision 失败: %v", err)
+		t.Fatalf("ProvisionByPlan 失败: %v", err)
 	}
 	if result.LicenseNo != "LIC-2026-000888" || result.Salt != "salt-http" {
 		t.Fatalf("许可证/盐映射不符: %s %s", result.LicenseNo, result.Salt)
@@ -95,10 +95,16 @@ func TestProvisionHTTP(t *testing.T) {
 		t.Fatalf("有效期/续签标识映射不符: %d %v", result.ExpiresAt, result.Reissued)
 	}
 
-	// 请求体上送模板编码/签发令牌/设备名
+	// 请求体上送项目编号/项目级令牌/设备名；tenantId 缺省 0 不上送
 	body := server.body()
-	if body["templateCode"] != "INIS-AUTO" || body["provisionToken"] != "tmpl-token" {
-		t.Fatalf("模板/令牌未上送: %v", body)
+	if body["projectNo"] != "INIS-AUTO" || body["provisionToken"] != "project-token" {
+		t.Fatalf("项目/令牌未上送: %v", body)
+	}
+	if _, exists := body["templateCode"]; exists {
+		t.Fatalf("旧模板编码字段不应再上送: %v", body)
+	}
+	if _, exists := body["tenantId"]; exists {
+		t.Fatalf("tenantId 缺省 0 不应上送: %v", body)
 	}
 	if body["deviceName"] != "provision-device" {
 		t.Fatalf("设备名未上送: %v", body["deviceName"])
@@ -119,9 +125,9 @@ func TestProvisionHTTP(t *testing.T) {
 	}
 
 	// 幂等复用：再次申领使用同一 SN，不重新生成
-	second, err := Provision(t.Context(), opts)
+	second, err := ProvisionByPlan(t.Context(), opts)
 	if err != nil {
-		t.Fatalf("再次 Provision 失败: %v", err)
+		t.Fatalf("再次 ProvisionByPlan 失败: %v", err)
 	}
 	if second.LicenseNo != result.LicenseNo {
 		t.Fatalf("重复申领应复用结果: %s vs %s", second.LicenseNo, result.LicenseNo)
@@ -135,14 +141,32 @@ func TestProvisionHTTP(t *testing.T) {
 	}
 }
 
-// TestProvisionHTTPBusinessError - 业务拒绝：status != OK → *ProvisionError（HTTP 200 传输）。
-func TestProvisionHTTPBusinessError(t *testing.T) {
+// TestProvisionByPlanHTTPTenant - SaaS 子租户发证：tenantId > 0 必须原样上送（0 才省略）。
+func TestProvisionByPlanHTTPTenant(t *testing.T) {
+
+	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
+		return "OK", okProvisionResponse()
+	})
+	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: server.server.URL, ProjectNo: "INIS-SAAS", ProvisionToken: "project-token",
+		TenantId: 42, StorageDir: t.TempDir(), DeviceName: "tenant-device",
+	})
+	if err != nil {
+		t.Fatalf("子租户申领失败: %v", err)
+	}
+	if tenant := server.body()["tenantId"]; tenant != float64(42) {
+		t.Fatalf("子租户 tenantId 未上送: %v", server.body())
+	}
+}
+
+// TestProvisionByPlanBusinessError - 业务拒绝：status != OK → *ProvisionError（HTTP 200 传输）。
+func TestProvisionByPlanBusinessError(t *testing.T) {
 
 	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
 		return "RATE_LIMITED", map[string]any{"message": "请求过于频繁"}
 	})
-	_, err := Provision(t.Context(), ProvisionOptions{
-		ServerURL: server.server.URL, TemplateCode: "INIS-AUTO", ProvisionToken: "tmpl-token",
+	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
 		StorageDir: t.TempDir(),
 	})
 	if err == nil {
@@ -160,49 +184,44 @@ func TestProvisionHTTPBusinessError(t *testing.T) {
 	}
 }
 
-// TestRedeemHTTP - 公开 Redeem（HTTP）：激活码兑换成功路径与参数上送。
-func TestRedeemHTTP(t *testing.T) {
+// TestProvisionByPlanTemplateDeprecated - 未知/新增业务码透传：服务端对旧模板申领返回的
+// TEMPLATE_DEPRECATED 不特判、不 crash，原样以 *ProvisionError 上抛供调用方降级。
+func TestProvisionByPlanTemplateDeprecated(t *testing.T) {
 
 	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
-		return "OK", okProvisionResponse()
+		return "TEMPLATE_DEPRECATED", map[string]any{"message": "授权模板体系已下线，请升级客户端"}
 	})
-	result, err := Redeem(t.Context(), RedeemOptions{
-		ProvisionOptions: ProvisionOptions{
-			ServerURL: server.server.URL, StorageDir: t.TempDir(), DeviceName: "redeem-device",
-		},
-		Code: "COM-2026-ABCDEF",
+	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
+		StorageDir: t.TempDir(),
 	})
-	if err != nil {
-		t.Fatalf("Redeem 失败: %v", err)
+	var provisionErr *ProvisionError
+	if !errors.As(err, &provisionErr) {
+		t.Fatalf("TEMPLATE_DEPRECATED 应可断言为 *ProvisionError，实际 %T", err)
 	}
-	if result.LicenseNo != "LIC-2026-000888" {
-		t.Fatalf("兑换结果映射不符: %s", result.LicenseNo)
-	}
-	body := server.body()
-	if body["code"] != "COM-2026-ABCDEF" {
-		t.Fatalf("激活码未上送: %v", body["code"])
-	}
-	sn, ok := body["installSN"].(string)
-	if !ok || sn == "" || !snUUIDPattern.MatchString(sn) {
-		t.Fatalf("兑换应懒生成并上送 SN: %v", body["installSN"])
+	if provisionErr.Status != "TEMPLATE_DEPRECATED" || provisionErr.Message != "授权模板体系已下线，请升级客户端" {
+		t.Fatalf("业务状态/提示透传不符: %s %s", provisionErr.Status, provisionErr.Message)
 	}
 }
 
-// TestProvisionValidation - 必填参数校验（HTTP/gRPC 共用，裸参数层）。
-func TestProvisionValidation(t *testing.T) {
+// TestProvisionByPlanValidation - 必填参数校验（HTTP/gRPC 共用，裸参数层）。
+func TestProvisionByPlanValidation(t *testing.T) {
 
 	dir := t.TempDir()
-	if _, err := Provision(t.Context(), ProvisionOptions{TemplateCode: "INIS-AUTO", ProvisionToken: "t"}); err == nil {
+	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ProjectNo: "INIS-AUTO", ProvisionToken: "t"}); err == nil {
 		t.Fatal("缺少 ServerURL 应报错")
 	}
-	if _, err := Provision(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1", ProvisionToken: "t"}); err == nil {
-		t.Fatal("缺少 TemplateCode 应报错")
+	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1", ProvisionToken: "t"}); err == nil {
+		t.Fatal("缺少 ProjectNo 应报错")
 	}
-	if _, err := Provision(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1", TemplateCode: "INIS-AUTO"}); err == nil {
+	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1", ProjectNo: "INIS-AUTO"}); err == nil {
 		t.Fatal("缺少 ProvisionToken 应报错")
 	}
-	if _, err := Redeem(t.Context(), RedeemOptions{ProvisionOptions: ProvisionOptions{ServerURL: "http://127.0.0.1:1", StorageDir: dir}}); err == nil {
-		t.Fatal("缺少 Code 应报错")
+	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: "http://127.0.0.1:1", ProjectNo: "INIS-AUTO", ProvisionToken: "t",
+		TenantId: -1, StorageDir: dir,
+	}); err == nil {
+		t.Fatal("TenantId 为负数应报错")
 	}
 }
 
@@ -215,7 +234,7 @@ type provisionGRPCServer struct {
 	request *licencev1.ProvisionRequest
 }
 
-func (this *provisionGRPCServer) Provision(_ context.Context, request *licencev1.ProvisionRequest) (*licencev1.ProvisionResponse, error) {
+func (this *provisionGRPCServer) ProvisionByPlan(_ context.Context, request *licencev1.ProvisionRequest) (*licencev1.ProvisionResponse, error) {
 	this.request = request
 	return &licencev1.ProvisionResponse{
 		Status: "OK", ServerTime: time.Now().UnixMilli(),
@@ -225,9 +244,9 @@ func (this *provisionGRPCServer) Provision(_ context.Context, request *licencev1
 	}, nil
 }
 
-// TestProvisionGRPC - 公开 Provision（gRPC）：裸 Client 承载 grpc 传输，
+// TestProvisionByPlanGRPC - 公开 ProvisionByPlan（gRPC）：裸 Client 承载 grpc 传输，
 // RoundTrip 走 /api/v1/licenses/provision 分发，统一响应映射为结果。
-func TestProvisionGRPC(t *testing.T) {
+func TestProvisionByPlanGRPC(t *testing.T) {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -240,23 +259,26 @@ func TestProvisionGRPC(t *testing.T) {
 	t.Cleanup(server.Stop)
 
 	dir := t.TempDir()
-	result, err := Provision(t.Context(), ProvisionOptions{
-		ServerURL:    "grpc://" + listener.Addr().String(),
-		TemplateCode: "INIS-AUTO", ProvisionToken: "tmpl-token",
-		StorageDir: dir, DeviceName: "g-device",
+	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: "grpc://" + listener.Addr().String(),
+		ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
+		TenantId: 7, StorageDir: dir, DeviceName: "g-device",
 		Transport: TransportGRPC, GRPC: GRPCOptions{AllowInsecure: true},
 		HTTPTimeout: 2 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("gRPC Provision 失败: %v", err)
+		t.Fatalf("gRPC ProvisionByPlan 失败: %v", err)
 	}
 	if result.LicenseNo != "LIC-2026-000999" || result.Salt != "salt-grpc" {
 		t.Fatalf("gRPC 结果映射不符: %s %s", result.LicenseNo, result.Salt)
 	}
 
-	// gRPC 请求字段对齐 HTTP 线格式（templateCode/provisionToken/installSN/deviceName）
-	if fake.request.GetTemplateCode() != "INIS-AUTO" || fake.request.GetProvisionToken() != "tmpl-token" {
-		t.Fatalf("gRPC 模板/令牌未上送: %+v", fake.request)
+	// gRPC 请求字段对齐 HTTP 线格式（projectNo/tenantId/provisionToken/installSN/deviceName）
+	if fake.request.GetProjectNo() != "INIS-AUTO" || fake.request.GetProvisionToken() != "project-token" {
+		t.Fatalf("gRPC 项目/令牌未上送: %+v", fake.request)
+	}
+	if fake.request.GetTenantId() != 7 {
+		t.Fatalf("gRPC 子租户 ID 未上送: %d", fake.request.GetTenantId())
 	}
 	if fake.request.GetDeviceName() != "g-device" {
 		t.Fatalf("gRPC 设备名未上送: %q", fake.request.GetDeviceName())
@@ -334,14 +356,14 @@ func TestResolveInstallSN(t *testing.T) {
 // TestProvisionErrorText - ProvisionError 错误文本与 errors.As 断言。
 func TestProvisionErrorText(t *testing.T) {
 
-	provisionErr := &ProvisionError{Status: "QUOTA_EXCEEDED", Message: "模板每日发放上限已用尽"}
+	provisionErr := &ProvisionError{Status: "QUOTA_EXCEEDED", Message: "项目每日发放上限已用尽"}
 	if !errors.Is(provisionErr, provisionErr) {
 		t.Fatal("errors.Is 自身应成立")
 	}
-	if text := provisionErr.Error(); text != "授权申领被拒绝（QUOTA_EXCEEDED）：模板每日发放上限已用尽" {
+	if text := provisionErr.Error(); text != "授权申领被拒绝（QUOTA_EXCEEDED）：项目每日发放上限已用尽" {
 		t.Fatalf("错误文本不符: %q", text)
 	}
-	if text := (&ProvisionError{Status: "CODE_INVALID"}).Error(); text != "授权申领被拒绝：CODE_INVALID" {
+	if text := (&ProvisionError{Status: "TEMPLATE_DEPRECATED"}).Error(); text != "授权申领被拒绝：TEMPLATE_DEPRECATED" {
 		t.Fatalf("无提示错误文本不符: %q", text)
 	}
 }

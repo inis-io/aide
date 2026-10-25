@@ -13,16 +13,18 @@ import (
 	"time"
 )
 
-// ProvisionOptions - 装机免费自动申领参数。
+// ProvisionOptions - 装机自动申领参数（项目编号 + 项目级令牌 + 可选 SaaS 子租户）。
 // 在 New(Client) 之前调用：先申领拿到证书参数（LicenseNo/Salt），再构造运行面客户端自动激活。
-// ServerURL/TemplateCode/ProvisionToken 由官方二进制内写死，装机用户不可改。
+// ServerURL/ProjectNo/ProvisionToken 由官方二进制内写死，装机用户不可改。
 type ProvisionOptions struct {
 	// ServerURL - 授权平台地址（必填），如 "https://license.example.com"
 	ServerURL string
-	// TemplateCode - 模板编码（必填，官方二进制写死），如 "INIS-AUTO"
-	TemplateCode string
-	// ProvisionToken - 签发令牌（必填，匿名申领凭证，官方二进制写死）
+	// ProjectNo - 项目编号（必填，官方二进制写死），如 "INIS-AUTO"
+	ProjectNo string
+	// ProvisionToken - 项目级签发令牌（必填，匿名申领凭证，官方二进制写死）
 	ProvisionToken string
+	// TenantId - SaaS 子租户 ID（可选，0 = 普通装机申领；>0 = 按项目子租户发证档位签发）
+	TenantId int64
 	// StorageDir - install.sn 持久化目录（默认 ./runtime/licence）
 	StorageDir string
 	// InstallSN - 安装唯一标识（可选；为空时懒生成 UUID v4 并持久化到 StorageDir/install.sn）
@@ -37,18 +39,11 @@ type ProvisionOptions struct {
 	HTTPTimeout time.Duration
 }
 
-// RedeemOptions - 商业激活码兑换参数（语义与 ProvisionOptions 一致，另含激活码）。
-type RedeemOptions struct {
-	ProvisionOptions
-	// Code - 激活码（必填）
-	Code string
-}
-
-// ProvisionResult - 申领/兑换结果，可直接用于构造运行面客户端（New 的 LicenseNo/Salt）。
+// ProvisionResult - 申领结果，可直接用于构造运行面客户端（New 的 LicenseNo/Salt）。
 type ProvisionResult struct {
 	// LicenseNo - 许可证编号（New(Client) 必填）
 	LicenseNo string
-	// Salt - 指纹盐（New(Client) 必填，与申领模板一致）
+	// Salt - 指纹盐（New(Client) 必填，与签发套餐档位一致）
 	Salt string
 	// BindingPolicy - 绑定策略（single/seats）
 	BindingPolicy string
@@ -60,9 +55,11 @@ type ProvisionResult struct {
 	Reissued bool
 }
 
-// ProvisionError - 申领/兑换业务拒绝（errors.As 断言后按 Status 降级处理）。
+// ProvisionError - 申领业务拒绝（errors.As 断言后按 Status 降级处理）。
 type ProvisionError struct {
-	// Status - 业务状态码（PROVISION_DISABLED/TEMPLATE_INVALID/QUOTA_EXCEEDED/RATE_LIMITED/...，契约 §6.3）
+	// Status - 业务状态码（PROVISION_DISABLED / TEMPLATE_DEPRECATED / PLAN_INVALID /
+	// QUOTA_EXCEEDED / RATE_LIMITED / ...，契约 §6.3）。SDK 不维护白名单：服务端新增或
+	// 未知的业务码一律原样透传（含旧版客户端申领被拒的 TEMPLATE_DEPRECATED），交调用方按需降级。
 	Status string
 	// Message - 平台提示
 	Message string
@@ -76,18 +73,25 @@ func (this *ProvisionError) Error() string {
 	return "授权申领被拒绝：" + this.Status
 }
 
-// Provision - 装机免费自动申领（匿名 Public，无需平台凭证）。
+// ProvisionByPlan - 装机自动申领（匿名 Public，无需平台凭证）。
+// 定位参数为项目编号 + 项目级令牌，签发参数由平台按项目配置的套餐档位（auto_issue_plan_id）
+// 决定；tenantId > 0 时按项目子租户发证档位（tenant_issue_plan_id）为 SaaS 子租户签发。
 // 必须在 New(Client) 之前调用：先申领拿到证书参数，再构造运行面客户端并自动激活。
 // 业务拒绝以 *ProvisionError 返回（errors.As 断言后按 Status 降级）。
-func Provision(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error) {
+// 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已下线，服务端对旧请求返回
+// TEMPLATE_DEPRECATED。
+func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error) {
 	if strings.TrimSpace(opts.ServerURL) == "" {
 		return ProvisionResult{}, errors.New("ServerURL 不能为空（平台 URI 入口）")
 	}
-	if strings.TrimSpace(opts.TemplateCode) == "" {
-		return ProvisionResult{}, errors.New("TemplateCode 不能为空（模板编码由官方二进制写死）")
+	if strings.TrimSpace(opts.ProjectNo) == "" {
+		return ProvisionResult{}, errors.New("ProjectNo 不能为空（项目编号由官方二进制写死）")
 	}
 	if strings.TrimSpace(opts.ProvisionToken) == "" {
-		return ProvisionResult{}, errors.New("ProvisionToken 不能为空（签发令牌由官方二进制写死）")
+		return ProvisionResult{}, errors.New("ProvisionToken 不能为空（项目级签发令牌由官方二进制写死）")
+	}
+	if opts.TenantId < 0 {
+		return ProvisionResult{}, errors.New("TenantId 不能为负数（0 = 普通装机申领，>0 = SaaS 子租户）")
 	}
 	installSN, err := resolveInstallSN(opts.StorageDir, opts.InstallSN)
 	if err != nil {
@@ -95,8 +99,9 @@ func Provision(ctx context.Context, opts ProvisionOptions) (ProvisionResult, err
 	}
 	opts.DeviceName = normalizeDeviceName(opts.DeviceName)
 	body, err := json.Marshal(provisionBody{
-		TemplateCode: opts.TemplateCode, ProvisionToken: opts.ProvisionToken,
-		InstallSN: installSN, DeviceName: opts.DeviceName,
+		ProjectNo: opts.ProjectNo, TenantId: opts.TenantId,
+		ProvisionToken: opts.ProvisionToken,
+		InstallSN:      installSN, DeviceName: opts.DeviceName,
 		ClientTime: time.Now().UnixMilli(),
 	})
 	if err != nil {
@@ -109,36 +114,8 @@ func Provision(ctx context.Context, opts ProvisionOptions) (ProvisionResult, err
 	return finishProvision(response)
 }
 
-// Redeem - 商业激活码兑换（匿名 Public，无需平台凭证）。
-// 业务拒绝以 *ProvisionError 返回（errors.As 断言后按 Status 降级）。
-func Redeem(ctx context.Context, opts RedeemOptions) (ProvisionResult, error) {
-	if strings.TrimSpace(opts.ServerURL) == "" {
-		return ProvisionResult{}, errors.New("ServerURL 不能为空（平台 URI 入口）")
-	}
-	if strings.TrimSpace(opts.Code) == "" {
-		return ProvisionResult{}, errors.New("Code 不能为空（激活码）")
-	}
-	installSN, err := resolveInstallSN(opts.StorageDir, opts.InstallSN)
-	if err != nil {
-		return ProvisionResult{}, err
-	}
-	opts.DeviceName = normalizeDeviceName(opts.DeviceName)
-	body, err := json.Marshal(redeemBody{
-		Code: opts.Code, InstallSN: installSN, DeviceName: opts.DeviceName,
-		ClientTime: time.Now().UnixMilli(),
-	})
-	if err != nil {
-		return ProvisionResult{}, err
-	}
-	response, err := provisionRoundTrip(ctx, opts.ProvisionOptions, "/api/v1/licenses/redeem", body)
-	if err != nil {
-		return ProvisionResult{}, err
-	}
-	return finishProvision(response)
-}
-
 // provisionRoundTrip - 双协议统一请求出口：选传传输 → RoundTrip → 解析统一响应。
-// 申领/兑换请求不做请求签名（匿名凭证，withSign=false 避免访问运行面状态）；
+// 申领请求不做请求签名（匿名凭证，withSign=false 避免访问运行面状态）；
 // 业务码放 status 字段，两协议线格式一致。
 func provisionRoundTrip(ctx context.Context, opts ProvisionOptions, uri string, body []byte) (provisionResponse, error) {
 	timeout := opts.HTTPTimeout

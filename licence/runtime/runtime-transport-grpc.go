@@ -371,38 +371,17 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return 0, nil, err
 		}
 		request := &licencev1.ProvisionRequest{
-			TemplateCode: input.TemplateCode, ProvisionToken: input.ProvisionToken,
-			InstallSn: input.InstallSN, FingerprintHash: input.FingerprintHash,
+			ProjectNo: input.ProjectNo, TenantId: input.TenantId,
+			ProvisionToken: input.ProvisionToken,
+			InstallSn:      input.InstallSN, FingerprintHash: input.FingerprintHash,
 			DeviceName: input.DeviceName, ClientTime: input.ClientTime,
 		}
-		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Provision_FullMethodName, request, false)
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_ProvisionByPlan_FullMethodName, request, false)
 		if err != nil {
 			return 0, nil, err
 		}
 		defer cancel()
-		response, err := this.license.Provision(callCtx, request)
-		if err != nil {
-			code, mapped := grpcHTTPCode(err)
-			return code, nil, mapped
-		}
-		return marshalMap(provisionMap(response))
-
-	case http.MethodPost + " /api/v1/licenses/redeem":
-		var input redeemBody
-		if err := json.Unmarshal(body, &input); err != nil {
-			return 0, nil, err
-		}
-		request := &licencev1.RedeemRequest{
-			Code: input.Code, InstallSn: input.InstallSN,
-			FingerprintHash: input.FingerprintHash, DeviceName: input.DeviceName,
-			ClientTime: input.ClientTime,
-		}
-		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Redeem_FullMethodName, request, false)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer cancel()
-		response, err := this.license.Redeem(callCtx, request)
+		response, err := this.license.ProvisionByPlan(callCtx, request)
 		if err != nil {
 			code, mapped := grpcHTTPCode(err)
 			return code, nil, mapped
