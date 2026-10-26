@@ -723,19 +723,17 @@ type LicensePayloadView struct {
 }
 
 // LicenseApplyInput - 提交授权申请参数（平台 types.LicenseApply；归属用户取登录态）
+// 套餐驱动签发：签发参数唯一来源是套餐（license_plans）+ 计费档位，
+// 不再接受自由填写的类型/环境/权益（项目与套餐须归本人、档位须为该套餐已启用选项）。
 type LicenseApplyInput struct {
 	// ProjectId - 项目ID（必填，须归本人所有）
 	ProjectId int `json:"projectId"`
-	// InstanceId - 部署实例ID（可选，须属于该项目）
+	// InstanceId - 部署实例ID（可选，须属于该项目；> 0 且该实例已有非吊销许可证时原地重签）
 	InstanceId int `json:"instanceId,omitempty"`
-	// LicenseType - 许可证类型（必填）
-	LicenseType string `json:"licenseType"`
-	// Environment - 环境（必填）
-	Environment string `json:"environment"`
-	// Reason - 申请说明（必填，最长 512）
-	Reason string `json:"reason"`
-	// RequestPayload - 期望的权益/额度/期限（自由 JSON，审批人可调整后签发）
-	RequestPayload map[string]any `json:"requestPayload,omitempty"`
+	// PlanId - 套餐ID（必填，须属于该项目）
+	PlanId int `json:"planId"`
+	// PlanBilling - 计费档位（必填，须为该套餐已启用的档位）
+	PlanBilling string `json:"planBilling"`
 }
 
 // LicenseBindingInput - 签发载荷中的绑定信息（平台 types.LicenseBindingInput）
@@ -1283,11 +1281,19 @@ type IdsResult struct {
 }
 
 // ApplyResult - 申请提交结果（资格/授权申请 apply 接口的 data）
+// 授权申请为提交即签发：LicenseId / LicenseNo / Reissued 仅 POST /api/licenses/apply 返回，
+// 资格申请（POST /api/qualification/apply）只回 id + applyNo。
 type ApplyResult struct {
 	// Id - 申请ID
 	Id int `json:"id"`
 	// ApplyNo - 申请编号
 	ApplyNo string `json:"applyNo"`
+	// LicenseId - 签发的许可证ID（仅授权申请返回）
+	LicenseId int `json:"licenseId"`
+	// LicenseNo - 签发的许可证编号（仅授权申请返回）
+	LicenseNo string `json:"licenseNo"`
+	// Reissued - 是否原地重签（仅授权申请返回；true = 目标实例已有许可证被重签，许可证号不变）
+	Reissued bool `json:"reissued"`
 }
 
 // ReviewResult - 审批结果（授权申请 review 接口的 data；approve 时返回签发的许可证信息）

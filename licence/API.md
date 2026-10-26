@@ -953,7 +953,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 |---|---|---|
 | `IdResult` | `Id int` | create/update/release 等 |
 | `IdsResult` | `Ids []int` | remove/delete/restore/clear 等批量操作 |
-| `ApplyResult` | `Id int`, `ApplyNo string` | 资格/授权申请提交 |
+| `ApplyResult` | `Id int`, `ApplyNo string`, `LicenseId int`, `LicenseNo string`, `Reissued bool` | 资格/授权申请提交（后三个字段仅授权申请返回：提交即签发，`Reissued` = 原地重签标记） |
 | `ReviewResult` | `Id int`, `Action string`, `LicenseNo string` | 资格/授权审批（approve 时 `Id` 为签发的许可证 ID，`LicenseNo` 仅 approve 返回） |
 | `LicenseNoResult` | `Id int`, `LicenseNo string` | renew/reissue |
 | `StatusResult` | `Id int`, `Status string` | suspend/revoke |
@@ -1002,7 +1002,7 @@ if errors.As(err, &apiErr) && apiErr.Code == http.StatusUnauthorized { /* 登录
 | `Take` | 许可证详情 | `GET /api/licenses/take?id=N` | `id int` → `*License` |
 | `TakePayload` | 查看签发载荷（载荷/签名原文，可用根包 `licence.Parse` + 公钥验签） | `GET /api/licenses/take-payload?id=N` | `id int` → `*LicensePayloadView` |
 | `PublicKey` | 项目验签公钥表（任意登录用户可读；projectId 必填，返回全版本 `keys[]` 含历史轮换密钥） | `GET /api/licenses/public-key?projectId=` | `projectId int` → `*LicensePublicKey` |
-| `Apply` | 提交授权申请（member 自助） | `POST /api/licenses/apply` | `LicenseApplyInput` → `*ApplyResult` |
+| `Apply` | 提交授权申请（套餐驱动签发，提交即自动签发） | `POST /api/licenses/apply` | `LicenseApplyInput` → `*ApplyResult` |
 | `Cancel` | 撤回授权申请（仅本人 pending 可撤回） | `POST /api/licenses/cancel` | `id int` → 无 |
 | `Applications` | 授权申请列表（不分页） | `GET /api/licenses/applications/rows` | `*LicenseApplicationFindParams` → `[]LicenseApplication` |
 | `ApplicationTake` | 授权申请详情 | `GET /api/licenses/applications/take?id=N` | `id int` → `*LicenseApplication` |
@@ -1257,7 +1257,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `QualificationReviewInput` | `Id`（必填）、`Action`（approve/reject）、`ReviewNote`（reject 必填）、`ProjectQuota`（个人配额，>=1 生效） |
 | `ProjectInput` | `Id`（Update 必填）、`ProjectName`（Create 必填，最长 128）；归属用户由平台按登录态强制写入 |
 | `InstanceInput` | `ProjectId`（Create 必填）、`ServerFingerprint`（原文提交，平台加盐哈希存储）、`NotifyUrl`（平台回调入口）、`IsBillableSet`（显式设置计费标记） |
-| `LicenseApplyInput` | `ProjectId` / `LicenseType` / `Environment` / `Reason` 必填、`RequestPayload`（期望权益自由 JSON） |
+| `LicenseApplyInput` | 套餐驱动签发：`ProjectId` / `PlanId` / `PlanBilling` 必填（项目归本人、套餐属该项目、档位须已启用）、`InstanceId`（可选，同实例已有有效证则原地重签） |
 | `LicenseIssuePayload` | 签发参数：四个期限为毫秒时间戳，0=不限制（`ValidUntil` 0=永久）、`Entitlements` / `Binding` |
 | `LicenseReviewInput` | `Id` / `Action` 必填、`IssuePayload`（approve 时可选，为空从申请的 requestPayload 回退解析） |
 | `LicenseActionInput` | `Id` 必填、`Reason`（suspend/revoke 必填）、renew 传新期限、`IssuePayload`（reissue 生效） |

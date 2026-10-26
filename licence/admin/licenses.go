@@ -65,7 +65,8 @@ func (this *LicensesResource) PublicKey(ctx context.Context, projectId int) (*Li
 
 // ============================= 授权申请 =============================
 
-// Apply - 提交授权申请（member 自助，归属用户取登录态）：POST /api/licenses/apply
+// Apply - 提交授权申请（套餐驱动签发，提交即自动签发；归属用户取登录态）：POST /api/licenses/apply
+// 签发参数唯一来源为套餐 + 计费档位；目标实例已有非吊销许可证时原地重签（ApplyResult.Reissued）。
 func (this *LicensesResource) Apply(ctx context.Context, input LicenseApplyInput) (*ApplyResult, error) {
 
 	var result ApplyResult

@@ -128,18 +128,20 @@ func TestProjectRemove(t *testing.T) {
 	}
 }
 
-// TestLicenseApply - 提交授权申请：请求体与返回 {id,applyNo} 解析
+// TestLicenseApply - 提交授权申请（套餐驱动签发）：请求体与返回 {id,applyNo,licenseId,licenseNo,reissued} 解析
 func TestLicenseApply(t *testing.T) {
 
 	hub := newFakeHub(t)
 	hub.routes["POST /api/licenses/apply"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
-		hub.writeData(writer, map[string]any{"id": 21, "applyNo": "LICAP-2026-000021"})
+		hub.writeData(writer, map[string]any{
+			"id": 21, "applyNo": "LICAP-2026-000021",
+			"licenseId": 88, "licenseNo": "LIC-2026-000088", "reissued": true,
+		})
 	}
 	client := hub.newClient(t)
 
 	result, err := client.Licenses.Apply(context.Background(), LicenseApplyInput{
-		ProjectId: 11, InstanceId: 5, LicenseType: "subscription", Environment: "production",
-		Reason: "生产部署", RequestPayload: map[string]any{"validUntil": 1800000000000},
+		ProjectId: 11, InstanceId: 5, PlanId: 7, PlanBilling: "yearly",
 	})
 	if err != nil {
 		t.Fatalf("申请失败: %v", err)
@@ -147,16 +149,23 @@ func TestLicenseApply(t *testing.T) {
 	if result.Id != 21 || result.ApplyNo != "LICAP-2026-000021" {
 		t.Fatalf("申请结果解析不符: %+v", result)
 	}
+	if result.LicenseId != 88 || result.LicenseNo != "LIC-2026-000088" || !result.Reissued {
+		t.Fatalf("签发结果解析不符: %+v", result)
+	}
 
 	var sent map[string]any
 	if err = json.Unmarshal(hub.lastBody, &sent); err != nil {
 		t.Fatalf("请求体不是 JSON: %v", err)
 	}
-	if sent["projectId"] != float64(11) || sent["licenseType"] != "subscription" || sent["environment"] != "production" {
+	if sent["projectId"] != float64(11) || sent["instanceId"] != float64(5) ||
+		sent["planId"] != float64(7) || sent["planBilling"] != "yearly" {
 		t.Fatalf("申请请求体不符: %s", string(hub.lastBody))
 	}
-	if _, ok := sent["requestPayload"].(map[string]any)["validUntil"]; !ok {
-		t.Fatalf("requestPayload 未上送: %s", string(hub.lastBody))
+	// 套餐驱动签发：旧的自由权益字段已下线，不得再上送
+	for _, field := range []string{"licenseType", "environment", "reason", "requestPayload"} {
+		if _, ok := sent[field]; ok {
+			t.Fatalf("已下线字段不应上送 %s: %s", field, string(hub.lastBody))
+		}
 	}
 }
 
