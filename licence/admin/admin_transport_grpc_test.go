@@ -220,3 +220,122 @@ func TestGRPCUpgradeRecordsFind(t *testing.T) {
 	}
 	_ = transport.Close()
 }
+
+// instanceCommandAdminServer - 实例指令管理面 gRPC 映射断言用假服务端：
+// 校验 JWT metadata，记录各方法 full method 与请求体原文
+type instanceCommandAdminServer struct {
+	licencev1.UnimplementedInstanceAdminServiceServer
+	t        *testing.T
+	fullName map[string]string
+	body     map[string][]byte
+}
+
+func (s *instanceCommandAdminServer) record(ctx context.Context, request *licencev1.AdminRequest, method string) {
+	s.t.Helper()
+	md, _ := metadata.FromIncomingContext(ctx)
+	if values := md.Get("authorization"); len(values) != 1 || values[0] != "Bearer jwt" {
+		s.t.Fatalf("authorization=%v", values)
+	}
+	s.fullName[method], _ = grpc.Method(ctx)
+	s.body[method] = request.GetJson()
+}
+
+func (s *instanceCommandAdminServer) IssueInstanceCommand(ctx context.Context, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {
+	s.record(ctx, request, "issue")
+	raw, _ := json.Marshal(map[string]any{"commandNo": "CMD-20261025-000001"})
+	return &licencev1.AdminResponse{Code: 200, Message: "ok", DataJson: raw}, nil
+}
+
+func (s *instanceCommandAdminServer) FindInstanceCommands(ctx context.Context, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {
+	s.record(ctx, request, "find")
+	raw, _ := json.Marshal(map[string]any{
+		"data":  []map[string]any{{"id": 9, "commandNo": "CMD-20261025-000001", "status": "success"}},
+		"count": 1, "page": 1,
+	})
+	return &licencev1.AdminResponse{Code: 200, Message: "ok", DataJson: raw}, nil
+}
+
+func (s *instanceCommandAdminServer) GetInstanceCommand(ctx context.Context, request *licencev1.AdminRequest) (*licencev1.AdminResponse, error) {
+	s.record(ctx, request, "take")
+	raw, _ := json.Marshal(map[string]any{"id": 9, "commandNo": "CMD-20261025-000001", "status": "failed"})
+	return &licencev1.AdminResponse{Code: 200, Message: "ok", DataJson: raw}, nil
+}
+
+// TestGRPCInstanceCommands - gRPC 管理面实例指令三路由映射（对照 HTTP 用例 TestInstanceCommand*）：
+// /api/instances/command → IssueInstanceCommand、/api/instance-commands/find|take →
+// FindInstanceCommands/GetInstanceCommand，请求体原样透传，响应解析一致
+func TestGRPCInstanceCommands(t *testing.T) {
+
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	commandServer := &instanceCommandAdminServer{t: t, fullName: map[string]string{}, body: map[string][]byte{}}
+	licencev1.RegisterInstanceAdminServiceServer(server, commandServer)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	transport := &grpcAdminTransport{client: &AdminClient{options: AdminOptions{}}, conn: conn, instance: licencev1.NewInstanceAdminServiceClient(conn)}
+
+	// 下发指令
+	data, err := transport.RoundTrip(context.Background(), adminCall{
+		Method: http.MethodPost, Path: "/api/instances/command",
+		Body: []byte(`{"id":3,"action":"runtime_info","params":"{\"verbose\":true}"}`), Token: "jwt",
+	})
+	if err != nil {
+		t.Fatalf("下发指令失败: %v", err)
+	}
+	if commandServer.fullName["issue"] != "/licenhub.licence.v1.InstanceAdminService/IssueInstanceCommand" {
+		t.Fatalf("下发 full method 路由不符: %q", commandServer.fullName["issue"])
+	}
+	if !bytes.Contains(commandServer.body["issue"], []byte(`"action":"runtime_info"`)) {
+		t.Fatalf("下发请求体未透传: %s", string(commandServer.body["issue"]))
+	}
+	var issued struct {
+		CommandNo string `json:"commandNo"`
+	}
+	if json.Unmarshal(data, &issued) != nil || issued.CommandNo != "CMD-20261025-000001" {
+		t.Fatalf("下发响应解析不符: %s", string(data))
+	}
+
+	// 指令分页
+	data, err = transport.RoundTrip(context.Background(), adminCall{
+		Method: http.MethodGet, Path: "/api/instance-commands/find",
+		Body: []byte(`{"instanceId":[3],"status":["success"]}`), Token: "jwt",
+	})
+	if err != nil {
+		t.Fatalf("指令分页失败: %v", err)
+	}
+	if commandServer.fullName["find"] != "/licenhub.licence.v1.InstanceAdminService/FindInstanceCommands" {
+		t.Fatalf("分页 full method 路由不符: %q", commandServer.fullName["find"])
+	}
+	var page struct {
+		Data  []map[string]any `json:"data"`
+		Count int              `json:"count"`
+	}
+	if json.Unmarshal(data, &page) != nil || page.Count != 1 || page.Data[0]["commandNo"] != "CMD-20261025-000001" {
+		t.Fatalf("分页响应解析不符: %s", string(data))
+	}
+
+	// 指令详情
+	data, err = transport.RoundTrip(context.Background(), adminCall{
+		Method: http.MethodGet, Path: "/api/instance-commands/take",
+		Body: []byte(`{"id":9}`), Token: "jwt",
+	})
+	if err != nil {
+		t.Fatalf("指令详情失败: %v", err)
+	}
+	if commandServer.fullName["take"] != "/licenhub.licence.v1.InstanceAdminService/GetInstanceCommand" {
+		t.Fatalf("详情 full method 路由不符: %q", commandServer.fullName["take"])
+	}
+	var row struct {
+		Id     int    `json:"id"`
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(data, &row) != nil || row.Id != 9 || row.Status != "failed" {
+		t.Fatalf("详情响应解析不符: %s", string(data))
+	}
+	_ = transport.Close()
+}

@@ -83,6 +83,14 @@ type Options struct {
 	DisableConsumptionReport bool
 	// ConsumptionReportInterval - 消费埋点上报间隔（默认 30 秒；累计达 50 个 key 时提前触发）
 	ConsumptionReportInterval time.Duration
+	// CommandPullTimeout - 指令长轮询 hold 时长（默认 25 秒；服务端硬上限 30 秒，超出自动收敛；
+	// 客户端请求超时始终大于 hold）
+	CommandPullTimeout time.Duration
+	// CommandHandlers - 自定义指令动作处理器（与内置动作同名时覆盖内置；
+	// handler 须幂等——回执失败平台会重新下发同一指令）
+	CommandHandlers map[string]CommandHandler
+	// DisableCommands - 关闭实例指令通道（默认 false=开启；为 true 不启动指令循环）
+	DisableCommands bool
 }
 
 // runtimeState - 持久化运行状态（加密存储，token 仅此一份）
@@ -141,6 +149,8 @@ type Client struct {
 	flushing atomic.Bool
 	// retryDelay - 网络故障退避（请求未达服务端时拉长下轮间隔，恢复后清除）
 	retryDelay time.Duration
+	// startedAt - 客户端创建时间（指令 runtime_info 的 uptime 统计起点）
+	startedAt time.Time
 
 	// Apis - API 商城 typed 方法包挂载点（apis 子包；New 时构造，生命周期跟随本 Client）
 	Apis *apis.Client
@@ -196,6 +206,13 @@ func New(options Options) (*Client, error) {
 	if options.ConsumptionReportInterval <= 0 {
 		options.ConsumptionReportInterval = 30 * time.Second
 	}
+	if options.CommandPullTimeout <= 0 {
+		options.CommandPullTimeout = commandDefaultHold
+	}
+	// 服务端 timeout_ms 硬上限 30000，hold 超出无意义（客户端请求超时随 hold 放大，恒大于 hold）
+	if options.CommandPullTimeout > commandMaxHold {
+		options.CommandPullTimeout = commandMaxHold
+	}
 
 	fingerprint, err := FingerprintHash(options.Salt, options.Fingerprint, options.Provider)
 	if err != nil {
@@ -213,6 +230,7 @@ func New(options Options) (*Client, error) {
 	client := &Client{
 		options: options,
 		store:   store, fingerprint: fingerprint,
+		startedAt: time.Now(),
 		state: runtimeState{
 			PlatformConfigs: make(map[string]PlatformConfigItem),
 		},
@@ -258,6 +276,9 @@ func (this *Client) Start(ctx context.Context) error {
 	go this.loop(loopCtx)
 	if !this.options.DisableConsumptionReport {
 		go this.consumptionLoop(loopCtx)
+	}
+	if !this.options.DisableCommands {
+		go this.commandLoop(loopCtx)
 	}
 	return nil
 }

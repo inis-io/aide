@@ -15,6 +15,7 @@
 4. [授权状态与降级策略](#4-授权状态与降级策略)
    - [多机席位（一 Client 一机一席）](#41-多机席位一-client-一机一席)
 5. [在线更新（更新代理/自更新程序用）](#5-在线更新更新代理自更新程序用)
+   - [远程指令（平台远程操作实例）](#51-远程指令平台远程操作实例)
 6. [SaaS 多租户（服务商集成）](#6-saas-多租户服务商集成)
 7. [管理面（商户 CI/运维自动化，勿随交付项目分发）](#7-管理面商户-ci运维自动化勿随交付项目分发)
 8. [常见问题（FAQ）](#8-常见问题faq)
@@ -34,6 +35,7 @@
    - [API 商城调用（`lic.Apis`）](#175-api-商城调用licapis)
    - [LLM 网关调用（`apis/llm` 独立客户端）](#176-llm-网关调用apisllm-独立客户端)
    - [项目套餐（在售目录与套餐订单）](#177-项目套餐在售目录与套餐订单)
+   - [远程指令（实例指令通道）](#178-远程指令实例指令通道)
 18. [在线更新模块](#18-在线更新模块)
 19. [SaaS 多租户接口](#19-saas-多租户接口)
 20. [管理面客户端 AdminClient](#20-管理面客户端-adminclient)
@@ -302,6 +304,45 @@ manifest, err := client.VerifyManifest(raw) // 验签通过才允许继续安装
 ```
 
 升级执行编排（预检/备份/停服/迁移/回滚）由你的更新代理负责，SDK 只提供检查、下载、验签与上报。
+
+### 5.1 远程指令（平台远程操作实例）
+
+实例指令通道让平台可以远程操作部署实例：实例通过 SDK **长轮询主动领取指令、执行后回执**——
+实例主动连平台（穿透 NAT/防火墙），平台不反向直连实例。`Start` 后指令循环与授权刷新循环并列
+自动运行，业务零接入成本；鉴权与 `validate` 完全同套（activation token + 客户端私钥签名 +
+nonce 防重放），领取动作同时承担心跳（平台据此判定实例在线）。
+
+内置指令动作（白名单）：
+
+| 动作 | 行为 | 回执输出摘要 |
+|---|---|---|
+| `runtime_info` | 采集实时运行信息（os/arch、Go 版本、hostname、uptime、授权状态/席位号/到期时间、当前版本、平台配置同步水位等） | 信息快照 map |
+| `license_refresh` | 立即执行一轮许可证校验（与后台 tick 同入口，不并发不死锁） | `{"status": 最新状态}` |
+| `config_refresh` | 立即增量同步平台配置 | `{"synced": true, "version": 水位}` |
+| `update_check` | 立即检查更新（**只检查**，返回 `{update, version, …}` 清单摘要，不执行升级） | 清单摘要 |
+
+```go
+client, err := licence.New(licence.Options{
+    // ...ServerURL / LicenseNo / Salt / PublicKeys 照常
+    // CommandPullTimeout: 25 * time.Second, // 长轮询 hold（默认 25s，服务端上限 30s）
+    // DisableCommands:   true,              // 为 true 彻底关闭指令通道
+    CommandHandlers: map[string]licence.CommandHandler{
+        // 自定义动作；与内置同名时覆盖内置。output 会被 JSON 序列化随回执上送
+        "cache_clear": func(ctx context.Context, task licence.CommandTask) (any, error) {
+            return map[string]any{"cleared": true}, nil
+        },
+    },
+})
+```
+
+语义要点：
+
+- **回执幂等**：平台按 `commandNo` 终态先入先赢；回执失败（网络故障）平台会重新下发同一指令，
+  故自定义 handler 必须具备幂等性（内置四个均为只读/幂等操作）。
+- **未知动作**：未注册的 action 自动回执 `failed`（输出「未知指令」），不会静默吞掉。
+- **停摆口径与 tick 一致**：无 activation token 或处于 `SEAT_LIMIT_EXCEEDED` / `SEAT_RELEASED`
+  终态时不拉取；网络故障退避 1 分钟；`Stop` 立即中断长轮询退出。
+- handler panic 会被 recover 为 `failed` 回执，不会拖垮指令循环。
 
 ## 6. SaaS 多租户（服务商集成）
 
@@ -687,6 +728,9 @@ type Options struct {
     Transport          Transport              // 零值 HTTP；可选 TransportGRPC
     GRPC               GRPCOptions
     OnStatusChange     func(oldStatus string, newStatus string) // 状态变化回调（可选）
+    CommandPullTimeout time.Duration          // 指令长轮询 hold（默认 25 秒，服务端上限 30 秒）
+    CommandHandlers    map[string]CommandHandler // 自定义指令动作（与内置同名时覆盖内置，须幂等）
+    DisableCommands    bool                   // 关闭实例指令通道（默认 false=开启）
 }
 ```
 
@@ -1012,6 +1056,35 @@ fmt.Println(rows.Count, len(rows.Records))
   字节不变，历史签名不受影响。
 - **契约出处**：`proto/licence/v1/runtime.proto` 的 `PlanRuntimeService` + 同目录
   `protocol-matrix.yaml` 套餐运行面五行（domain `license_plan`，create/cancel 为 write）。
+
+### 17.8 远程指令（实例指令通道）
+
+平台远程操作部署实例的运行面通道（机制与内置动作见 §5.1）：实例长轮询领取 + 执行后回执，
+双协议与 `activation-sign-v1` 签名族（domain `instance_command`）。`Start` 自动启动指令循环，
+正常集成**不需要直接调用以下两个方法**——它们是指令循环的单轮原语，也可用于自实现调度。
+
+| 方法 | 签名 | HTTP | gRPC |
+|---|---|---|---|
+| 领取指令 | `lic.PullCommands(ctx, timeoutMs int32) ([]licence.CommandTask, error)` | `POST /api/v1/commands/pull` | `CommandRuntimeService.Pull` |
+| 执行回执 | `lic.ReportCommand(ctx, commandNo, result, outputJSON string) error` | `POST /api/v1/commands/report` | `CommandRuntimeService.Report` |
+
+```go
+// CommandTask - 平台下发的一条远程指令
+type CommandTask struct {
+    CommandNo  string `json:"commandNo"`  // 指令编号（幂等键，回执锚点）
+    Action     string `json:"action"`     // 动作：内置 CommandAction* 或自定义
+    ParamsJSON string `json:"paramsJson"` // 动作参数 JSON 原文（无参数为空串）
+    IssuedAt   int64  `json:"issuedAt"`   // 平台下发时间（毫秒）
+}
+
+// CommandHandler - 自定义指令处理器（output 经 JSON 序列化随回执上送；须幂等）
+type CommandHandler func(ctx context.Context, task CommandTask) (output any, err error)
+```
+
+常量：动作白名单 `CommandActionRuntimeInfo` / `CommandActionLicenseRefresh` /
+`CommandActionConfigRefresh` / `CommandActionUpdateCheck`；回执结果 `CommandResultSuccess` /
+`CommandResultFailed`。`PullCommands` 的 `timeoutMs <= 0` 取 `Options.CommandPullTimeout`
+（默认 25s），超过 30000 收敛到服务端硬上限；非放行态返回「许可证非放行态：{status}」错误。
 
 ## 18. 在线更新模块
 
@@ -1738,7 +1811,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 | 文件 / 子包 | 能力 |
 |---|---|
-| `doc.go` / `facade.go` | 根包纯门面：138 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
+| `doc.go` / `facade.go` | 根包纯门面：144 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
 | `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` | 平台契约镜像层：信封结构、签发、验签、密钥对、nonce、canonical 助手（licen-hub backend 直接 import） |
 | `protocol/status.go` | 运行面状态码与本地时间判定 |
 | `protocol/version-range.go` | 版本范围表达式判定 |

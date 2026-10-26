@@ -16,6 +16,7 @@
 6. [安全存储接口](#6-安全存储接口)
 7. [运行面客户端 Client](#7-运行面客户端-client)
    - [项目套餐（在售目录与套餐订单）](#76-项目套餐在售目录与套餐订单)
+   - [远程指令（实例指令通道）](#77-远程指令实例指令通道)
 8. [在线更新模块](#8-在线更新模块)
 9. [SaaS 多租户接口](#9-saas-多租户接口)
 10. [管理面客户端 AdminClient](#10-管理面客户端-adminclient)
@@ -297,6 +298,9 @@ type Options struct {
     Transport          Transport              // 零值 HTTP；可选 TransportGRPC
     GRPC               GRPCOptions
     OnStatusChange     func(oldStatus string, newStatus string) // 状态变化回调（可选）
+    CommandPullTimeout time.Duration          // 指令长轮询 hold（默认 25 秒，服务端上限 30 秒）
+    CommandHandlers    map[string]CommandHandler // 自定义指令动作（与内置同名时覆盖内置，须幂等）
+    DisableCommands    bool                   // 关闭实例指令通道（默认 false=开启）
 }
 ```
 
@@ -547,6 +551,52 @@ type llm.Error struct {
 - **入参校验**：`planCode` / `orderNo` 非空、`billing` 枚举、`page ≥ 1` 均在本地完成，不合法零请求。
 - **契约出处**：`proto/licence/v1/runtime.proto` 的 `PlanRuntimeService` + 同目录
   `protocol-matrix.yaml` 套餐运行面五行（domain `license_plan`，create/cancel 为 write）。
+
+### 7.7 远程指令（实例指令通道）
+
+平台远程操作部署实例：实例经长轮询主动领取指令、执行后回执（穿透 NAT，平台不反向直连）。
+`Start` 自动启动指令循环（与授权刷新循环并列，`Options.DisableCommands=true` 关闭），
+正常集成无需直接调用下列方法——它们是指令循环的单轮原语，也可用于自实现调度。
+机制、内置动作表与自定义 handler 示例见 README §5.1。
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `PullCommands` | `func (this *Client) PullCommands(ctx context.Context, timeoutMs int32) ([]CommandTask, error)` | 一轮指令领取（长轮询）。`timeoutMs <= 0` 取 `Options.CommandPullTimeout`（默认 25s），超 30000 收敛到服务端硬上限；内含时钟校正与状态闸门（`ERROR`/非放行态 → error）；传输层未初始化返回错误 |
+| `ReportCommand` | `func (this *Client) ReportCommand(ctx context.Context, commandNo, result, outputJSON string) error` | 指令执行回执（幂等：`commandNo` 终态先入先赢）。`result` 取 `CommandResultSuccess` / `CommandResultFailed`；best-effort——仅凭证失效（404）与服务端故障返回错误，失败不重试（平台重新下发由下一轮领取补偿） |
+
+```go
+// CommandTask - 平台下发的一条远程指令（json tag camelCase 与服务端逐字对齐）
+type CommandTask struct {
+    CommandNo  string `json:"commandNo"`  // 指令编号（幂等键，回执锚点）
+    Action     string `json:"action"`     // 动作：内置 CommandAction* 或自定义
+    ParamsJSON string `json:"paramsJson"` // 动作参数 JSON 原文（无参数为空串）
+    IssuedAt   int64  `json:"issuedAt"`   // 平台下发时间（毫秒）
+}
+
+// CommandHandler - 自定义指令处理器（Options.CommandHandlers 注册；
+// output 经 JSON 序列化为 output_json 上送；回执失败平台会重发，须幂等）
+type CommandHandler func(ctx context.Context, task CommandTask) (output any, err error)
+```
+
+常量（根包门面同步导出）：
+
+| 常量 | 值 | 说明 |
+|---|---|---|
+| `CommandActionRuntimeInfo` | `runtime_info` | 内置：实时运行信息（os/arch、Go 版本、hostname、uptime、授权状态/席位/到期、版本、配置同步水位） |
+| `CommandActionLicenseRefresh` | `license_refresh` | 内置：立即一轮许可证校验（与后台 tick 同入口，不并发不死锁） |
+| `CommandActionConfigRefresh` | `config_refresh` | 内置：立即增量同步平台配置 |
+| `CommandActionUpdateCheck` | `update_check` | 内置：立即检查更新（只检查不升级，返回 `{update, …}` 清单摘要） |
+| `CommandResultSuccess` / `CommandResultFailed` | `success` / `failed` | 回执结果枚举 |
+
+要点：
+
+- **分发顺序**：`Options.CommandHandlers` 优先（与内置同名时覆盖内置）→ 内置 handler →
+  未知动作回执 `failed`（输出「未知指令」）；handler panic 被 recover 为 `failed`，不拖垮循环。
+- **停摆口径**：与 `tick` 一致——无 activation token 或 `SEAT_LIMIT_EXCEEDED` / `SEAT_RELEASED`
+  终态时不拉取；网络故障退避 1 分钟；`Stop` 中断长轮询立即退出。
+- **双协议**：HTTP `POST /api/v1/commands/pull|report` ↔ gRPC `CommandRuntimeService.Pull|Report`，
+  `activation-sign-v1` 签名族，协议矩阵 domain `instance_command`（`runtime.proto` +
+  `protocol-matrix.yaml` 指令段两行）。
 
 ---
 
@@ -1323,7 +1373,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 | 文件 / 子包 | 能力 |
 |---|---|
-| `doc.go` / `facade.go` | 根包纯门面：138 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
+| `doc.go` / `facade.go` | 根包纯门面：144 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
 | `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` | 平台契约镜像层：信封结构、签发、验签、密钥对、nonce、canonical 助手（licen-hub backend 直接 import） |
 | `protocol/status.go` | 运行面状态码与本地时间判定 |
 | `protocol/version-range.go` | 版本范围表达式判定 |

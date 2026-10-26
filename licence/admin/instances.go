@@ -87,3 +87,34 @@ func (this *InstancesResource) Restore(ctx context.Context, ids []int) (*IdsResu
 	}
 	return &result, nil
 }
+
+// IssueCommand - 下发实例指令（高风险，permission: project.instance.command）：
+// 平台落 pending 行等待客户端长轮询领取，返回指令编号（回执锚点）：POST /api/instances/command
+func (this *InstancesResource) IssueCommand(ctx context.Context, input IssueInstanceCommandInput) (*IssueInstanceCommandResult, error) {
+
+	var result IssueInstanceCommandResult
+	if err := this.client.post(ctx, "/api/instances/command", input, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// FindCommands - 实例指令分页：GET /api/instance-commands/find
+func (this *InstancesResource) FindCommands(ctx context.Context, params *InstanceCommandFindParams) (*Page[InstanceCommand], error) {
+
+	var result Page[InstanceCommand]
+	if err := this.client.get(ctx, "/api/instance-commands/find", params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetCommand - 实例指令详情：GET /api/instance-commands/take?id=N
+func (this *InstancesResource) GetCommand(ctx context.Context, id int) (*InstanceCommand, error) {
+
+	var result InstanceCommand
+	if err := this.client.getWithQuery(ctx, "/api/instance-commands/take", idQuery(id), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

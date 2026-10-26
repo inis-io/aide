@@ -1,7 +1,7 @@
 // Package licence - Licence SDK 门面（facade）包。
 //
 // 本包不承载任何实现，仅以类型别名（type X = ...）、常量别名（const X = ...）与
-// 函数/变量别名（var X = ...）形式镜像全部 86 个导出符号，保证下游
+// 函数/变量别名（var X = ...）形式镜像全部 144 个导出符号，保证下游
 // `import licence "github.com/inis-io/aide/licence"` 零改动。
 //
 // 实现下沉到两个子包：
@@ -11,7 +11,8 @@
 //     版本范围表达式（version-range.go）。与 licen-hub 平台
 //     backend/app/common/sign、license-status.go、version-range.go 字节级镜像。
 //   - runtime/   运行面客户端层：Client、传输（HTTP/gRPC）、设备指纹、本地加密
-//     存储、SaaS 租户与菜单、平台配置同步、在线更新、装机自动申领、配置回推。
+//     存储、SaaS 租户与菜单、平台配置同步、在线更新、装机自动申领、配置回推、
+//     实例指令通道（长轮询领取 + 执行回执）。
 //
 // 依赖方向（编译期保证无环）：
 //

@@ -475,3 +475,53 @@ message PlanOrderRowsResponse {
   int64 count = 2;
   int32 page = 3;
 }
+
+// CommandRuntimeService - 实例指令运行面（平台远程操作实例：实例长轮询领取指令 + 执行后回执）。
+// 通道模型与事件订阅一致：实例主动连平台（穿透 NAT/防火墙），平台不反向直连实例；
+// 与 activate/validate 同套实例签名防重放（activation-sign-v1，凭证锚定部署实例）。
+service CommandRuntimeService {
+  // Pull - 长轮询领取待执行指令（hold 语义与 EventSubscribe 一致：0=立即返回，默认 10s，硬上限 30s）；
+  // 每次调用同时承担心跳（平台回写实例 last_seen_at，是在线状态的判定依据）。
+  rpc Pull(CommandPullRequest) returns (CommandPullResponse);
+  // Report - 指令执行回执（幂等：command_no 终态先入先赢，重复/迟到回执直接返回成功）。
+  rpc Report(CommandReportRequest) returns (CommandReportResponse);
+}
+
+// CommandPullRequest - 指令领取请求。
+message CommandPullRequest {
+  string license_no = 1;
+  // timeout_ms - 长轮询 hold 时长（0 = 服务端默认 10000，硬上限 30000）
+  int32 timeout_ms = 2;
+}
+
+// CommandTask - 平台下发的一条远程指令。
+message CommandTask {
+  string command_no = 1;   // 指令编号（幂等键，同时是回执锚点）
+  string action = 2;       // 指令动作白名单：runtime_info / license_refresh / config_refresh / update_check
+  string params_json = 3;  // 动作参数 JSON 原文（无参数为空串）
+  int64 issued_at = 4;     // 平台下发时间（毫秒）
+}
+
+// CommandPullResponse - 指令领取响应。
+message CommandPullResponse {
+  string status = 1;  // 许可证运行面状态码（与 RuntimeResponse.status 同口径；非放行态 commands 为空）
+  int64 server_time = 2;
+  repeated CommandTask commands = 3;
+  string message = 4;
+}
+
+// CommandReportRequest - 指令执行回执请求。
+message CommandReportRequest {
+  string license_no = 1;
+  string command_no = 2;
+  string result = 3;        // 执行结果：success / failed
+  string output_json = 4;   // 执行输出 JSON 原文（失败时为 {"message":"..."}；无输出为空串）
+  int64 client_time = 5;
+}
+
+// CommandReportResponse - 指令执行回执响应。
+message CommandReportResponse {
+  string status = 1;
+  int64 server_time = 2;
+  string message = 3;
+}

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 )
 
 // runtimeTransport - 运行面底层传输抽象。
@@ -16,6 +18,11 @@ type runtimeTransport interface {
 	RoundTrip(ctx context.Context, method, requestURI string, body []byte, withSign bool) (int, []byte, error)
 	// SubscribeEvents - 一轮事件拉取（HTTP 长轮询单次 POST 解码批次；gRPC 服务端流 Recv 到 EOF 收集成 slice）。
 	SubscribeEvents(ctx context.Context, licenseNo string, sinceEventId int64, hold time.Duration) (subscribeResult, error)
+	// PullCommands - 一轮指令领取（HTTP/gRPC 均为一元长轮询：hold 收敛到 30s 上限，
+	// 请求超时恒大于 hold）。
+	PullCommands(ctx context.Context, licenseNo string, hold time.Duration) (commandPullResult, error)
+	// ReportCommand - 指令执行回执（普通一元请求，不回写授权刷新循环的退避状态）。
+	ReportCommand(ctx context.Context, licenseNo string, commandNo string, result string, outputJSON string) (commandReportResult, error)
 	Close() error
 }
 
@@ -159,6 +166,121 @@ func (this *httpRuntimeTransport) SubscribeEvents(ctx context.Context, licenseNo
 func (this *httpRuntimeTransport) Close() error {
 	this.http.CloseIdleConnections()
 	return nil
+}
+
+// PullCommands - 指令领取 HTTP 长轮询实现。
+// hold 上界收敛到专用长轮询客户端超时 −5s 与服务端硬上限 30s（与 SubscribeEvents 同口径），
+// 保证单次请求超时恒大于 hold。
+func (this *httpRuntimeTransport) PullCommands(ctx context.Context, licenseNo string, hold time.Duration) (commandPullResult, error) {
+
+	timeout := this.client.options.HTTPTimeout + 30*time.Second
+	maxHold := timeout - 5*time.Second
+	if maxHold <= 0 {
+		maxHold = time.Second
+	}
+	if hold <= 0 {
+		hold = commandDefaultHold
+	}
+	if hold > maxHold {
+		hold = maxHold
+	}
+	if hold > commandMaxHold {
+		hold = commandMaxHold
+	}
+	body, err := json.Marshal(map[string]any{
+		"licenseNo": licenseNo, "timeoutMs": hold.Milliseconds(),
+	})
+	if err != nil {
+		return commandPullResult{}, err
+	}
+	const uri = "/api/v1/commands/pull"
+	addr := strings.TrimRight(this.client.options.ServerURL, "/") + uri
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, addr, bytes.NewReader(body))
+	if err != nil {
+		return commandPullResult{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	headers, signErr := this.client.signHeaders(http.MethodPost, uri, body)
+	if signErr != nil {
+		return commandPullResult{}, signErr
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	// 长轮询专用客户端：单次请求超时 = HTTPTimeout + 30s，hold 上界已收敛到其 −5s
+	client := &http.Client{Timeout: timeout}
+	defer client.CloseIdleConnections()
+	response, err := client.Do(request)
+	if err != nil {
+		return commandPullResult{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return commandPullResult{}, err
+	}
+	if response.StatusCode == http.StatusNotFound {
+		return commandPullResult{}, errors.New("许可证或实例信息无效")
+	}
+	var result struct {
+		Status     string        `json:"status"`
+		ServerTime int64         `json:"serverTime"`
+		Commands   []CommandTask `json:"commands"`
+		Message    string        `json:"message"`
+	}
+	if err = json.Unmarshal(raw, &result); err != nil {
+		return commandPullResult{}, err
+	}
+	return commandPullResult{
+		Status: result.Status, ServerTime: result.ServerTime, Message: result.Message, Commands: result.Commands,
+	}, nil
+}
+
+// ReportCommand - 指令回执 HTTP 实现（普通一元请求，走默认超时客户端）。
+func (this *httpRuntimeTransport) ReportCommand(ctx context.Context, licenseNo string, commandNo string, result string, outputJSON string) (commandReportResult, error) {
+
+	body, err := json.Marshal(map[string]any{
+		"licenseNo": licenseNo, "commandNo": commandNo, "result": result,
+		"outputJson": outputJSON, "clientTime": time.Now().UnixMilli(),
+	})
+	if err != nil {
+		return commandReportResult{}, err
+	}
+	const uri = "/api/v1/commands/report"
+	addr := strings.TrimRight(this.client.options.ServerURL, "/") + uri
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, addr, bytes.NewReader(body))
+	if err != nil {
+		return commandReportResult{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	headers, signErr := this.client.signHeaders(http.MethodPost, uri, body)
+	if signErr != nil {
+		return commandReportResult{}, signErr
+	}
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	response, err := this.http.Do(request)
+	if err != nil {
+		return commandReportResult{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return commandReportResult{}, err
+	}
+	if response.StatusCode == http.StatusNotFound {
+		return commandReportResult{Status: LicenceProtocol.StatusNotFound}, nil
+	}
+	var parsed struct {
+		Status     string `json:"status"`
+		ServerTime int64  `json:"serverTime"`
+		Message    string `json:"message"`
+	}
+	if err = json.Unmarshal(raw, &parsed); err != nil {
+		return commandReportResult{}, err
+	}
+	return commandReportResult{Status: parsed.Status, ServerTime: parsed.ServerTime, Message: parsed.Message}, nil
 }
 
 var _ runtimeTransport = (*httpRuntimeTransport)(nil)

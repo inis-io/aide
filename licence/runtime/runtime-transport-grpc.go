@@ -42,6 +42,7 @@ type grpcRuntimeTransport struct {
 	event          licencev1.EventRuntimeServiceClient
 	pushback       licencev1.ConfigPushbackRuntimeServiceClient
 	plan           licencev1.PlanRuntimeServiceClient
+	command        licencev1.CommandRuntimeServiceClient
 	apis           apisv1.ApisRuntimeServiceClient
 	starDirectory  starv1.StarDirectoryServiceClient
 	starIndex      starv1.StarIndexServiceClient
@@ -65,6 +66,7 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 		event:          licencev1.NewEventRuntimeServiceClient(conn),
 		pushback:       licencev1.NewConfigPushbackRuntimeServiceClient(conn),
 		plan:           licencev1.NewPlanRuntimeServiceClient(conn),
+		command:        licencev1.NewCommandRuntimeServiceClient(conn),
 		apis:           apisv1.NewApisRuntimeServiceClient(conn),
 		starDirectory:  starv1.NewStarDirectoryServiceClient(conn),
 		starIndex:      starv1.NewStarIndexServiceClient(conn),
@@ -271,6 +273,88 @@ func (this *grpcRuntimeTransport) mapSubscribeError(err error) error {
 	switch grpcStatus.Code() {
 	case codes.NotFound:
 		return errors.New("许可证或项目信息无效")
+	case codes.FailedPrecondition:
+		// 服务端消息已带"许可证非放行态：{status}"，直接透传保持双协议一致
+		return errors.New(grpcStatus.Message())
+	case codes.Internal:
+		return errors.New("服务端故障，请稍后重试")
+	default:
+		return err
+	}
+}
+
+// PullCommands - 指令领取 gRPC 实现：一元长轮询，带独立 deadline（hold + 10s，
+// 下限默认调用超时），hold 收敛到服务端硬上限 30s（与 SubscribeEvents 同口径）。
+func (this *grpcRuntimeTransport) PullCommands(ctx context.Context, licenseNo string, hold time.Duration) (commandPullResult, error) {
+
+	timeout := this.client.options.HTTPTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	if hold <= 0 {
+		hold = commandDefaultHold
+	}
+	if hold > commandMaxHold {
+		hold = commandMaxHold
+	}
+	deadline := hold + 10*time.Second
+	if deadline < timeout {
+		deadline = timeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	request := &licencev1.CommandPullRequest{LicenseNo: licenseNo, TimeoutMs: int32(hold.Milliseconds())}
+	signed, err := this.signedContext(callCtx, licencev1.CommandRuntimeService_Pull_FullMethodName, request)
+	if err != nil {
+		return commandPullResult{}, err
+	}
+	response, err := this.command.Pull(signed, request)
+	if err != nil {
+		return commandPullResult{}, this.mapCommandError(err)
+	}
+	result := commandPullResult{
+		Status: response.GetStatus(), ServerTime: response.GetServerTime(), Message: response.GetMessage(),
+	}
+	for _, item := range response.GetCommands() {
+		result.Commands = append(result.Commands, CommandTask{
+			CommandNo: item.GetCommandNo(), Action: item.GetAction(),
+			ParamsJSON: item.GetParamsJson(), IssuedAt: item.GetIssuedAt(),
+		})
+	}
+	return result, nil
+}
+
+// ReportCommand - 指令回执 gRPC 实现：一元普通请求（默认调用超时）。
+// NotFound 归一为 StatusNotFound 结果（由公共方法统一翻译错误文本，与 HTTP 侧一致）。
+func (this *grpcRuntimeTransport) ReportCommand(ctx context.Context, licenseNo string, commandNo string, result string, outputJSON string) (commandReportResult, error) {
+
+	request := &licencev1.CommandReportRequest{
+		LicenseNo: licenseNo, CommandNo: commandNo, Result: result,
+		OutputJson: outputJSON, ClientTime: time.Now().UnixMilli(),
+	}
+	callCtx, cancel, err := this.invokeContext(ctx, licencev1.CommandRuntimeService_Report_FullMethodName, request, true)
+	if err != nil {
+		return commandReportResult{}, err
+	}
+	defer cancel()
+	response, err := this.command.Report(callCtx, request)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return commandReportResult{Status: LicenceProtocol.StatusNotFound}, nil
+		}
+		return commandReportResult{}, err
+	}
+	return commandReportResult{
+		Status: response.GetStatus(), ServerTime: response.GetServerTime(), Message: response.GetMessage(),
+	}, nil
+}
+
+// mapCommandError - 指令通道错误映射到业务错误文本（与 HTTP 侧归一，保证公共方法跨协议一致）。
+func (this *grpcRuntimeTransport) mapCommandError(err error) error {
+	grpcStatus, _ := status.FromError(err)
+	switch grpcStatus.Code() {
+	case codes.NotFound:
+		return errors.New("许可证或实例信息无效")
 	case codes.FailedPrecondition:
 		// 服务端消息已带"许可证非放行态：{status}"，直接透传保持双协议一致
 		return errors.New(grpcStatus.Message())

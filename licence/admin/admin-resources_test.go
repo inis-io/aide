@@ -672,3 +672,102 @@ func TestUpgradeRecordTake(t *testing.T) {
 		t.Fatalf("take 应携带 ?id=5，实际: %s", hub.lastQuery.Encode())
 	}
 }
+
+// ============================= 实例指令通道（管理面） =============================
+
+// TestInstanceCommandIssue - 下发实例指令：POST body {id,action,params} 对齐平台契约，返回 commandNo
+func TestInstanceCommandIssue(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["POST /api/instances/command"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{"commandNo": "CMD-20261025-000001"})
+	}
+	client := hub.newClient(t)
+
+	result, err := client.Instances.IssueCommand(context.Background(), IssueInstanceCommandInput{
+		Id: 3, Action: "runtime_info", Params: `{"verbose":true}`,
+	})
+	if err != nil {
+		t.Fatalf("下发指令失败: %v", err)
+	}
+	if result.CommandNo != "CMD-20261025-000001" {
+		t.Fatalf("指令编号解析不符: %+v", result)
+	}
+	var sent map[string]any
+	if err = json.Unmarshal(hub.lastBody, &sent); err != nil {
+		t.Fatalf("请求体不是 JSON: %v", err)
+	}
+	if sent["id"] != float64(3) || sent["action"] != "runtime_info" || sent["params"] != `{"verbose":true}` {
+		t.Fatalf("请求体字段不符: %s", string(hub.lastBody))
+	}
+}
+
+// TestInstanceCommandFind - 实例指令分页：查询参数序列化（数组 key[]=v）+ 行字段解析
+func TestInstanceCommandFind(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/instance-commands/find"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"data": []map[string]any{{
+				"id": 9, "commandNo": "CMD-20261025-000001", "projectId": 7, "instanceId": 3,
+				"licenseId": 5, "action": "update_check", "params": "", "status": "success",
+				"output": `{"update":false}`, "issuedBy": 1, "issuedAt": 1761302400000,
+				"deliveredAt": 1761302401000, "finishedAt": 1761302402000, "expireAt": 1761303000000,
+			}},
+			"count": 1, "page": 1,
+		})
+	}
+	client := hub.newClient(t)
+
+	page, err := client.Instances.FindCommands(context.Background(), &InstanceCommandFindParams{
+		InstanceId: []int{3}, Status: []string{"success", "failed"}, Page: 1, Limit: 10,
+		FinishedAt: []int64{1761300000000, 1761400000000},
+	})
+	if err != nil {
+		t.Fatalf("指令分页失败: %v", err)
+	}
+	if page.Count != 1 || len(page.Data) != 1 {
+		t.Fatalf("指令分页解析不符: %+v", page)
+	}
+	row := page.Data[0]
+	if row.CommandNo != "CMD-20261025-000001" || row.Action != "update_check" || row.Status != "success" {
+		t.Fatalf("指令字段解析不符: %+v", row)
+	}
+	if row.Output != `{"update":false}` || row.DeliveredAt != 1761302401000 || row.FinishedAt != 1761302402000 {
+		t.Fatalf("指令时间/输出字段解析不符: %+v", row)
+	}
+	query := hub.lastQuery
+	if got := query["instanceId[]"]; len(got) != 1 || got[0] != "3" {
+		t.Fatalf("实例过滤参数不符: %s", query.Encode())
+	}
+	if got := query["status[]"]; len(got) != 2 || got[0] != "success" || got[1] != "failed" {
+		t.Fatalf("状态过滤参数不符: %s", query.Encode())
+	}
+	if got := query["finishedAt[]"]; len(got) != 2 {
+		t.Fatalf("完成时间区间参数不符: %s", query.Encode())
+	}
+}
+
+// TestInstanceCommandGet - 实例指令详情：GET /api/instance-commands/take?id=N
+func TestInstanceCommandGet(t *testing.T) {
+
+	hub := newFakeHub(t)
+	hub.routes["GET /api/instance-commands/take"] = func(writer http.ResponseWriter, request *http.Request, body []byte) {
+		hub.writeData(writer, map[string]any{
+			"id": 9, "commandNo": "CMD-20261025-000001", "action": "license_refresh",
+			"status": "failed", "output": `{"message":"未知指令"}`,
+		})
+	}
+	client := hub.newClient(t)
+
+	row, err := client.Instances.GetCommand(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("指令详情失败: %v", err)
+	}
+	if row.Id != 9 || row.Status != "failed" || row.Output != `{"message":"未知指令"}` {
+		t.Fatalf("指令详情解析不符: %+v", row)
+	}
+	if hub.lastQuery.Get("id") != "9" {
+		t.Fatalf("take 应携带 ?id=9，实际: %s", hub.lastQuery.Encode())
+	}
+}
