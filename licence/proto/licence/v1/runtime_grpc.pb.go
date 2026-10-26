@@ -1334,3 +1334,157 @@ var PlanRuntimeService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "licence/v1/runtime.proto",
 }
+
+const (
+	CommandRuntimeService_Pull_FullMethodName   = "/licenhub.licence.v1.CommandRuntimeService/Pull"
+	CommandRuntimeService_Report_FullMethodName = "/licenhub.licence.v1.CommandRuntimeService/Report"
+)
+
+// CommandRuntimeServiceClient is the client API for CommandRuntimeService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// CommandRuntimeService - 实例指令运行面（平台远程操作实例：实例长轮询领取指令 + 执行后回执）。
+// 通道模型与事件订阅一致：实例主动连平台（穿透 NAT/防火墙），平台不反向直连实例；
+// 与 activate/validate 同套实例签名防重放（activation-sign-v1，凭证锚定部署实例）。
+type CommandRuntimeServiceClient interface {
+	// Pull - 长轮询领取待执行指令（hold 语义与 EventSubscribe 一致：0=立即返回，默认 10s，硬上限 30s）；
+	// 每次调用同时承担心跳（平台回写实例 last_seen_at，是在线状态的判定依据）。
+	Pull(ctx context.Context, in *CommandPullRequest, opts ...grpc.CallOption) (*CommandPullResponse, error)
+	// Report - 指令执行回执（幂等：command_no 终态先入先赢，重复/迟到回执直接返回成功）。
+	Report(ctx context.Context, in *CommandReportRequest, opts ...grpc.CallOption) (*CommandReportResponse, error)
+}
+
+type commandRuntimeServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewCommandRuntimeServiceClient(cc grpc.ClientConnInterface) CommandRuntimeServiceClient {
+	return &commandRuntimeServiceClient{cc}
+}
+
+func (c *commandRuntimeServiceClient) Pull(ctx context.Context, in *CommandPullRequest, opts ...grpc.CallOption) (*CommandPullResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandPullResponse)
+	err := c.cc.Invoke(ctx, CommandRuntimeService_Pull_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *commandRuntimeServiceClient) Report(ctx context.Context, in *CommandReportRequest, opts ...grpc.CallOption) (*CommandReportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandReportResponse)
+	err := c.cc.Invoke(ctx, CommandRuntimeService_Report_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CommandRuntimeServiceServer is the server API for CommandRuntimeService service.
+// All implementations must embed UnimplementedCommandRuntimeServiceServer
+// for forward compatibility.
+//
+// CommandRuntimeService - 实例指令运行面（平台远程操作实例：实例长轮询领取指令 + 执行后回执）。
+// 通道模型与事件订阅一致：实例主动连平台（穿透 NAT/防火墙），平台不反向直连实例；
+// 与 activate/validate 同套实例签名防重放（activation-sign-v1，凭证锚定部署实例）。
+type CommandRuntimeServiceServer interface {
+	// Pull - 长轮询领取待执行指令（hold 语义与 EventSubscribe 一致：0=立即返回，默认 10s，硬上限 30s）；
+	// 每次调用同时承担心跳（平台回写实例 last_seen_at，是在线状态的判定依据）。
+	Pull(context.Context, *CommandPullRequest) (*CommandPullResponse, error)
+	// Report - 指令执行回执（幂等：command_no 终态先入先赢，重复/迟到回执直接返回成功）。
+	Report(context.Context, *CommandReportRequest) (*CommandReportResponse, error)
+	mustEmbedUnimplementedCommandRuntimeServiceServer()
+}
+
+// UnimplementedCommandRuntimeServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedCommandRuntimeServiceServer struct{}
+
+func (UnimplementedCommandRuntimeServiceServer) Pull(context.Context, *CommandPullRequest) (*CommandPullResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Pull not implemented")
+}
+func (UnimplementedCommandRuntimeServiceServer) Report(context.Context, *CommandReportRequest) (*CommandReportResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Report not implemented")
+}
+func (UnimplementedCommandRuntimeServiceServer) mustEmbedUnimplementedCommandRuntimeServiceServer() {}
+func (UnimplementedCommandRuntimeServiceServer) testEmbeddedByValue()                               {}
+
+// UnsafeCommandRuntimeServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to CommandRuntimeServiceServer will
+// result in compilation errors.
+type UnsafeCommandRuntimeServiceServer interface {
+	mustEmbedUnimplementedCommandRuntimeServiceServer()
+}
+
+func RegisterCommandRuntimeServiceServer(s grpc.ServiceRegistrar, srv CommandRuntimeServiceServer) {
+	// If the following call pancis, it indicates UnimplementedCommandRuntimeServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&CommandRuntimeService_ServiceDesc, srv)
+}
+
+func _CommandRuntimeService_Pull_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommandPullRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CommandRuntimeServiceServer).Pull(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CommandRuntimeService_Pull_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CommandRuntimeServiceServer).Pull(ctx, req.(*CommandPullRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CommandRuntimeService_Report_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommandReportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CommandRuntimeServiceServer).Report(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CommandRuntimeService_Report_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CommandRuntimeServiceServer).Report(ctx, req.(*CommandReportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// CommandRuntimeService_ServiceDesc is the grpc.ServiceDesc for CommandRuntimeService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var CommandRuntimeService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "licenhub.licence.v1.CommandRuntimeService",
+	HandlerType: (*CommandRuntimeServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Pull",
+			Handler:    _CommandRuntimeService_Pull_Handler,
+		},
+		{
+			MethodName: "Report",
+			Handler:    _CommandRuntimeService_Report_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "licence/v1/runtime.proto",
+}

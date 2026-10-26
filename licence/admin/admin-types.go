@@ -455,6 +455,84 @@ type InstanceFindParams struct {
 	WithTrashed bool `json:"withTrashed,omitempty"`
 }
 
+// InstanceCommand - 实例指令（平台 models/basic.InstanceCommand）：
+// 平台远程操作部署实例的指令通道记录——管理面下发落 pending 行，
+// 运行面客户端长轮询领取、执行后回执落终态（success/failed；超期未领取/未回执 → expired）
+type InstanceCommand struct {
+	// Id - 指令ID
+	Id int `json:"id"`
+	// CommandNo - 指令编号（幂等键，客户端回执锚点），格式 CMD-YYYYMMDD-XXXXXX
+	CommandNo string `json:"commandNo"`
+	// ProjectId - 项目ID
+	ProjectId int `json:"projectId"`
+	// InstanceId - 部署实例ID
+	InstanceId int `json:"instanceId"`
+	// LicenseId - 下发时实例当前许可证ID
+	LicenseId int `json:"licenseId"`
+	// Action - 指令动作（白名单 runtime_info/license_refresh/config_refresh/update_check）
+	Action string `json:"action"`
+	// Params - 动作参数 JSON 原文（无参数为空串，平台原样透传给客户端）
+	Params string `json:"params"`
+	// Status - 状态机：pending 待领取 / delivered 已领取 / success / failed / expired
+	Status string `json:"status"`
+	// Output - 执行输出 JSON 原文（失败时为 {"message":"..."}；无输出为空串）
+	Output string `json:"output"`
+	// IssuedBy - 操作人用户ID
+	IssuedBy int `json:"issuedBy"`
+	// IssuedAt - 平台下发时间（毫秒）
+	IssuedAt int64 `json:"issuedAt"`
+	// DeliveredAt - 客户端领取时间（毫秒，0=未领取）
+	DeliveredAt int64 `json:"deliveredAt"`
+	// FinishedAt - 回执落终态时间（毫秒，0=未回执）
+	FinishedAt int64 `json:"finishedAt"`
+	// ExpireAt - 当前状态超时截止（毫秒）
+	ExpireAt int64 `json:"expireAt"`
+	// CreateAt - 创建时间（毫秒）
+	CreateAt int64 `json:"createAt"`
+	// UpdateAt - 更新时间（毫秒）
+	UpdateAt int64 `json:"updateAt"`
+	// DeleteAt - 删除时间（毫秒，0=未删除）
+	DeleteAt int64 `json:"deleteAt"`
+}
+
+// IssueInstanceCommandInput - 下发实例指令参数（POST /api/instances/command）
+type IssueInstanceCommandInput struct {
+	// Id - 目标部署实例ID（必填）
+	Id int `json:"id"`
+	// Action - 指令动作（必填，白名单 runtime_info/license_refresh/config_refresh/update_check）
+	Action string `json:"action"`
+	// Params - 动作参数 JSON 原文（可选，最长 2048，必须合法 JSON）
+	Params string `json:"params,omitempty"`
+}
+
+// IssueInstanceCommandResult - 下发实例指令结果
+type IssueInstanceCommandResult struct {
+	// CommandNo - 指令编号（回执锚点，凭它跟踪指令状态）
+	CommandNo string `json:"commandNo"`
+}
+
+// InstanceCommandFindParams - 实例指令查询参数（平台 querySpec In/Between 白名单）
+type InstanceCommandFindParams struct {
+	// Page - 页码（默认 1）
+	Page int `json:"page,omitempty"`
+	// Limit - 每页数量（默认 10）
+	Limit int `json:"limit,omitempty"`
+	// Order - 排序（如 "create_at desc"）
+	Order string `json:"order,omitempty"`
+	// InstanceId - 部署实例ID（IN）
+	InstanceId []int `json:"instanceId,omitempty"`
+	// ProjectId - 项目ID（IN）
+	ProjectId []int `json:"projectId,omitempty"`
+	// Action - 指令动作（IN）
+	Action []string `json:"action,omitempty"`
+	// Status - 状态（IN：pending/delivered/success/failed/expired）
+	Status []string `json:"status,omitempty"`
+	// CreateAt - 创建时间区间（毫秒，Between）
+	CreateAt []int64 `json:"createAt,omitempty"`
+	// FinishedAt - 完成时间区间（毫秒，Between）
+	FinishedAt []int64 `json:"finishedAt,omitempty"`
+}
+
 // ============================= 许可证与授权申请 =============================
 
 // License - 许可证（平台 models/basic.License）

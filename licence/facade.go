@@ -184,6 +184,23 @@ type (
 	StarReportOutcomeInput       = LicenceRuntime.StarReportOutcomeInput
 )
 
+// ============================= 实例指令通道（镜像 runtime 包） =============================
+
+const (
+	CommandActionRuntimeInfo    = LicenceRuntime.CommandActionRuntimeInfo
+	CommandActionLicenseRefresh = LicenceRuntime.CommandActionLicenseRefresh
+	CommandActionConfigRefresh  = LicenceRuntime.CommandActionConfigRefresh
+	CommandActionUpdateCheck    = LicenceRuntime.CommandActionUpdateCheck
+
+	CommandResultSuccess = LicenceRuntime.CommandResultSuccess
+	CommandResultFailed  = LicenceRuntime.CommandResultFailed
+)
+
+type (
+	CommandHandler = LicenceRuntime.CommandHandler
+	CommandTask    = LicenceRuntime.CommandTask
+)
+
 // ============================= 项目套餐目录与订单（镜像 runtime 包） =============================
 
 const (

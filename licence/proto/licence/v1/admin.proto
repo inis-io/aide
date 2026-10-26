@@ -61,6 +61,10 @@ service InstanceAdminService {
   rpc RemoveInstances(AdminRequest) returns (AdminResponse);
   rpc DeleteInstances(AdminRequest) returns (AdminResponse);
   rpc RestoreInstances(AdminRequest) returns (AdminResponse);
+  // 实例指令通道：下发远程指令（高风险）+ 指令记录查询
+  rpc IssueInstanceCommand(AdminRequest) returns (AdminResponse);
+  rpc FindInstanceCommands(AdminRequest) returns (AdminResponse);
+  rpc GetInstanceCommand(AdminRequest) returns (AdminResponse);
 }
 
 service LicenseAdminService {

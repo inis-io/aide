@@ -33,6 +33,11 @@ runtime:
   - [Client.PlanOrderQuery, POST, /api/v1/plan-orders/query, PlanRuntimeService/PlanOrderQuery, activation-sign-v1, "", license_plan, read, normal, true]
   - [Client.PlanOrderCancel, POST, /api/v1/plan-orders/cancel, PlanRuntimeService/PlanOrderCancel, activation-sign-v1, "", license_plan, write, normal, true]
   - [Client.PlanOrderRows, GET, /api/v1/plan-orders/rows, PlanRuntimeService/PlanOrderRows, activation-sign-v1, "", license_plan, read, normal, true]
+  # 实例指令运行面（平台远程操作实例：实例长轮询领取 + 执行回执，通道模型与事件订阅一致——实例
+  # 主动连平台，平台不反向直连）：Pull 兼心跳（平台回写实例 last_seen_at）；指令动作白名单
+  # runtime_info / license_refresh / config_refresh / update_check；回执幂等 = command_no 终态先入先赢。
+  - [Client.PullCommands, POST, /api/v1/commands/pull, CommandRuntimeService/Pull, activation-sign-v1, "", instance_command, read, normal, true]
+  - [Client.ReportCommand, POST, /api/v1/commands/report, CommandRuntimeService/Report, activation-sign-v1, "", instance_command, write, normal, true]
 admin:
   # 管理面 gRPC 统一走通用 AdminRequest{json}/AdminResponse{code,message,data_json} 信封，
   # proto 不为单个业务动作建专用字段；菜单类参数（如 menuKind、projectId/tenantIds）经
@@ -68,6 +73,10 @@ admin:
     - [RemoveInstances, DELETE, /api/instances/remove, permission, project.instance.delete, normal]
     - [DeleteInstances, DELETE, /api/instances/delete, permission, project.instance.delete, normal]
     - [RestoreInstances, PUT, /api/instances/restore, permission, project.instance.update, normal]
+    # 实例指令通道管理面（平台远程操作实例：下发高风险 + 记录只读查询）
+    - [IssueInstanceCommand, POST, /api/instances/command, permission, project.instance.command, high]
+    - [FindInstanceCommands, GET, /api/instance-commands/find, permission, project.instance.read, normal]
+    - [GetInstanceCommand, GET, /api/instance-commands/take, permission, project.instance.read, normal]
   LicenseAdminService:
     - [RowsLicenses, GET, /api/licenses/rows, permission, license.read, normal]
     - [FindLicenses, GET, /api/licenses/find, permission, license.read, normal]

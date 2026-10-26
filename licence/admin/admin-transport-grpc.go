@@ -216,6 +216,12 @@ func (this *grpcAdminTransport) RoundTrip(ctx context.Context, call adminCall) (
 		response, err = this.instance.DeleteInstances(callCtx, request)
 	case http.MethodPut + " /api/instances/restore":
 		response, err = this.instance.RestoreInstances(callCtx, request)
+	case http.MethodPost + " /api/instances/command":
+		response, err = this.instance.IssueInstanceCommand(callCtx, request)
+	case http.MethodGet + " /api/instance-commands/find":
+		response, err = this.instance.FindInstanceCommands(callCtx, request)
+	case http.MethodGet + " /api/instance-commands/take":
+		response, err = this.instance.GetInstanceCommand(callCtx, request)
 
 	case http.MethodGet + " /api/licenses/rows":
 		response, err = this.license.RowsLicenses(callCtx, request)

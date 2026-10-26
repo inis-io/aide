@@ -91,6 +91,12 @@ type fakePlatform struct {
 	// events - 项目事件订阅队列（callback_events 简化镜像，eventId 单调递增）
 	events   []fakeEvent
 	eventSeq int64
+	// commands - 待领取实例指令队列（handleCommandPull 弹出全部）
+	commands []CommandTask
+	// commandReports - 指令回执记录（handleCommandReport 追加，供断言）
+	commandReports []map[string]any
+	// commandPullCalls - 指令领取调用计数
+	commandPullCalls int
 	// server - httptest 实例
 	server *httptest.Server
 }
@@ -264,6 +270,10 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleTenantCurrent(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/events/subscribe":
 		this.handleSubscribe(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/commands/pull":
+		this.handleCommandPull(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/commands/report":
+		this.handleCommandReport(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/pushback/configs":
 		this.handlePushbackConfigs(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/pushback/config-definitions":
@@ -734,6 +744,64 @@ func (this *fakePlatform) handlePushbackDefinitions(writer http.ResponseWriter, 
 		"configs":   map[string]any{"created": len(params.Configs), "updated": 0, "deleted": 0, "unchanged": 0},
 		"pushed_at": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// handleCommandPull - 指令领取：凭证校验（签名头同 validate）→ 放行态判定 → 弹出全部待执行指令；
+// 空批次按 timeoutMs 短暂挂起模拟长轮询（上限 20ms，避免拖慢测试）。
+func (this *fakePlatform) handleCommandPull(writer http.ResponseWriter, request *http.Request, body []byte) {
+
+	var params struct {
+		LicenseNo string `json:"licenseNo"`
+		TimeoutMs int32  `json:"timeoutMs"`
+	}
+	if err := json.Unmarshal(body, &params); err != nil {
+		writeNotFound(writer)
+		return
+	}
+	this.mu.Lock()
+	if !this.credential(writer, request, body) {
+		this.mu.Unlock()
+		return
+	}
+	status := this.status()
+	if !LicenceProtocol.PassThrough(status) {
+		writeJson(writer, map[string]any{"status": status, "serverTime": time.Now().UnixMilli()})
+		this.mu.Unlock()
+		return
+	}
+	commands := this.commands
+	this.commands = nil
+	this.commandPullCalls++
+	this.mu.Unlock()
+
+	if len(commands) == 0 && params.TimeoutMs > 0 {
+		hold := time.Duration(params.TimeoutMs) * time.Millisecond
+		if hold > 20*time.Millisecond {
+			hold = 20 * time.Millisecond
+		}
+		time.Sleep(hold)
+	}
+	writeJson(writer, map[string]any{
+		"status": status, "serverTime": time.Now().UnixMilli(), "commands": commands,
+	})
+}
+
+// handleCommandReport - 指令回执：凭证校验 → 记录回执（幂等语义简化镜像：一律接收返回成功）
+func (this *fakePlatform) handleCommandReport(writer http.ResponseWriter, request *http.Request, body []byte) {
+
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	if !this.credential(writer, request, body) {
+		return
+	}
+	var params map[string]any
+	if err := json.Unmarshal(body, &params); err != nil {
+		writeNotFound(writer)
+		return
+	}
+	this.commandReports = append(this.commandReports, params)
+	writeJson(writer, map[string]any{"status": LicenceProtocol.StatusValid, "serverTime": time.Now().UnixMilli()})
 }
 
 // handleFileDownload - 发布物下载（/files/{version}）

@@ -934,14 +934,17 @@ var ProjectAdminService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	InstanceAdminService_RowsInstances_FullMethodName    = "/licenhub.licence.v1.InstanceAdminService/RowsInstances"
-	InstanceAdminService_FindInstances_FullMethodName    = "/licenhub.licence.v1.InstanceAdminService/FindInstances"
-	InstanceAdminService_GetInstance_FullMethodName      = "/licenhub.licence.v1.InstanceAdminService/GetInstance"
-	InstanceAdminService_CreateInstance_FullMethodName   = "/licenhub.licence.v1.InstanceAdminService/CreateInstance"
-	InstanceAdminService_UpdateInstance_FullMethodName   = "/licenhub.licence.v1.InstanceAdminService/UpdateInstance"
-	InstanceAdminService_RemoveInstances_FullMethodName  = "/licenhub.licence.v1.InstanceAdminService/RemoveInstances"
-	InstanceAdminService_DeleteInstances_FullMethodName  = "/licenhub.licence.v1.InstanceAdminService/DeleteInstances"
-	InstanceAdminService_RestoreInstances_FullMethodName = "/licenhub.licence.v1.InstanceAdminService/RestoreInstances"
+	InstanceAdminService_RowsInstances_FullMethodName        = "/licenhub.licence.v1.InstanceAdminService/RowsInstances"
+	InstanceAdminService_FindInstances_FullMethodName        = "/licenhub.licence.v1.InstanceAdminService/FindInstances"
+	InstanceAdminService_GetInstance_FullMethodName          = "/licenhub.licence.v1.InstanceAdminService/GetInstance"
+	InstanceAdminService_CreateInstance_FullMethodName       = "/licenhub.licence.v1.InstanceAdminService/CreateInstance"
+	InstanceAdminService_UpdateInstance_FullMethodName       = "/licenhub.licence.v1.InstanceAdminService/UpdateInstance"
+	InstanceAdminService_RemoveInstances_FullMethodName      = "/licenhub.licence.v1.InstanceAdminService/RemoveInstances"
+	InstanceAdminService_DeleteInstances_FullMethodName      = "/licenhub.licence.v1.InstanceAdminService/DeleteInstances"
+	InstanceAdminService_RestoreInstances_FullMethodName     = "/licenhub.licence.v1.InstanceAdminService/RestoreInstances"
+	InstanceAdminService_IssueInstanceCommand_FullMethodName = "/licenhub.licence.v1.InstanceAdminService/IssueInstanceCommand"
+	InstanceAdminService_FindInstanceCommands_FullMethodName = "/licenhub.licence.v1.InstanceAdminService/FindInstanceCommands"
+	InstanceAdminService_GetInstanceCommand_FullMethodName   = "/licenhub.licence.v1.InstanceAdminService/GetInstanceCommand"
 )
 
 // InstanceAdminServiceClient is the client API for InstanceAdminService service.
@@ -956,6 +959,10 @@ type InstanceAdminServiceClient interface {
 	RemoveInstances(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	DeleteInstances(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	RestoreInstances(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// 实例指令通道：下发远程指令（高风险）+ 指令记录查询
+	IssueInstanceCommand(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	FindInstanceCommands(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	GetInstanceCommand(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 }
 
 type instanceAdminServiceClient struct {
@@ -1046,6 +1053,36 @@ func (c *instanceAdminServiceClient) RestoreInstances(ctx context.Context, in *A
 	return out, nil
 }
 
+func (c *instanceAdminServiceClient) IssueInstanceCommand(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, InstanceAdminService_IssueInstanceCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *instanceAdminServiceClient) FindInstanceCommands(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, InstanceAdminService_FindInstanceCommands_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *instanceAdminServiceClient) GetInstanceCommand(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, InstanceAdminService_GetInstanceCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstanceAdminServiceServer is the server API for InstanceAdminService service.
 // All implementations must embed UnimplementedInstanceAdminServiceServer
 // for forward compatibility.
@@ -1058,6 +1095,10 @@ type InstanceAdminServiceServer interface {
 	RemoveInstances(context.Context, *AdminRequest) (*AdminResponse, error)
 	DeleteInstances(context.Context, *AdminRequest) (*AdminResponse, error)
 	RestoreInstances(context.Context, *AdminRequest) (*AdminResponse, error)
+	// 实例指令通道：下发远程指令（高风险）+ 指令记录查询
+	IssueInstanceCommand(context.Context, *AdminRequest) (*AdminResponse, error)
+	FindInstanceCommands(context.Context, *AdminRequest) (*AdminResponse, error)
+	GetInstanceCommand(context.Context, *AdminRequest) (*AdminResponse, error)
 	mustEmbedUnimplementedInstanceAdminServiceServer()
 }
 
@@ -1091,6 +1132,15 @@ func (UnimplementedInstanceAdminServiceServer) DeleteInstances(context.Context, 
 }
 func (UnimplementedInstanceAdminServiceServer) RestoreInstances(context.Context, *AdminRequest) (*AdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RestoreInstances not implemented")
+}
+func (UnimplementedInstanceAdminServiceServer) IssueInstanceCommand(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IssueInstanceCommand not implemented")
+}
+func (UnimplementedInstanceAdminServiceServer) FindInstanceCommands(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindInstanceCommands not implemented")
+}
+func (UnimplementedInstanceAdminServiceServer) GetInstanceCommand(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetInstanceCommand not implemented")
 }
 func (UnimplementedInstanceAdminServiceServer) mustEmbedUnimplementedInstanceAdminServiceServer() {}
 func (UnimplementedInstanceAdminServiceServer) testEmbeddedByValue()                              {}
@@ -1257,6 +1307,60 @@ func _InstanceAdminService_RestoreInstances_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstanceAdminService_IssueInstanceCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstanceAdminServiceServer).IssueInstanceCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstanceAdminService_IssueInstanceCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstanceAdminServiceServer).IssueInstanceCommand(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InstanceAdminService_FindInstanceCommands_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstanceAdminServiceServer).FindInstanceCommands(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstanceAdminService_FindInstanceCommands_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstanceAdminServiceServer).FindInstanceCommands(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InstanceAdminService_GetInstanceCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstanceAdminServiceServer).GetInstanceCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstanceAdminService_GetInstanceCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstanceAdminServiceServer).GetInstanceCommand(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstanceAdminService_ServiceDesc is the grpc.ServiceDesc for InstanceAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1295,6 +1399,18 @@ var InstanceAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestoreInstances",
 			Handler:    _InstanceAdminService_RestoreInstances_Handler,
+		},
+		{
+			MethodName: "IssueInstanceCommand",
+			Handler:    _InstanceAdminService_IssueInstanceCommand_Handler,
+		},
+		{
+			MethodName: "FindInstanceCommands",
+			Handler:    _InstanceAdminService_FindInstanceCommands_Handler,
+		},
+		{
+			MethodName: "GetInstanceCommand",
+			Handler:    _InstanceAdminService_GetInstanceCommand_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
