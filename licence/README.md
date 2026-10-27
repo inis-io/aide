@@ -2,7 +2,7 @@
 
 > 包路径：`github.com/inis-io/aide/licence`（Licen Hub 授权平台官方 Go SDK，仅支持 Go，要求 Go 1.26+）。
 > 本文档分两部分：**第 1~10 节 快速上手教程**（材料清单、快速开始、FAQ），**第 11~22 节 接口级参考手册**（逐接口列出签名、参数、返回与语义）。
-> 所有接口均可脱机编译测试；运行面/管理面接口依赖平台服务，对接前请先与平台方确认 `ServerURL` 与公钥材料。
+> 所有接口均可脱机编译测试；官方平台自动授权只需 `projectNo`，自定义平台经 `AutoStartWithOptions` 提供地址与 bootstrap 根。
 
 ## 目录
 
@@ -11,7 +11,7 @@
 1. [开始前：你需要从平台方拿到什么](#1-开始前你需要从平台方拿到什么)
 2. [安装](#2-安装)
 3. [快速开始：许可证激活与授权校验（运行面）](#3-快速开始许可证激活与授权校验运行面)
-   - [装机自动申领（ProvisionByPlan）](#31-装机自动申领provisionbyplan)
+   - [自动申领、指纹挑战与本地恢复](#31-自动申领指纹挑战与本地恢复)
 4. [授权状态与降级策略](#4-授权状态与降级策略)
    - [多机席位（一 Client 一机一席）](#41-多机席位一-client-一机一席)
 5. [在线更新（更新代理/自更新程序用）](#5-在线更新更新代理自更新程序用)
@@ -48,14 +48,14 @@
 
 ## 1. 开始前：你需要从平台方拿到什么
 
-| 材料 | 是什么 | 从哪里获得 |
+| 场景 | 接入方需要的材料 | 说明 |
 |---|---|---|
-| **平台地址 `ServerURL`** | 授权平台的访问地址 | 平台方提供，如 `https://licen-hub.inis.cn` |
-| **许可证编号 `licenseNo`** | 你的部署实例对应的许可证，格式 `LIC-{年}-XXXXXX` | 平台管理端「我的许可证」页签发后可见（先完成注册 → 资格审核 → 建项目/实例 → 授权申请 → 平台审批签发） |
-| **指纹盐 `Salt`** | 实例指纹的盐值 | 你在平台登记部署实例时自己定的盐；二者必须一致 |
-| **验签公钥 `PublicKeys`** | 平台 license-key 的 Ed25519 公钥（hex），用于验证许可证信封是真的 | 管理端登录后**按项目**导出 `GET /api/licenses/public-key?projectId=X`，返回全版本 `keys[]`（含历史轮换密钥），逐字内置到你的程序里 |
-| **release 公钥 `ReleasePublicKeys`** | release-key 公钥（hex），验证更新清单与发布物 | 同上，`GET /api/signing-keys/public?purpose=release`；**只用在线更新功能时才需要** |
-| **管理面账号密码** | 平台后台账号 | **仅 CI/运维自动化才需要**（查项目、申请授权、导公钥等）；禁止随交付项目分发 |
+| **官方平台 SDK 自动签发（推荐）** | 只需项目编号 `projectNo` | `DefaultServerURL` 与 `DefaultBootstrapPublicKeys` 已内置；许可证、盐、实例号和动态工作公钥由 `AutoStart` 自动取得 |
+| **自定义平台自动签发** | `projectNo` + 自定义 `ServerURL` + 对应 bootstrap 根公钥 | 使用 `AutoStartWithOptions`，其余流程相同 |
+| **手动许可证激活** | `licenseNo` + `Salt` + 项目编号与 bootstrap 根 | 继续使用 `New + Start`；官方平台使用内置根，自定义平台显式提供根 |
+| **管理面 CI/运维** | 平台管理端账号密码 | 仅 `admin.NewAdmin` 需要，禁止随交付项目分发 |
+
+SDK 自动签发不再需要 provision token，也不要求接入方导出或内置 license/release 工作公钥。平台用 bootstrap 根签署 keyset，SDK 验根后才接受其中的工作公钥；私钥永不下发。
 
 安全约定（SDK 已强制，了解一下即可）：
 
@@ -105,7 +105,7 @@ client-streaming，`io.Reader` 不会被 SDK 全量读入内存。
 
 ## 3. 快速开始：许可证激活与授权校验（运行面）
 
-嵌入交付项目的就是这部分。**5 行接入**：
+官方平台的 SDK 自动签发项目只需传入自己的 `projectNo`。**不需要平台地址、provision token、许可证号、指纹盐或任何公钥配置**：
 
 ```go
 package main
@@ -118,98 +118,48 @@ import (
 )
 
 func main() {
-
-	client, err := licence.New(licence.Options{
-		ServerURL: "https://licen-hub.inis.cn",     // 平台地址（必填）
-		LicenseNo: "LIC-2026-000123",               // 许可证编号（必填）
-		Salt:      "my-project-salt",               // 指纹盐，与实例登记一致（必填）
-		PublicKeys: map[string]string{              // 验签公钥表（必填：项目全版本并存，从平台按项目导出）
-			"license-key-INIS-202608-1a2b3c": "79b5562e8fe6…（从平台导出的公钥 hex）",
-		},
-		ReleasePublicKeys: map[string]string{       // release 公钥（用在线更新才填）
-			"release-key-2026-01": "…",
-		},
-		StorageDir: "/var/lib/myapp/licence",       // 状态存储目录（默认 ./runtime/licence）
-		Version:    "2.3.1",                        // 当前项目版本（随校验上送）
-	})
+	result, err := licence.AutoStart(context.Background(), "PRJ-20260815-705406", "2.3.1")
 	if err != nil {
-		panic(err)
+		panic(err) // 真实申领/验签/激活错误，不得包装成激活成功
 	}
+	client := result.Client // 已完成 New + Start，不要重复启动
+	defer client.Close()
 
-	// Start：首次自动激活（生成密钥对 + 注册公钥 + 换取令牌），
-	// 之后进入后台滑动刷新循环；有缓存时平台不可达也能降级启动
-	if err = client.Start(context.Background()); err != nil {
-		panic(err)
-	}
-	defer client.Close() // 停止刷新并释放 HTTP/gRPC 连接
-
-	// 业务闸门：功能 / 额度 / 版本范围
 	if granted, ok := client.GetBool("report.advanced"); ok && granted {
 		// 开放高级报表
 	}
-	maxUsers, exist := client.GetInt("max_users")
 	if !client.CheckVersion("2.3.1") {
 		// 当前版本不在授权范围
 	}
-
-	// 状态与用量上报
-	fmt.Println(client.Status()) // VALID / EXPIRING / GRACE / ...
+	fmt.Println(client.Status(), result.LicenseNo, result.InstanceNo, result.Provisioned)
 	client.ReportUsage(map[string]int64{"max_users": 42})
-	_ = maxUsers
-	_ = exist
 }
 ```
 
-`Start` 之后你什么都不用管：
+第三个参数 `appVersion` 可省略且最多一个；为空不影响授权，但 `CheckUpdate` 会明确返回“当前版本不能为空”。返回的 `AutoResult` 还包含 `Salt`；`Provisioned` 仅本次实际执行申领时为 true。
 
-- 后台每 12~24 小时自动 `validate` 滑动续期（默认 12h，可配 `RefreshInterval`）；
-- 每个请求自动携带客户端私钥签名（时间戳 + nonce 防重放），开发者零感知；
-- 断网/平台故障自动按本地缓存信封降级运行（宽限内 `GRACE`，耗尽 `EXPIRED`）；
-- 许可证被续期/调整权益后，新信封自动下发、验签、替换缓存。
+启动后 SDK 自动完成：每 12 小时滑动刷新（可配）、逐请求 Ed25519 签名、断网离线降级，以及 license/release 工作密钥轮换。所有网络响应先验 bootstrap 根签署的 keyset，再验业务信封，二者通过才提交。
 
-### 3.1 装机自动申领（ProvisionByPlan）
+### 3.1 自动申领、指纹挑战与本地恢复
 
-面向**私有化/交付装机**场景：客户机器上只跑你的程序，程序启动时调用包级函数自动拿证，**零人工/零管理端操作**。申领的定位参数是**项目编号 + 项目级签发令牌**（都写死在官方二进制里），签发参数（许可证类型、环境、绑定策略、席位、期限、权益）由平台侧该项目配置的**套餐档位**决定，客户端不做任何选择：
+`AutoStart` 首次读取不到 `StorageDir/auto.json` 时才调用申领；拿到许可证参数后先验 keyset，再写元数据并激活。`auto.json` 只保存 `projectNo/licenseNo/salt/instanceNo`，activation token、客户端私钥、业务信封和 keyset 仍在加密的 `licence-<licenseNo>.state` 中。后续启动直接恢复，不重复申领；断网时使用已验签缓存。
 
-| 场景 | 用法 | 平台侧 |
-|---|---|---|
-| 免费版/试用装机 | `ProvisionByPlan`（`TenantId` 缺省 0） | 项目「授权签发方式」设为 SDK 自动签发并指定免费/试用套餐档位；客户机器免密申领 |
-| SaaS 子租户发证 | `ProvisionByPlan` + `TenantId=n`（n > 0） | 项目配置子租户发证档位；按该档位为子租户签发 |
+强制指纹项目首次返回 `FINGERPRINT_REQUIRED + salt` 时，SDK 用与激活相同的算法计算指纹，并复用同一 `install.sn` 只重试一次。`install.sn` 是独立于许可证生命周期的安装 UUID，平台据此幂等复用或有界续签。
+
+自定义平台使用高级入口：
 
 ```go
-result, err := licence.ProvisionByPlan(ctx, licence.ProvisionOptions{
-    ServerURL:      "https://licen-hub.inis.cn", // 平台地址（官方二进制内写死）
-    ProjectNo:      "INIS",                      // 项目编号（官方二进制内写死）
-    ProvisionToken: "proj-token",                // 项目级签发令牌（官方二进制内写死，服务端常数时间比对）
+result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
+	ProjectNo: "PRJ-CUSTOM", AppVersion: "2.3.1",
+	ServerURL: "https://license.example.com",
+	BootstrapPublicKeys: map[string]string{"bootstrap-key-custom": "<平台根公钥 hex>"},
+	StorageDir: "/var/lib/myapp/licence",
 })
-if err != nil {
-    // 业务拒绝是 *licence.ProvisionError，errors.As 后按 Status 降级
-    var denied *licence.ProvisionError
-    if errors.As(err, &denied) {
-        switch denied.Status {
-        case "RATE_LIMITED":        /* 稍后重试 */
-        case "QUOTA_EXCEEDED":      /* 今日发放额用完 */
-        case "TEMPLATE_DEPRECATED": /* 客户端过旧（仍在用模板编码申领），提示升级 */
-        }
-    }
-    return err
-}
-
-// 用申领结果直接构造运行面客户端，并自动激活
-client, err := licence.New(licence.Options{
-    ServerURL:  "https://licen-hub.inis.cn",
-    LicenseNo:  result.LicenseNo,
-    Salt:       result.Salt,
-    PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "<平台按项目导出的公钥 hex>"},
-})
-if err = client.Start(ctx); err != nil {
-    panic(err)
-}
 ```
 
-**安装唯一标识（install.sn）**：申领按机器持久化一个 UUID v4 到 `StorageDir/install.sn`（默认 `./runtime/licence/install.sn`）。同机重装/换证复用一个 SN，平台据此幂等复用或有界续签；SDK 首次使用自动生成，也可用 `ProvisionOptions.InstallSN` 显式覆盖。该文件独立于按 licenseNo 命名的状态文件，跨许可证生命周期稳定。
+需要分别编排申领与客户端时仍可调用 `ProvisionByPlan`（`projectNo + installSN`，无 token），其 `ProvisionResult.Keyset` 保留平台原始 JSON；调用方必须先验 keyset，再把许可证参数交给 `New + Start`。通常直接使用 `AutoStart` 即可。
 
-> **旧契约已移除，无宽限期**：授权模板与激活码体系整体下线，旧 `Provision`（模板编码 `TemplateCode` + 模板级令牌）与旧 `Redeem`（激活码兑换）方法一并删除。仍在用旧版 SDK 的客户端会收到 `TEMPLATE_DEPRECATED` 业务码，升级后把 `TemplateCode` 换成 `ProjectNo`（令牌换成项目级令牌）即可，其余参数与返回值不变；商业授权改走套餐在线购买（`PlansCatalog` / 套餐订单），不再有激活码兑换通道。
+> **旧契约已移除**：授权模板、激活码和 provision token 均已下线。旧 `Provision` / `Redeem` 不再存在；sdk_auto 直接用 `ProjectNo`，不再保留令牌配置入口。商业授权改走套餐在线购买（`PlansCatalog` / 套餐订单）。
 
 ## 4. 授权状态与降级策略
 
@@ -479,25 +429,25 @@ licence.Options{
 `StorageDir`（默认 `./runtime/licence`）下的 `licence-<licenseNo>.state`，AES-256-GCM 加密（密钥派生自盐+指纹），权限 0600。token、私钥、信封都在里面。SDK 只有在拿到并验签完整许可证信封后才会落盘；首次激活被拒绝不保存半成品状态，升级时遇到旧版无信封状态会自动清理并重新激活。想接系统密钥库（DPAPI/Keychain/keyring）就实现 `licence.Store` 接口注入。
 
 **Q：平台轮换密钥了怎么办？**
-`PublicKeys`/`ReleasePublicKeys` 是 map，把新旧公钥都放进去即可平滑过渡（SDK 按载荷 `keyVersion` 自动选钥）。轮换后重新从项目接入配置导出 `keys[]` 全量同步即可，**历史版本务必保留**——旧缓存信封离线降级恢复时仍按历史 keyVersion 验签。
+自动模式无需操作：平台在 provision/activate/validate/current/update 响应附带更高 revision 的签名 keyset，SDK 验 bootstrap 根后更新加锁快照。keyset 含当前与全部历史 license/release 公钥，旧缓存、事件、配置、清单和历史发布物仍可验签；错根、低 revision 或业务信封失败不会覆盖旧可信状态。手动静态 `PublicKeys` 模式才需要自行保留并更新全量公钥。
 
 ## 9. 排错速查
 
 | 现象 | 先查什么 |
 |---|---|
 | `Start` 报「许可证或实例信息无效」 | `licenseNo` 是否正确；许可证是否已签发且未吊销 |
-| `Start` 报「未内置 keyVersion=… 的验签公钥」 | 公钥 map 的 key 必须等于平台的 `keyVersion`（形如 `license-key-INIS-202608-1a2b3c`，从项目导出 `keys[]` 逐字复制，勿拼接猜测） |
-| `信封验签失败` | 公钥是否配对、是否最新；找平台方重新导出 |
+| `Start` 报「未内置 keyVersion=… 的验签公钥」 | 自动模式检查项目编号、keyset revision 与平台是否已下发该工作钥；手动静态模式检查公钥 map 的 key 是否精确匹配 |
+| `keyset 验签失败` / `信封验签失败` | 检查 bootstrap 根是否正确、响应是否被篡改；不要通过关闭验签或改信匿名公钥来绕过 |
 | 一直 `GRACE` | 交付机网络到平台不通，或许可证已过 `validUntil` |
 | `INSTANCE_MISMATCH` | 换了机器/指纹源变了；检查 `Salt` 是否与实例登记一致 |
 | 管理面 401 | 账号密码/2FA；或 token 过期（SDK 会自动重登一次） |
 
 ## 10. 一图流（集成清单）
 
-1. 平台方开通账号 → 资格审核通过
-2. 建项目 → 登记实例（记下你的指纹盐）→ 申请授权 → 平台签发
-3. 拿到 `licenseNo` + 按项目导出 `PublicKeys`（`GET /api/licenses/public-key?projectId=X` 全版本 `keys[]`；用更新功能再导出 `ReleasePublicKeys`）
-4. `licence.New` + `Start` → 用 `GetBool/GetInt/GetFloat/CheckVersion` 做业务闸门
+1. 平台方建项目，设为 `sdk_auto` 并配置自动签发套餐档位
+2. 接入方内置公开 `projectNo`，调用 `licence.AutoStart(ctx, projectNo, appVersion)`
+3. 保存返回的 `AutoResult.Client`（已启动），用 `GetBool/GetInt/GetFloat/CheckVersion` 做业务闸门
+4. 后续重启复用 `auto.json` 与加密状态，不重复申领，也不重复 `New + Start`
 5.（可选）`CheckUpdate`/`DownloadArtifact`/`ReportUpgrade` 接在线更新
 6.（可选 SaaS）`TenantSync`/`TenantValidate` 接多租户
 7.（可选 CI）`admin.NewAdmin` 做运维自动化
@@ -712,12 +662,14 @@ activationToken / 客户端私钥 / 信封缓存只允许经 `Store` 持久化�
 ```go
 type Options struct {
     ServerURL          string                 // 平台地址（必填），如 "https://licen-hub.inis.cn"
+    ProjectNo          string                 // 项目编号（使用 BootstrapPublicKeys 时必填）
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
     DeviceName         string                 // 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
     Salt               string                 // 指纹盐（必填，与实例登记时一致）
-    PublicKeys         map[string]string      // 验签公钥表（必填，keyVersion -> hex 公钥，可多版本并存轮换）
-    ReleasePublicKeys  map[string]string      // release 验签公钥表（在线更新模块必填）
+    PublicKeys         map[string]string      // 静态 license 公钥（与 BootstrapPublicKeys 至少一种）
+    ReleasePublicKeys  map[string]string      // 静态 release 公钥（可由动态 keyset 提供）
+    BootstrapPublicKeys map[string]string     // bootstrap 根公钥，验证动态 keyset
     StorageDir         string                 // 状态存储目录（默认 ./runtime/licence）
     Fingerprint        string                 // 显式指纹哈希（可选，覆盖自动采集）
     Provider           FingerprintProvider    // 自定义指纹提供者（可选）
@@ -738,7 +690,7 @@ type Options struct {
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt` / `PublicKeys` |
+| `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt`，且 `PublicKeys` 与 `BootstrapPublicKeys` 至少一种；使用 bootstrap 根时 `ProjectNo` 必填 |
 | `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可验签的本地缓存信封时，平台不可达也能降级启动（按本地时间维度给出 `GRACE` / `EXPIRED` 状态）；无缓存且激活失败时返回错误 |
 | `Stop` | `func (this *Client) Stop()` | 停止后台刷新循环 |
 | `Close` | `func (this *Client) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
@@ -792,42 +744,42 @@ if !client.CheckVersion("2.3.1") { /* 当前版本不在授权范围 */ }
 
 ### 17.4 装机自动申领（包级函数 ProvisionByPlan）
 
-> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用，拿证后再构造运行面客户端。传输层与运行面复用同一 HTTP/gRPC 双实现，申领为匿名凭证（`withSign=false`，不请求签名）；业务码统一放 200/nil-error 的 `status` 字段，两协议线格式一致。契约：HTTP `POST /api/v1/licenses/provision` ↔ gRPC `LicenseRuntimeService/ProvisionByPlan`（请求字段 `project_no` / `tenant_id` / `provision_token` / `install_sn` / `fingerprint_hash` / `device_name` / `client_time`）。
+> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用。sdk_auto 仅以 `projectNo + installSN` 定位，**没有 ProvisionToken 参数**。HTTP 与 gRPC 共用响应语义；proto 的字段号 2 与 `provision_token` 名称已永久 reserved。请求字段为 `project_no` / `tenant_id` / `install_sn` / `fingerprint_hash` / `device_name` / `client_time`。
 
 ```go
 type ProvisionOptions struct {
     ServerURL      string        // 平台地址（必填）
-    ProjectNo      string        // 项目编号（必填，官方二进制写死）
-    ProvisionToken string        // 项目级签发令牌（必填，匿名申领凭证，官方二进制写死）
-    TenantId       int64         // SaaS 子租户 ID（可选，0 = 普通装机申领；>0 = 子租户发证）
+    ProjectNo      string        // 项目编号（必填）
+    TenantId       int64         // SaaS 子租户 ID（可选）
     StorageDir     string        // install.sn 持久化目录（默认 ./runtime/licence）
     InstallSN      string        // 安装唯一标识（可选，为空懒生成 UUID v4 并持久化）
-    DeviceName     string        // 机器名称（可选，缺省取 os.Hostname）
-    Transport      Transport     // 传输协议（默认 HTTP；可选 TransportGRPC）
-    GRPC           GRPCOptions   // gRPC 连接配置（仅 TransportGRPC 生效）
-    HTTPTimeout    time.Duration // 单次请求超时（默认 15 秒）
+    DeviceName     string        // 机器名称（可选）
+    Fingerprint    string        // 显式指纹哈希（可选，与运行面一致）
+    Provider       FingerprintProvider // 自定义指纹源（可选）
+    Transport      Transport     // 默认 HTTP；可选 TransportGRPC
+    GRPC           GRPCOptions
+    HTTPTimeout    time.Duration
 }
 type ProvisionResult struct {
-    LicenseNo     string // 许可证编号（New 必填）
-    Salt          string // 指纹盐（New 必填，与签发套餐档位一致）
+    LicenseNo     string
+    Salt          string
     BindingPolicy string // single / seats
     SeatLimit     int
-    ExpiresAt     int64  // 有效期截止（毫秒）
-    Reissued      bool   // 同 SN 有界续签
+    ExpiresAt     int64
+    Reissued      bool
+    Keyset        json.RawMessage // bootstrap 根签名的原始 JSON，交给 New 前必须验证
 }
-type ProvisionError struct { // 业务拒绝，errors.As 断言
-    Status  string // PROVISION_DISABLED / TEMPLATE_DEPRECATED / PLAN_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
-    Message string // 平台提示
+type ProvisionError struct {
+    Status  string // FINGERPRINT_REQUIRED / QUOTA_EXCEEDED / RATE_LIMITED / ...
+    Message string
 }
 ```
 
 | 函数 | 签名 | 说明 |
 |---|---|---|
-| `ProvisionByPlan` | `func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error)` | 装机自动申领（项目编号 + 项目级令牌 + 套餐档位；`TenantId>0` 为 SaaS 子租户发证）；业务拒绝返回 `*ProvisionError` |
+| `ProvisionByPlan` | `func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error)` | sdk_auto 匿名申领；强制指纹时自动完成一次挑战；业务拒绝返回 `*ProvisionError` |
 
-`*ProvisionError` 的 `Status` 由服务端定义，SDK **不维护白名单**：除 `OK` 外的一切业务码（含服务端新增的 `TEMPLATE_DEPRECATED` 等）一律原样透传，调用方按需降级，SDK 不会因未知码 panic 或吞错。
-
-`install.sn` 生命周期：显式 `InstallSN` 优先；否则读 `StorageDir/install.sn` 幂等复用；不存在则懒生成 UUID v4 原子落盘（`MkdirAll 0700` + tmp/rename + `0600`）。卸载清理删除该文件属预期行为（重装生成新 SN，视为新装机）。
+除 `FINGERPRINT_REQUIRED` 的首次挑战外，非 `OK` 状态均以 `*ProvisionError` 原样透出；第二次仍挑战也返回错误，不会循环申领。通常应使用 `AutoStart`，由它完成 keyset 验证、`auto.json` 与 `New + Start` 编排。
 
 ### 17.5 API 商城调用（`lic.Apis`）
 
@@ -1811,19 +1763,20 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 | 文件 / 子包 | 能力 |
 |---|---|
-| `doc.go` / `facade.go` | 根包纯门面：144 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
-| `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` | 平台契约镜像层：信封结构、签发、验签、密钥对、nonce、canonical 助手（licen-hub backend 直接 import） |
+| `doc.go` / `facade.go` | 根包纯门面：全部导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
+| `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` / `keyset.go` | 平台契约镜像层：信封、keyset、签发验签、密钥对、nonce、canonical 助手 |
 | `protocol/status.go` | 运行面状态码与本地时间判定 |
 | `protocol/version-range.go` | 版本范围表达式判定 |
 | `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `runtime/store.go` | 安全存储接口与默认加密文件实现 |
-| `runtime/client.go` | 运行面客户端：生命周期、后台刷新、权益闸门、事件拉取原语（`PullEvents`/`PublicKeys`，订阅器在 `callback` 子包）、消费记录上报 |
-| `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、信封缓存与 HTTP/gRPC 双传输实现 |
+| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报 |
+| `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、keyset 与信封原子提交、HTTP/gRPC 双传输 |
 | `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
-| `runtime/provision.go` | 装机自动申领 `ProvisionByPlan`（项目编号 + 项目级令牌 + 套餐档位，可选 SaaS 子租户 `TenantId`；HTTP/gRPC 双协议） |
+| `runtime/auto.go` / `defaults.go` | `AutoStart` / `AutoStartWithOptions`、`auto.json`、官方地址与 bootstrap 根 |
+| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战，HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |

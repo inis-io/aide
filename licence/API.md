@@ -2,7 +2,7 @@
 
 > 包路径：`github.com/inis-io/aide/licence`（Licen Hub 授权平台 Go SDK，仅支持 Go，要求 Go 1.26+）。
 > 本文档是**接口级参考手册**：逐接口列出签名、参数、返回与语义；面向接入方的快速上手见同目录 [`README.md`](README.md)（材料清单、快速开始、FAQ）。
-> 所有接口均可脱机编译测试；运行面/管理面接口依赖平台服务，对接前请先与平台方确认 `ServerURL` 与公钥材料。
+> 所有接口均可脱机编译测试；官方平台自动授权只需 `projectNo`，自定义平台经 `AutoStartWithOptions` 提供地址与 bootstrap 根。
 
 ---
 
@@ -178,7 +178,18 @@ type GRPCOptions struct {
 | `MarshalPayload` | `func MarshalPayload(payload Payload) ([]byte, error)` | 序列化载荷为待签名字节。结构体字段顺序稳定，map 字段（entitlements）由 `encoding/json` 按键名排序，同一载荷任意时刻序列化结果字节一致 |
 | `ParseEnvelope` | `func ParseEnvelope(data []byte) (envelope Envelope, rawPayload []byte, err error)` | 解析信封 JSON，同时返回**载荷原始字节**。验签必须基于载荷原文（而非重序列化），平台只追加新字段时原文验签天然兼容 |
 
-### 3.3 Licence 链式工具类（nil 安全，全局变量 `licence.Licence`）
+### 3.3 签名 keyset（`protocol/keyset.go`）
+
+`KeysetPayload` 的字段顺序固定为 `projectNo/revision/issuedAt/licenseKeys/releaseKeys/keyVersion/nonce`；公钥项为 `{keyVersion, publicKey}` 并按版本排序。`KeysetEnvelope` 与许可证信封同构，但由 bootstrap 根签名。
+
+```go
+func ParseKeyset(data []byte) (envelope KeysetEnvelope, rawPayload []byte, err error)
+func VerifyKeyset(raw []byte, projectNo string, roots map[string]string, minimumRevision int64) (*KeysetEnvelope, error)
+```
+
+`VerifyKeyset` 始终基于 payload 原始 JSON 验签，并强制项目精确匹配、有效公钥、根版本与 revision 防回退。较低 revision 拒绝，同一可信 keyset 允许幂等恢复；错根、跨项目、篡改和同版本不同公钥均失败。运行面还会拒绝同 revision 不同内容，并在候选 keyset 与业务信封全部通过后才原子提交、加密持久化。
+
+### 3.4 Licence 链式工具类（nil 安全，全局变量 `licence.Licence`）
 
 值语义：每个方法返回副本，不修改原实例。`*LicenceClass` 方法：
 
@@ -282,12 +293,14 @@ activationToken / 客户端私钥 / 信封缓存只允许经 `Store` 持久化�
 ```go
 type Options struct {
     ServerURL          string                 // 平台地址（必填），如 "https://licen-hub.inis.cn"
+    ProjectNo          string                 // 项目编号（使用 BootstrapPublicKeys 时必填）
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
     DeviceName         string                 // 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
     Salt               string                 // 指纹盐（必填，与实例登记时一致）
-    PublicKeys         map[string]string      // 验签公钥表（必填，keyVersion -> hex 公钥，可多版本并存轮换）
-    ReleasePublicKeys  map[string]string      // release 验签公钥表（在线更新模块必填）
+    PublicKeys         map[string]string      // 静态 license 公钥（与 BootstrapPublicKeys 至少一种）
+    ReleasePublicKeys  map[string]string      // 静态 release 公钥（可由动态 keyset 提供）
+    BootstrapPublicKeys map[string]string     // bootstrap 根公钥，验证动态 keyset
     StorageDir         string                 // 状态存储目录（默认 ./runtime/licence）
     Fingerprint        string                 // 显式指纹哈希（可选，覆盖自动采集）
     Provider           FingerprintProvider    // 自定义指纹提供者（可选）
@@ -308,7 +321,7 @@ type Options struct {
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt` / `PublicKeys` |
+| `New` | `func New(options Options) (*Client, error)` | 创建客户端：归一化配置 + 采集指纹 + 初始化存储，**不发起网络请求**。必填校验：`ServerURL` / `LicenseNo` / `Salt`，且 `PublicKeys` 与 `BootstrapPublicKeys` 至少一种；使用 bootstrap 根时 `ProjectNo` 必填 |
 | `Start` | `func (this *Client) Start(ctx context.Context) error` | 启动：恢复本地状态（读存储 → 验签缓存信封）或执行首激活（生成客户端密钥对 + 注册公钥 + 换令牌），随后进入后台滑动刷新循环。有可验签的本地缓存信封时，平台不可达也能降级启动（按本地时间维度给出 `GRACE` / `EXPIRED` 状态）；无缓存且激活失败时返回错误 |
 | `Stop` | `func (this *Client) Stop()` | 停止后台刷新循环 |
 | `Close` | `func (this *Client) Close() error` | 释放 HTTP idle connection 或复用的 gRPC connection；可重复调用 |
@@ -597,6 +610,54 @@ type CommandHandler func(ctx context.Context, task CommandTask) (output any, err
 - **双协议**：HTTP `POST /api/v1/commands/pull|report` ↔ gRPC `CommandRuntimeService.Pull|Report`，
   `activation-sign-v1` 签名族，协议矩阵 domain `instance_command`（`runtime.proto` +
   `protocol-matrix.yaml` 指令段两行）。
+
+### 7.8 projectNo-only 自动授权（AutoStart）
+
+官方平台接入方只需项目编号；`appVersion` 可选且最多一个。返回的客户端已经 `Start`，调用方不得重复 `New/Start`。
+
+```go
+func AutoStart(ctx context.Context, projectNo string, appVersion ...string) (AutoResult, error)
+func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, error)
+
+type AutoResult struct {
+    Client     *Client // 已启动；不再使用时 Close
+    LicenseNo  string
+    Salt       string
+    InstanceNo string
+    Provisioned bool  // 本次实际申领为 true；auto.json 恢复为 false
+}
+
+type AutoOptions struct {
+    ProjectNo          string
+    AppVersion         string
+    ServerURL          string            // 缺省 DefaultServerURL
+    BootstrapPublicKeys map[string]string // 缺省 DefaultBootstrapPublicKeys
+    TenantId           int64
+    StorageDir         string            // 默认 ./runtime/licence
+    InstallSN          string
+    InstanceNo         string
+    DeviceName         string
+    Fingerprint        string
+    Provider           FingerprintProvider
+    Store              Store
+    RefreshInterval    time.Duration
+    HTTPTimeout        time.Duration
+    Transport          Transport
+    GRPC               GRPCOptions
+    OnStatusChange     func(oldStatus, newStatus string)
+    DisableConsumptionReport bool
+    ConsumptionReportInterval time.Duration
+    CommandPullTimeout time.Duration
+    CommandHandlers    map[string]CommandHandler
+    DisableCommands    bool
+}
+```
+
+默认值：`DefaultServerURL = "https://licen-hub.inis.cn"`；`DefaultBootstrapPublicKeys` 仅含 `bootstrap-key-2026-01` 对应的官方公开根 `cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a`。
+
+执行顺序：读取 `auto.json` → 无元数据才 `ProvisionByPlan` → 验证 keyset → 写非机密元数据 → 复用 `New + Start` → 从签名信封回填 `InstanceNo`。强制指纹项目自动用挑战盐计算与激活一致的指纹，并复用 installSN 重试一次。任何失败原样返回，不得包装成激活成功。
+
+低层 `ProvisionByPlan(ctx, ProvisionOptions)` 仍可独立使用；`ProvisionOptions` 已无 `ProvisionToken`，新增 `Fingerprint/Provider`，`ProvisionResult` 新增 `Keyset json.RawMessage`。直接使用低层入口时，调用方必须先 `VerifyKeyset`，不得把匿名公钥列表当作信任根。
 
 ---
 
@@ -1359,7 +1420,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 1. **信封版本与字段顺序**：所有签名载荷（`Payload` / `ManifestPayload` / `TenantPayload`）的字段顺序即签名内容——新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。
 2. **验签首选原文模式**：`ParseEnvelope` / `ParseManifest` / `ParseTenantEnvelope` 均返回载荷原始字节，`VerifyRaw` 基于原文验签。平台只追加新字段时重序列化会丢字段导致验签失败，原文验签天然兼容。
-3. **签名算法与密钥**：固定 Ed25519，签名 hex 编码；验签公钥按载荷 `KeyVersion` 从 `PublicKeys` / `ReleasePublicKeys` 选取（支持新旧公钥并存轮换过渡）。你永远拿不到平台的签名私钥，签发只在平台进行。
+3. **签名算法与密钥**：固定 Ed25519，签名 hex 编码。自动模式以 `BootstrapPublicKeys` 验证 keyset，再从加锁快照选择 license/release 工作公钥；手动静态模式使用 `PublicKeys` / `ReleasePublicKeys`。候选 keyset 与业务信封全部通过才原子提交并加密持久化，私钥永不下发。
 4. **时间戳约定**：运行面信封与租户载荷的期限字段为 RFC3339 字符串（空串 = 不限制）；管理面 DTO 与请求参数的时间戳均为**毫秒**；`Token.Expired` 为毫秒时间戳（平台注释误标为秒，以毫秒为准）。
 5. **运行面请求签名**：每个请求自动携带 `X-License-Token` / `X-License-Timestamp` / `X-License-Nonce` / `X-License-Sign` 四头，签名内容 = `method\nuri\ntimestamp\nnonce\nsha256hex(body)`；gRPC 传输额外携带第 5 个头 `X-License-Sign-Version`（签名版本），签名内容 = `GRPC\nfullMethod\ntimestamp\nnonce\nsha256hex(确定性 protobuf 字节)`。时间戳用服务端校时（±5 分钟时间窗），nonce 防重放，开发者零感知。
 6. **管理面协议**：HTTP 状态码恒为 200，业务结果看 `code`（200=成功；400 参数错误；401 未登录/登录失效；403 无权限；404 不存在；409 状态冲突）；GET 走 query，POST/PUT/DELETE 走 JSON body；数组查询参数序列化为 `key[]=v` 重复键；自动登录、令牌过期预判重登、业务 401 自动重登并重试一次。账密明文上送，必须 HTTPS；平台开启「API 签名验证」时管理面客户端不支持。
@@ -1373,19 +1434,20 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 
 | 文件 / 子包 | 能力 |
 |---|---|
-| `doc.go` / `facade.go` | 根包纯门面：144 个导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
-| `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` | 平台契约镜像层：信封结构、签发、验签、密钥对、nonce、canonical 助手（licen-hub backend 直接 import） |
+| `doc.go` / `facade.go` | 根包纯门面：全部导出符号的别名镜像（下游 `import licence` 零改动），不承载实现 |
+| `protocol/envelope.go` / `sign.go` / `licence.go` / `signature.go` / `keyset.go` | 平台契约镜像层：信封、keyset、签发验签、密钥对、nonce、canonical 助手 |
 | `protocol/status.go` | 运行面状态码与本地时间判定 |
 | `protocol/version-range.go` | 版本范围表达式判定 |
 | `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `runtime/store.go` | 安全存储接口与默认加密文件实现 |
-| `runtime/client.go` | 运行面客户端：生命周期、后台刷新、权益闸门、事件拉取原语（`PullEvents`/`PublicKeys`，订阅器在 `callback` 子包）、消费记录上报 |
-| `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、信封缓存与 HTTP/gRPC 双传输实现 |
+| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报 |
+| `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、keyset 与信封原子提交、HTTP/gRPC 双传输 |
 | `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
-| `runtime/provision.go` | 装机自动申领 `ProvisionByPlan`（项目编号 + 项目级令牌 + 套餐档位，可选 SaaS 子租户 `TenantId`；HTTP/gRPC 双协议） |
+| `runtime/auto.go` / `defaults.go` | `AutoStart` / `AutoStartWithOptions`、`auto.json`、官方地址与 bootstrap 根 |
+| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战，HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |

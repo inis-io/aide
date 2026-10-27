@@ -16,16 +16,16 @@ const (
 	// provisionGoldenRequest - 请求体期望 canonical 字节（tenantId 缺省 0 被 omitempty 省略）：
 	// 键序=声明序；<>& 被 Go encoding/json 转义为
 	// \u003c / \u003e / \u0026 字面序列（与信封 golden 同一语义，防误换不转义的 JSON 库）。
-	provisionGoldenRequest = `{"projectNo":"INIS-AUTO","provisionToken":"project-token","installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","deviceName":"dev\u003cpro\u003e\u0026","clientTime":1789459200000}`
+	provisionGoldenRequest = `{"projectNo":"INIS-AUTO","installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","deviceName":"dev\u003cpro\u003e\u0026","clientTime":1789459200000}`
 	// provisionGoldenTenantRequest - SaaS 子租户发证：tenantId > 0 时按声明序紧随 projectNo 上送。
-	provisionGoldenTenantRequest = `{"projectNo":"INIS-SAAS","tenantId":42,"provisionToken":"project-token","installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","clientTime":1789459200000}`
+	provisionGoldenTenantRequest = `{"projectNo":"INIS-SAAS","tenantId":42,"installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","clientTime":1789459200000}`
 )
 
 // TestProvisionBodyGoldenWire - 申领请求体 JSON 必须与契约 §6 逐字节一致（含 <>& 转义）。
 func TestProvisionBodyGoldenWire(t *testing.T) {
 
 	body, err := json.Marshal(provisionBody{
-		ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
+		ProjectNo:  "INIS-AUTO",
 		InstallSN:  "7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f",
 		DeviceName: "dev<pro>&", ClientTime: 1789459200000,
 	})
@@ -41,7 +41,7 @@ func TestProvisionBodyGoldenWire(t *testing.T) {
 
 	// 子租户方向：tenantId 参与序列化且位置固定在 projectNo 之后
 	tenantBody, err := json.Marshal(provisionBody{
-		ProjectNo: "INIS-SAAS", TenantId: 42, ProvisionToken: "project-token",
+		ProjectNo: "INIS-SAAS", TenantId: 42,
 		InstallSN: "7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f", ClientTime: 1789459200000,
 	})
 	if err != nil {

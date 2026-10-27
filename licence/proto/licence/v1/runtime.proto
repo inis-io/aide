@@ -9,10 +9,9 @@ service LicenseRuntimeService {
   rpc Activate(ActivateRequest) returns (RuntimeResponse);
   rpc Validate(ValidateRequest) returns (RuntimeResponse);
   rpc Current(CurrentLicenseRequest) returns (RuntimeResponse);
-  // ProvisionByPlan - 装机自动申领（匿名 Public；官方二进制内写死项目编号与项目级签发令牌，
-  // 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发）。
-  // 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已整体下线，
-  // 旧客户端按模板编码申领一律返回 TEMPLATE_DEPRECATED。
+  // ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
+  // 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
+  // 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
   rpc ProvisionByPlan(ProvisionRequest) returns (ProvisionResponse);
 }
 
@@ -80,17 +79,15 @@ message CurrentLicenseRequest {
 }
 
 // ProvisionRequest - 装机自动申领请求。
-// project_no 与 provision_token 由官方二进制内写死（项目级令牌）；install_sn 为安装唯一标识。
-// 历史字段 template_code（模板编码）随授权模板体系下线删除，字段号 1 与字段名永久 reserved。
+// sdk_auto 仅以 project_no + install_sn 定位项目与安装，不再使用项目级签发令牌。
+// 历史字段 template_code 与 provision_token 的字段号、字段名永久 reserved。
 message ProvisionRequest {
-  reserved 1;
-  reserved "template_code";
+  reserved 1, 2;
+  reserved "template_code", "provision_token";
   // project_no - 项目编号（必填，官方二进制内写死）
   string project_no = 7;
   // tenant_id - 0 = 普通装机申领；>0 = SaaS 子租户发证（平台按项目 tenant_issue_plan_id 档位签发）
   int64 tenant_id = 8;
-  // provision_token - 项目级签发令牌（必填，匿名申领凭证，官方二进制内写死）
-  string provision_token = 2;
   // install_sn - 安装唯一标识（必填，同项目下唯一）
   string install_sn = 3;
   // fingerprint_hash - 机器指纹哈希（可选，项目开启 provision_enforce_fingerprint 时强制）
@@ -117,10 +114,12 @@ message ProvisionResponse {
   int64 expires_at = 7;
   bool reissued = 8;
   string message = 9;
+  // keyset_json - bootstrap 根签名的项目工作公钥集合原文。
+  bytes keyset_json = 10;
 }
 
 // RuntimeResponse - 许可证运行面统一响应。
-// envelope_json 必须是平台签发的 JSON 原文，客户端基于其中 payload 原文验签。
+// envelope_json 与 keyset_json 必须保留平台 JSON 原文，客户端分别基于 payload 原文验签。
 message RuntimeResponse {
   string status = 1;
   int64 server_time = 2;
@@ -130,6 +129,7 @@ message RuntimeResponse {
   int64 expires_at = 6;
   string message = 7;
   string seat_no = 8;
+  bytes keyset_json = 9;
 }
 
 message UpdateCheckRequest {
@@ -146,6 +146,7 @@ message UpdateCheckResponse {
   bool update = 3;
   bytes manifest_json = 4;
   string message = 5;
+  bytes keyset_json = 6;
 }
 
 message UpdateReportRequest {

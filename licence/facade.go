@@ -32,16 +32,21 @@ const (
 // ============================= 信封、载荷与签发（镜像 protocol 包） =============================
 
 type (
-	Binding      = LicenceProtocol.Binding
-	Envelope     = LicenceProtocol.Envelope
-	LicenceClass = LicenceProtocol.LicenceClass
-	Payload      = LicenceProtocol.Payload
-	PayloadPlan  = LicenceProtocol.PayloadPlan
+	Binding         = LicenceProtocol.Binding
+	Envelope        = LicenceProtocol.Envelope
+	KeysetEnvelope  = LicenceProtocol.KeysetEnvelope
+	KeysetPayload   = LicenceProtocol.KeysetPayload
+	KeysetPublicKey = LicenceProtocol.KeysetPublicKey
+	LicenceClass    = LicenceProtocol.LicenceClass
+	Payload         = LicenceProtocol.Payload
+	PayloadPlan     = LicenceProtocol.PayloadPlan
 )
 
 var CompareVersion = LicenceProtocol.CompareVersion
 var MarshalPayload = LicenceProtocol.MarshalPayload
 var ParseEnvelope = LicenceProtocol.ParseEnvelope
+var ParseKeyset = LicenceProtocol.ParseKeyset
+var VerifyKeyset = LicenceProtocol.VerifyKeyset
 var VersionInRange = LicenceProtocol.VersionInRange
 
 var Licence = LicenceProtocol.Licence
@@ -135,6 +140,24 @@ type (
 )
 
 var ProvisionByPlan = LicenceRuntime.ProvisionByPlan
+
+// ============================= projectNo-only 自动授权（镜像 runtime 包） =============================
+
+var (
+	// DefaultServerURL - 官方授权平台默认地址。
+	DefaultServerURL = LicenceRuntime.DefaultServerURL
+	// DefaultBootstrapPublicKeys - 官方 bootstrap 根公钥表。
+	DefaultBootstrapPublicKeys = LicenceRuntime.DefaultBootstrapPublicKeys
+	// AutoStart - 官方平台 projectNo-only 自动授权入口。
+	AutoStart = LicenceRuntime.AutoStart
+	// AutoStartWithOptions - 自定义平台自动授权入口。
+	AutoStartWithOptions = LicenceRuntime.AutoStartWithOptions
+)
+
+type (
+	AutoOptions = LicenceRuntime.AutoOptions
+	AutoResult  = LicenceRuntime.AutoResult
+)
 
 // ============================= 配置回推与定义反推（镜像 runtime 包） =============================
 

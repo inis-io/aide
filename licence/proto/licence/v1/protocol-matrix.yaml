@@ -3,12 +3,14 @@ contract: licenhub.licence.v1
 defaults:
   transport_fallback: false
   envelope: raw_json_bytes
+  keyset: bootstrap_signed_raw_json
 runtime:
-  - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, deviceName]
-  - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false]
-  - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true]
-  - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true]
-  - [Client.CheckUpdate, POST, /api/v1/updates/check, UpdateRuntimeService/Check, activation-sign-v1, "", update, read, normal, true]
+  # keyset = 响应附带 bootstrap 根签名的项目工作公钥集合；HTTP 字段 keyset，gRPC 字段 keyset_json bytes。
+  - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, "deviceName,keyset"]
+  - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false, keyset]
+  - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, keyset]
+  - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true, keyset]
+  - [Client.CheckUpdate, POST, /api/v1/updates/check, UpdateRuntimeService/Check, activation-sign-v1, "", update, read, normal, true, keyset]
   - [Client.ReportUpdate, POST, /api/v1/updates/report, UpdateRuntimeService/Report, activation-sign-v1, "", update, write, normal, true]
   - [Client.AppendUpdateLogs, POST, /api/v1/updates/logs, UpdateRuntimeService/AppendLogs, activation-sign-v1, "", update, write, normal, true]
   - [Client.SyncTenants, POST, /api/v1/saas/tenants/sync, SaasRuntimeService/Sync, activation-sign-v1, "", saas_tenant, read, normal, true]

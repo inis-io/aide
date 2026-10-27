@@ -237,3 +237,11 @@ func TestReportUpgradeFlow(t *testing.T) {
 		t.Fatalf("日志上报失败: %v", err)
 	}
 }
+
+// TestCheckUpdateRejectsEmptyVersion - 空版本不影响授权，但更新检查必须明确失败且不得发请求。
+func TestCheckUpdateRejectsEmptyVersion(t *testing.T) {
+	client := &Client{}
+	if _, err := client.CheckUpdate(t.Context(), "windows/amd64"); err == nil || err.Error() != "当前版本不能为空" {
+		t.Fatalf("空版本应明确报当前版本不能为空，实际: %v", err)
+	}
+}

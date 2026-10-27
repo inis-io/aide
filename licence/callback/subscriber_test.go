@@ -297,3 +297,37 @@ func TestNewEventSubscriberInheritsPullerPublicKeys(t *testing.T) {
 		t.Fatalf("分发结果异常: delivered=%d received=%d watermark=%d", delivered, received, subscriber.Watermark())
 	}
 }
+
+// TestEventSubscriberReadsLatestPublicKeys - keyset 轮换后，订阅器必须在每条事件验签时
+// 重新读取拉取方快照，而不是永久使用创建订阅器时复制的旧公钥。
+func TestEventSubscriberReadsLatestPublicKeys(t *testing.T) {
+	puller, oldPublicKey := newTestPuller(t,
+		fakePullerEvent{eventId: 1, eventNo: "EVT-2026-000001", event: "license.rotated", data: json.RawMessage(`{"revision":1}`)},
+	)
+	keyed := &fakeKeyPuller{fakeEventPuller: puller, publicKey: oldPublicKey}
+	received := 0
+	subscriber := NewEventSubscriber(keyed, CallbackOptions{}).OnAny(func(ctx context.Context, event *CallbackEvent) (Ack, error) {
+		received++
+		return AckSuccess, nil
+	})
+	if delivered, err := subscriber.Poll(t.Context()); err != nil || delivered != 1 {
+		t.Fatalf("旧公钥首轮验签失败: delivered=%d err=%v", delivered, err)
+	}
+	newSeed, newPublicKey, err := LicenceProtocol.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed.mu.Lock()
+	keyed.seed = newSeed
+	keyed.publicKey = hex.EncodeToString(newPublicKey)
+	keyed.events = append(keyed.events, fakePullerEvent{
+		eventId: 2, eventNo: "EVT-2026-000002", event: "license.rotated", data: json.RawMessage(`{"revision":2}`),
+	})
+	keyed.mu.Unlock()
+	if delivered, err := subscriber.Poll(t.Context()); err != nil || delivered != 1 {
+		t.Fatalf("轮换后应使用最新公钥: delivered=%d err=%v", delivered, err)
+	}
+	if received != 2 || subscriber.Watermark() != 2 {
+		t.Fatalf("轮换事件未完整分发: received=%d watermark=%d", received, subscriber.Watermark())
+	}
+}

@@ -234,16 +234,14 @@ func (x *CurrentLicenseRequest) GetLicenseNo() string {
 }
 
 // ProvisionRequest - 装机自动申领请求。
-// project_no 与 provision_token 由官方二进制内写死（项目级令牌）；install_sn 为安装唯一标识。
-// 历史字段 template_code（模板编码）随授权模板体系下线删除，字段号 1 与字段名永久 reserved。
+// sdk_auto 仅以 project_no + install_sn 定位项目与安装，不再使用项目级签发令牌。
+// 历史字段 template_code 与 provision_token 的字段号、字段名永久 reserved。
 type ProvisionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// project_no - 项目编号（必填，官方二进制内写死）
 	ProjectNo string `protobuf:"bytes,7,opt,name=project_no,json=projectNo,proto3" json:"project_no,omitempty"`
 	// tenant_id - 0 = 普通装机申领；>0 = SaaS 子租户发证（平台按项目 tenant_issue_plan_id 档位签发）
 	TenantId int64 `protobuf:"varint,8,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	// provision_token - 项目级签发令牌（必填，匿名申领凭证，官方二进制内写死）
-	ProvisionToken string `protobuf:"bytes,2,opt,name=provision_token,json=provisionToken,proto3" json:"provision_token,omitempty"`
 	// install_sn - 安装唯一标识（必填，同项目下唯一）
 	InstallSn string `protobuf:"bytes,3,opt,name=install_sn,json=installSn,proto3" json:"install_sn,omitempty"`
 	// fingerprint_hash - 机器指纹哈希（可选，项目开启 provision_enforce_fingerprint 时强制）
@@ -300,13 +298,6 @@ func (x *ProvisionRequest) GetTenantId() int64 {
 	return 0
 }
 
-func (x *ProvisionRequest) GetProvisionToken() string {
-	if x != nil {
-		return x.ProvisionToken
-	}
-	return ""
-}
-
 func (x *ProvisionRequest) GetInstallSn() string {
 	if x != nil {
 		return x.InstallSn
@@ -347,6 +338,8 @@ type ProvisionResponse struct {
 	ExpiresAt     int64                  `protobuf:"varint,7,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Reissued      bool                   `protobuf:"varint,8,opt,name=reissued,proto3" json:"reissued,omitempty"`
 	Message       string                 `protobuf:"bytes,9,opt,name=message,proto3" json:"message,omitempty"`
+	// keyset_json - bootstrap 根签名的项目工作公钥集合原文。
+	KeysetJson    []byte `protobuf:"bytes,10,opt,name=keyset_json,json=keysetJson,proto3" json:"keyset_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -444,8 +437,15 @@ func (x *ProvisionResponse) GetMessage() string {
 	return ""
 }
 
+func (x *ProvisionResponse) GetKeysetJson() []byte {
+	if x != nil {
+		return x.KeysetJson
+	}
+	return nil
+}
+
 // RuntimeResponse - 许可证运行面统一响应。
-// envelope_json 必须是平台签发的 JSON 原文，客户端基于其中 payload 原文验签。
+// envelope_json 与 keyset_json 必须保留平台 JSON 原文，客户端分别基于 payload 原文验签。
 type RuntimeResponse struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Status          string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
@@ -456,6 +456,7 @@ type RuntimeResponse struct {
 	ExpiresAt       int64                  `protobuf:"varint,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Message         string                 `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
 	SeatNo          string                 `protobuf:"bytes,8,opt,name=seat_no,json=seatNo,proto3" json:"seat_no,omitempty"`
+	KeysetJson      []byte                 `protobuf:"bytes,9,opt,name=keyset_json,json=keysetJson,proto3" json:"keyset_json,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -546,6 +547,13 @@ func (x *RuntimeResponse) GetSeatNo() string {
 	return ""
 }
 
+func (x *RuntimeResponse) GetKeysetJson() []byte {
+	if x != nil {
+		return x.KeysetJson
+	}
+	return nil
+}
+
 type UpdateCheckRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	LicenseNo       string                 `protobuf:"bytes,1,opt,name=license_no,json=licenseNo,proto3" json:"license_no,omitempty"`
@@ -629,6 +637,7 @@ type UpdateCheckResponse struct {
 	Update        bool                   `protobuf:"varint,3,opt,name=update,proto3" json:"update,omitempty"`
 	ManifestJson  []byte                 `protobuf:"bytes,4,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
 	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	KeysetJson    []byte                 `protobuf:"bytes,6,opt,name=keyset_json,json=keysetJson,proto3" json:"keyset_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -696,6 +705,13 @@ func (x *UpdateCheckResponse) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *UpdateCheckResponse) GetKeysetJson() []byte {
+	if x != nil {
+		return x.KeysetJson
+	}
+	return nil
 }
 
 type UpdateReportRequest struct {
@@ -3786,19 +3802,18 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"6\n" +
 	"\x15CurrentLicenseRequest\x12\x1d\n" +
 	"\n" +
-	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\x98\x02\n" +
+	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\x86\x02\n" +
 	"\x10ProvisionRequest\x12\x1d\n" +
 	"\n" +
 	"project_no\x18\a \x01(\tR\tprojectNo\x12\x1b\n" +
-	"\ttenant_id\x18\b \x01(\x03R\btenantId\x12'\n" +
-	"\x0fprovision_token\x18\x02 \x01(\tR\x0eprovisionToken\x12\x1d\n" +
+	"\ttenant_id\x18\b \x01(\x03R\btenantId\x12\x1d\n" +
 	"\n" +
 	"install_sn\x18\x03 \x01(\tR\tinstallSn\x12)\n" +
 	"\x10fingerprint_hash\x18\x04 \x01(\tR\x0ffingerprintHash\x12\x1f\n" +
 	"\vdevice_name\x18\x05 \x01(\tR\n" +
 	"deviceName\x12\x1f\n" +
 	"\vclient_time\x18\x06 \x01(\x03R\n" +
-	"clientTimeJ\x04\b\x01\x10\x02R\rtemplate_code\"\x9a\x02\n" +
+	"clientTimeJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\rtemplate_codeR\x0fprovision_token\"\xbb\x02\n" +
 	"\x11ProvisionResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -3812,7 +3827,10 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\a \x01(\x03R\texpiresAt\x12\x1a\n" +
 	"\breissued\x18\b \x01(\bR\breissued\x12\x18\n" +
-	"\amessage\x18\t \x01(\tR\amessage\"\x91\x02\n" +
+	"\amessage\x18\t \x01(\tR\amessage\x12\x1f\n" +
+	"\vkeyset_json\x18\n" +
+	" \x01(\fR\n" +
+	"keysetJson\"\xb2\x02\n" +
 	"\x0fRuntimeResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -3823,7 +3841,9 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x06 \x01(\x03R\texpiresAt\x12\x18\n" +
 	"\amessage\x18\a \x01(\tR\amessage\x12\x17\n" +
-	"\aseat_no\x18\b \x01(\tR\x06seatNo\"\xb2\x01\n" +
+	"\aseat_no\x18\b \x01(\tR\x06seatNo\x12\x1f\n" +
+	"\vkeyset_json\x18\t \x01(\fR\n" +
+	"keysetJson\"\xb2\x01\n" +
 	"\x12UpdateCheckRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12)\n" +
@@ -3831,14 +3851,16 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\aos_arch\x18\x03 \x01(\tR\x06osArch\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12\x1f\n" +
 	"\vclient_time\x18\x05 \x01(\x03R\n" +
-	"clientTime\"\xa5\x01\n" +
+	"clientTime\"\xc6\x01\n" +
 	"\x13UpdateCheckResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
 	"serverTime\x12\x16\n" +
 	"\x06update\x18\x03 \x01(\bR\x06update\x12#\n" +
 	"\rmanifest_json\x18\x04 \x01(\fR\fmanifestJson\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage\"\x8f\x02\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\x12\x1f\n" +
+	"\vkeyset_json\x18\x06 \x01(\fR\n" +
+	"keysetJson\"\x8f\x02\n" +
 	"\x13UpdateReportRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12\x1b\n" +
