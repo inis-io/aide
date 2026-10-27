@@ -78,7 +78,8 @@ type PlanCatalogOption struct {
 	SalePrice float64 `json:"salePrice"`
 	// DiscountTag - 折扣/创始标签（如 "8折·试用期内"、"创始价"，无折扣为空串）
 	DiscountTag string `json:"discountTag"`
-	// FounderLeft - 创始价剩余名额（-1 = 该选项非创始价）
+	// FounderLeft - 创始价剩余名额（-1 = 该选项非创始价）；
+	// 服务端展示口径：已扣减营销「虚拟已购」（virtual_sold），真实计价与防超卖不受影响
 	FounderLeft int `json:"founderLeft"`
 	// CreditAmount - 升级抵扣预览（元，0 = 无）：升级视角下旧套餐剩余价值的预估抵扣，
 	// 随剩余期限逐日变化，仅供展示参考，结算以 PlanOrderCreate 为准
