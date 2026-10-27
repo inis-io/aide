@@ -77,7 +77,7 @@ func TestProvisionByPlanHTTP(t *testing.T) {
 	})
 	dir := t.TempDir()
 	opts := ProvisionOptions{
-		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
+		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO",
 		StorageDir: dir, DeviceName: "provision-device",
 	}
 
@@ -95,10 +95,13 @@ func TestProvisionByPlanHTTP(t *testing.T) {
 		t.Fatalf("有效期/续签标识映射不符: %d %v", result.ExpiresAt, result.Reissued)
 	}
 
-	// 请求体上送项目编号/项目级令牌/设备名；tenantId 缺省 0 不上送
+	// 请求体上送项目编号/设备名；不得包含项目级令牌，tenantId 缺省 0 不上送
 	body := server.body()
-	if body["projectNo"] != "INIS-AUTO" || body["provisionToken"] != "project-token" {
-		t.Fatalf("项目/令牌未上送: %v", body)
+	if body["projectNo"] != "INIS-AUTO" {
+		t.Fatalf("项目编号未上送: %v", body)
+	}
+	if _, exists := body["provisionToken"]; exists {
+		t.Fatalf("provision token 已删除，不应再上送: %v", body)
 	}
 	if _, exists := body["templateCode"]; exists {
 		t.Fatalf("旧模板编码字段不应再上送: %v", body)
@@ -148,7 +151,7 @@ func TestProvisionByPlanHTTPTenant(t *testing.T) {
 		return "OK", okProvisionResponse()
 	})
 	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: server.server.URL, ProjectNo: "INIS-SAAS", ProvisionToken: "project-token",
+		ServerURL: server.server.URL, ProjectNo: "INIS-SAAS",
 		TenantId: 42, StorageDir: t.TempDir(), DeviceName: "tenant-device",
 	})
 	if err != nil {
@@ -166,7 +169,7 @@ func TestProvisionByPlanBusinessError(t *testing.T) {
 		return "RATE_LIMITED", map[string]any{"message": "请求过于频繁"}
 	})
 	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
+		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO",
 		StorageDir: t.TempDir(),
 	})
 	if err == nil {
@@ -192,7 +195,7 @@ func TestProvisionByPlanTemplateDeprecated(t *testing.T) {
 		return "TEMPLATE_DEPRECATED", map[string]any{"message": "授权模板体系已下线，请升级客户端"}
 	})
 	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
+		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO",
 		StorageDir: t.TempDir(),
 	})
 	var provisionErr *ProvisionError
@@ -208,17 +211,14 @@ func TestProvisionByPlanTemplateDeprecated(t *testing.T) {
 func TestProvisionByPlanValidation(t *testing.T) {
 
 	dir := t.TempDir()
-	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ProjectNo: "INIS-AUTO", ProvisionToken: "t"}); err == nil {
+	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ProjectNo: "INIS-AUTO"}); err == nil {
 		t.Fatal("缺少 ServerURL 应报错")
 	}
-	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1", ProvisionToken: "t"}); err == nil {
+	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1"}); err == nil {
 		t.Fatal("缺少 ProjectNo 应报错")
 	}
-	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{ServerURL: "http://127.0.0.1:1", ProjectNo: "INIS-AUTO"}); err == nil {
-		t.Fatal("缺少 ProvisionToken 应报错")
-	}
 	if _, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: "http://127.0.0.1:1", ProjectNo: "INIS-AUTO", ProvisionToken: "t",
+		ServerURL: "http://127.0.0.1:1", ProjectNo: "INIS-AUTO",
 		TenantId: -1, StorageDir: dir,
 	}); err == nil {
 		t.Fatal("TenantId 为负数应报错")
@@ -261,8 +261,8 @@ func TestProvisionByPlanGRPC(t *testing.T) {
 	dir := t.TempDir()
 	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
 		ServerURL: "grpc://" + listener.Addr().String(),
-		ProjectNo: "INIS-AUTO", ProvisionToken: "project-token",
-		TenantId: 7, StorageDir: dir, DeviceName: "g-device",
+		ProjectNo: "INIS-AUTO",
+		TenantId:  7, StorageDir: dir, DeviceName: "g-device",
 		Transport: TransportGRPC, GRPC: GRPCOptions{AllowInsecure: true},
 		HTTPTimeout: 2 * time.Second,
 	})
@@ -273,9 +273,9 @@ func TestProvisionByPlanGRPC(t *testing.T) {
 		t.Fatalf("gRPC 结果映射不符: %s %s", result.LicenseNo, result.Salt)
 	}
 
-	// gRPC 请求字段对齐 HTTP 线格式（projectNo/tenantId/provisionToken/installSN/deviceName）
-	if fake.request.GetProjectNo() != "INIS-AUTO" || fake.request.GetProvisionToken() != "project-token" {
-		t.Fatalf("gRPC 项目/令牌未上送: %+v", fake.request)
+	// gRPC 请求字段对齐 HTTP 线格式（projectNo/tenantId/installSN/deviceName），proto 已 reserved token。
+	if fake.request.GetProjectNo() != "INIS-AUTO" {
+		t.Fatalf("gRPC 项目编号未上送: %+v", fake.request)
 	}
 	if fake.request.GetTenantId() != 7 {
 		t.Fatalf("gRPC 子租户 ID 未上送: %d", fake.request.GetTenantId())

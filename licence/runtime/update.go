@@ -170,6 +170,7 @@ type checkUpdateResponse struct {
 	ServerTime int64           `json:"serverTime"`
 	Update     bool            `json:"update"`
 	Manifest   json.RawMessage `json:"manifest"`
+	Keyset     json.RawMessage `json:"keyset"`
 	Message    string          `json:"message"`
 }
 
@@ -185,6 +186,9 @@ type checkUpdateResponse struct {
  */
 func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo, error) {
 
+	if strings.TrimSpace(this.options.Version) == "" {
+		return UpdateInfo{}, errors.New("当前版本不能为空")
+	}
 	this.opMu.Lock()
 	defer this.opMu.Unlock()
 
@@ -219,19 +223,32 @@ func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo,
 	if !LicenceProtocol.PassThrough(response.Status) {
 		return info, errors.New("实例许可证非放行态：" + response.Status)
 	}
+	candidate, err := this.verifyKeysetCandidate(response.Keyset)
+	if err != nil {
+		return UpdateInfo{}, err
+	}
 	if !response.Update {
+		if candidate != nil {
+			this.commitKeyset(candidate)
+			this.persist()
+		}
 		return info, nil
 	}
 
-	manifest, err := this.VerifyManifest(response.Manifest)
+	releaseKeys := this.candidatePublicKeys(candidate, true)
+	manifest, err := this.verifyManifestWithKeys(response.Manifest, releaseKeys)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
 	// 复核每个发布物自身的 release-key 签名（上传时签名锁定的双层校验）
 	for _, artifact := range manifest.Payload.Artifacts {
-		if !this.verifyArtifact(artifact, manifest.Payload.Version) {
+		if !this.verifyArtifactWithKeys(artifact, manifest.Payload.Version, releaseKeys) {
 			return UpdateInfo{}, errors.New("发布物签名验签失败：" + artifact.ArtifactNo)
 		}
+	}
+	if candidate != nil {
+		this.commitKeyset(candidate)
+		this.persist()
 	}
 	info.Available = true
 	info.Manifest = manifest
@@ -240,12 +257,16 @@ func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo,
 
 // VerifyManifest - 验签更新清单原文（在线响应与离线更新包 manifest.json 共用）
 func (this *Client) VerifyManifest(raw json.RawMessage) (*Manifest, error) {
+	return this.verifyManifestWithKeys(raw, this.publicKeysSnapshot(true))
+}
 
+// verifyManifestWithKeys - 使用指定可信快照验证清单，支持候选 keyset 原子提交。
+func (this *Client) verifyManifestWithKeys(raw json.RawMessage, keys map[string]string) (*Manifest, error) {
 	manifest, rawPayload, err := ParseManifest(raw)
 	if err != nil {
 		return nil, err
 	}
-	publicKey, exist := LookupPublicKey(this.options.ReleasePublicKeys, manifest.Payload.KeyVersion)
+	publicKey, exist := LookupPublicKey(keys, manifest.Payload.KeyVersion)
 	if !exist {
 		return nil, errors.New("未内置 keyVersion=" + manifest.Payload.KeyVersion + " 的 release 验签公钥")
 	}
@@ -258,8 +279,12 @@ func (this *Client) VerifyManifest(raw json.RawMessage) (*Manifest, error) {
 
 // verifyArtifact - 复核发布物签名（canonical ArtifactPayload + release-key 公钥）
 func (this *Client) verifyArtifact(artifact ManifestArtifact, version string) bool {
+	return this.verifyArtifactWithKeys(artifact, version, this.publicKeysSnapshot(true))
+}
 
-	publicKey, exist := LookupPublicKey(this.options.ReleasePublicKeys, artifact.KeyVersion)
+// verifyArtifactWithKeys - 使用指定可信快照复核发布物签名。
+func (this *Client) verifyArtifactWithKeys(artifact ManifestArtifact, version string, keys map[string]string) bool {
+	publicKey, exist := LookupPublicKey(keys, artifact.KeyVersion)
 	if !exist {
 		return false
 	}

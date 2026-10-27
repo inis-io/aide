@@ -46,6 +46,8 @@ type GRPCOptions struct {
 type Options struct {
 	// ServerURL - 授权平台地址（必填），如 "https://license.example.com"
 	ServerURL string
+	// ProjectNo - 项目编号（使用 BootstrapPublicKeys 动态验 keyset 时必填，精确绑定项目）
+	ProjectNo string
 	// LicenseNo - 许可证编号（必填），格式 LIC-{年}-%06d
 	LicenseNo string
 	// InstanceNo - 部署实例编号（可选，许可证绑定实例时上送）
@@ -54,10 +56,12 @@ type Options struct {
 	DeviceName string
 	// Salt - 指纹盐（必填，与实例登记时使用的盐一致）
 	Salt string
-	// PublicKeys - 验签公钥表（必填，keyVersion -> hex 公钥，支持多版本并存轮换）
+	// PublicKeys - 静态 license 验签公钥表（与 BootstrapPublicKeys 至少一种，支持多版本并存轮换）
 	PublicKeys map[string]string
-	// ReleasePublicKeys - release 验签公钥表（在线更新模块必填，keyVersion -> hex 公钥）
+	// ReleasePublicKeys - 静态 release 验签公钥表（在线更新模块可使用动态 keyset 替代）
 	ReleasePublicKeys map[string]string
+	// BootstrapPublicKeys - bootstrap 根公钥表（keyVersion -> hex 公钥），用于验证动态 keyset
+	BootstrapPublicKeys map[string]string
 	// StorageDir - 状态存储目录（默认 ./runtime/licence）
 	StorageDir string
 	// Fingerprint - 显式指纹哈希（可选，覆盖自动采集）
@@ -109,6 +113,8 @@ type runtimeState struct {
 	Status string `json:"status"`
 	// Envelope - 当前缓存信封原文（验签基于载荷原文）
 	Envelope json.RawMessage `json:"envelope"`
+	// Keyset - 已验证的项目工作公钥集合原文（bootstrap 根签名）
+	Keyset json.RawMessage `json:"keyset,omitempty"`
 	// PlatformConfigs - 已验签的平台配置快照（按 Key）
 	PlatformConfigs map[string]PlatformConfigItem `json:"platformConfigs,omitempty"`
 	// PlatformConfigSyncVersion - 平台配置增量同步水位
@@ -135,6 +141,8 @@ type Client struct {
 	state runtimeState
 	// envelope - 当前缓存信封（已验签）
 	envelope LicenceProtocol.Envelope
+	// keyset - 当前可信工作公钥集合（已验 bootstrap 根）
+	keyset LicenceProtocol.KeysetEnvelope
 	// clockOffset - 服务端时间偏移（serverTime - 本地毫秒，用于签名时间戳与本地判定）
 	clockOffset int64
 	// pendingUsage - 待上报用量（下次 validate 携带，服务端确认后清空）
@@ -165,7 +173,7 @@ type Client struct {
 
 // New - 创建运行面客户端（归一化配置 + 采集指纹 + 初始化存储，不发起网络请求）
 /**
- * @param options Options - 客户端配置（ServerURL/LicenseNo/Salt/PublicKeys 必填）
+ * @param options Options - 客户端配置（ServerURL/LicenseNo/Salt 必填，工作公钥或 bootstrap 根至少一种）
  * @return *Client - 客户端实例
  * @example：
  * 	client, err := licence.New(licence.Options{
@@ -184,8 +192,11 @@ func New(options Options) (*Client, error) {
 	if options.Salt == "" {
 		return nil, errors.New("Salt 不能为空（指纹盐，与实例登记一致）")
 	}
-	if len(options.PublicKeys) == 0 {
-		return nil, errors.New("PublicKeys 不能为空（至少内置一个 keyVersion 的验签公钥）")
+	if len(options.PublicKeys) == 0 && len(options.BootstrapPublicKeys) == 0 {
+		return nil, errors.New("PublicKeys 与 BootstrapPublicKeys 至少配置一种")
+	}
+	if len(options.BootstrapPublicKeys) > 0 && strings.TrimSpace(options.ProjectNo) == "" {
+		return nil, errors.New("使用 BootstrapPublicKeys 时 ProjectNo 不能为空")
 	}
 	if options.StorageDir == "" {
 		options.StorageDir = "./runtime/licence"
@@ -430,6 +441,7 @@ func (this *Client) Reset() error {
 	this.mu.Lock()
 	this.state = runtimeState{PlatformConfigs: make(map[string]PlatformConfigItem)}
 	this.envelope = LicenceProtocol.Envelope{}
+	this.keyset = LicenceProtocol.KeysetEnvelope{}
 	this.clockOffset = 0
 	clear(this.pendingUsage)
 	clear(this.tenantCache)
@@ -550,7 +562,7 @@ func (this *Client) offline() {
 	this.setStatus(LicenceProtocol.LocalStatus(this.now(), validUntil, graceDays))
 }
 
-// restore - 恢复本地状态：读存储 → 验签信封 → 恢复凭证与缓存
+// restore - 恢复本地状态：读存储 → 先验缓存 keyset 根 → 再验信封 → 恢复凭证与缓存。
 func (this *Client) restore() error {
 
 	raw, err := this.store.Load()
@@ -567,6 +579,13 @@ func (this *Client) restore() error {
 	if (len(rawEnvelope) == 0 || bytes.Equal(rawEnvelope, []byte("null"))) && state.Status != LicenceProtocol.StatusSeatReleased {
 		return this.store.Clear()
 	}
+	if len(bytes.TrimSpace(state.Keyset)) > 0 && len(this.options.BootstrapPublicKeys) == 0 {
+		return errors.New("本地缓存 keyset 缺少 bootstrap 根公钥")
+	}
+	candidate, err := this.verifyKeysetCandidate(state.Keyset)
+	if err != nil {
+		return err
+	}
 
 	var envelope LicenceProtocol.Envelope
 	if len(rawEnvelope) > 0 && !bytes.Equal(rawEnvelope, []byte("null")) {
@@ -575,7 +594,7 @@ func (this *Client) restore() error {
 		if err != nil {
 			return err
 		}
-		publicKey, exist := LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
+		publicKey, exist := LookupPublicKey(this.candidatePublicKeys(candidate, false), envelope.Payload.KeyVersion)
 		if !exist || !LicenceProtocol.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
 			return errors.New("本地缓存信封验签失败")
 		}
@@ -587,6 +606,10 @@ func (this *Client) restore() error {
 	}
 	this.state = state
 	this.envelope = envelope
+	this.keyset = LicenceProtocol.KeysetEnvelope{}
+	if candidate != nil {
+		this.keyset = *candidate.envelope
+	}
 	this.mu.Unlock()
 
 	// 启动即按本地时间维度给出初始状态（等待首轮服务端判定修正）
@@ -650,15 +673,138 @@ func (this *Client) PullEvents(ctx context.Context, sinceEventId int64, hold tim
 	return result.Events, nil
 }
 
-// PublicKeys - 返回平台公钥副本（keyVersion → hex 公钥），供回调/订阅验签复用。
+// keysetCandidate - 已通过 bootstrap 根验证、尚未提交的 keyset 与派生公钥快照。
+type keysetCandidate struct {
+	envelope    *LicenceProtocol.KeysetEnvelope
+	raw         json.RawMessage
+	licenseKeys map[string]string
+	releaseKeys map[string]string
+}
+
+// mergeKeysetKeys - 合并静态与 keyset 公钥，同版本不同公钥一律 fail-closed。
+func mergeKeysetKeys(static map[string]string, items []LicenceProtocol.KeysetPublicKey) (map[string]string, error) {
+	keys := make(map[string]string, len(static)+len(items))
+	for version, key := range static {
+		keys[version] = key
+	}
+	for _, item := range items {
+		if previous, exists := keys[item.KeyVersion]; exists && previous != item.PublicKey {
+			return nil, errors.New("同 keyVersion 对应不同公钥: " + item.KeyVersion)
+		}
+		keys[item.KeyVersion] = item.PublicKey
+	}
+	return keys, nil
+}
+
+// verifyKeysetHistory - 高 revision 也不得改变既有 keyVersion 的公钥。
+func verifyKeysetHistory(current, candidate []LicenceProtocol.KeysetPublicKey) error {
+	keys := make(map[string]string, len(current))
+	for _, item := range current {
+		keys[item.KeyVersion] = item.PublicKey
+	}
+	for _, item := range candidate {
+		if previous, exists := keys[item.KeyVersion]; exists && previous != item.PublicKey {
+			return errors.New("同 keyVersion 对应不同公钥: " + item.KeyVersion)
+		}
+	}
+	return nil
+}
+
+// publicKeysSnapshot - 读取最新加锁快照，始终返回独立副本。
+func (this *Client) publicKeysSnapshot(release bool) map[string]string {
+	this.mu.RLock()
+	defer this.mu.RUnlock()
+	static := this.options.PublicKeys
+	items := this.keyset.Payload.LicenseKeys
+	if release {
+		static = this.options.ReleasePublicKeys
+		items = this.keyset.Payload.ReleaseKeys
+	}
+	keys, _ := mergeKeysetKeys(static, items)
+	return keys
+}
+
+// verifyKeysetCandidate - 验证候选 keyset，但不修改当前可信状态。
+func (this *Client) verifyKeysetCandidate(raw json.RawMessage) (*keysetCandidate, error) {
+	if len(this.options.BootstrapPublicKeys) == 0 {
+		return nil, nil
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, errors.New("响应缺少 keyset")
+	}
+	this.mu.RLock()
+	currentRaw := append(json.RawMessage(nil), this.state.Keyset...)
+	currentLicenseKeys := append([]LicenceProtocol.KeysetPublicKey(nil), this.keyset.Payload.LicenseKeys...)
+	currentReleaseKeys := append([]LicenceProtocol.KeysetPublicKey(nil), this.keyset.Payload.ReleaseKeys...)
+	minimumRevision := this.keyset.Payload.Revision
+	this.mu.RUnlock()
+	envelope, err := LicenceProtocol.VerifyKeyset(trimmed, this.options.ProjectNo, this.options.BootstrapPublicKeys, minimumRevision)
+	if err != nil {
+		return nil, err
+	}
+	if envelope.Payload.Revision == minimumRevision && len(currentRaw) > 0 &&
+		!bytes.Equal(bytes.TrimSpace(currentRaw), trimmed) {
+		return nil, errors.New("同 revision 的 keyset 内容不一致")
+	}
+	if err = verifyKeysetHistory(currentLicenseKeys, envelope.Payload.LicenseKeys); err != nil {
+		return nil, err
+	}
+	if err = verifyKeysetHistory(currentReleaseKeys, envelope.Payload.ReleaseKeys); err != nil {
+		return nil, err
+	}
+	licenseKeys, err := mergeKeysetKeys(this.options.PublicKeys, envelope.Payload.LicenseKeys)
+	if err != nil {
+		return nil, err
+	}
+	releaseKeys, err := mergeKeysetKeys(this.options.ReleasePublicKeys, envelope.Payload.ReleaseKeys)
+	if err != nil {
+		return nil, err
+	}
+	return &keysetCandidate{
+		envelope: envelope, raw: append(json.RawMessage(nil), trimmed...),
+		licenseKeys: licenseKeys, releaseKeys: releaseKeys,
+	}, nil
+}
+
+// candidatePublicKeys - 选择候选快照；无候选时读取当前已信任快照。
+func (this *Client) candidatePublicKeys(candidate *keysetCandidate, release bool) map[string]string {
+	if candidate != nil {
+		if release {
+			return candidate.releaseKeys
+		}
+		return candidate.licenseKeys
+	}
+	return this.publicKeysSnapshot(release)
+}
+
+// commitKeyset - 提交已验证 keyset；调用方负责与业务结果在同一操作内落盘。
+func (this *Client) commitKeyset(candidate *keysetCandidate) {
+	if candidate == nil {
+		return
+	}
+	this.mu.Lock()
+	this.keyset = *candidate.envelope
+	this.state.Keyset = append(json.RawMessage(nil), candidate.raw...)
+	this.mu.Unlock()
+}
+
+// commitEnvelopeAndKeyset - 原子替换业务信封与 keyset，任一验签失败都不会进入本方法。
+func (this *Client) commitEnvelopeAndKeyset(candidate *keysetCandidate, envelope LicenceProtocol.Envelope, raw json.RawMessage) {
+	this.mu.Lock()
+	if candidate != nil {
+		this.keyset = *candidate.envelope
+		this.state.Keyset = append(json.RawMessage(nil), candidate.raw...)
+	}
+	this.envelope = envelope
+	this.state.Envelope = append(json.RawMessage(nil), raw...)
+	this.mu.Unlock()
+}
+
+// PublicKeys - 返回最新 license 公钥副本（keyVersion → hex 公钥），供回调/订阅验签复用。
 // 返回副本而非内部 map 引用，调用方修改不影响客户端。
 func (this *Client) PublicKeys() map[string]string {
-
-	publicKeys := make(map[string]string, len(this.options.PublicKeys))
-	for version, key := range this.options.PublicKeys {
-		publicKeys[version] = key
-	}
-	return publicKeys
+	return this.publicKeysSnapshot(false)
 }
 
 // ============================= 消费记录上报 =============================

@@ -32,12 +32,11 @@ type validateBody struct {
 	ClientTime      int64            `json:"clientTime,omitempty"`
 }
 
-// provisionBody - 装机自动申领请求体（契约 §6.1；projectNo/provisionToken 官方二进制内写死）
+// provisionBody - 装机自动申领请求体（sdk_auto：projectNo + installSN 定位，无项目级令牌）。
 // tenantId 缺省 0 = 普通装机申领，>0 = SaaS 子租户发证（omitempty 不上送零值）。
 type provisionBody struct {
 	ProjectNo       string `json:"projectNo"`
 	TenantId        int64  `json:"tenantId,omitempty"`
-	ProvisionToken  string `json:"provisionToken"`
 	InstallSN       string `json:"installSN"`
 	FingerprintHash string `json:"fingerprintHash,omitempty"`
 	DeviceName      string `json:"deviceName,omitempty"`
@@ -46,22 +45,24 @@ type provisionBody struct {
 
 // provisionResponse - 装机自动申领统一响应（契约 §6；status 为业务状态码）
 type provisionResponse struct {
-	Status        string `json:"status"`
-	ServerTime    int64  `json:"serverTime"`
-	LicenseNo     string `json:"licenseNo"`
-	Salt          string `json:"salt"`
-	BindingPolicy string `json:"bindingPolicy"`
-	SeatLimit     int    `json:"seatLimit"`
-	ExpiresAt     int64  `json:"expiresAt"`
-	Reissued      bool   `json:"reissued"`
-	Message       string `json:"message"`
+	Status        string          `json:"status"`
+	ServerTime    int64           `json:"serverTime"`
+	LicenseNo     string          `json:"licenseNo"`
+	Salt          string          `json:"salt"`
+	BindingPolicy string          `json:"bindingPolicy"`
+	SeatLimit     int             `json:"seatLimit"`
+	ExpiresAt     int64           `json:"expiresAt"`
+	Reissued      bool            `json:"reissued"`
+	Keyset        json.RawMessage `json:"keyset"`
+	Message       string          `json:"message"`
 }
 
-// runtimeResponse - 运行面统一响应（契约 §2；envelope 为原文，验签后替换缓存）
+// runtimeResponse - 运行面统一响应（keyset 与 envelope 均为原始 JSON，验签后原子替换缓存）
 type runtimeResponse struct {
 	Status          string          `json:"status"`
 	ServerTime      int64           `json:"serverTime"`
 	Envelope        json.RawMessage `json:"envelope"`
+	Keyset          json.RawMessage `json:"keyset"`
 	ActivationNo    string          `json:"activationNo"`
 	ActivationToken string          `json:"activationToken"`
 	SeatNo          string          `json:"seatNo"`
@@ -123,7 +124,7 @@ func (this *Client) activateLocked(ctx context.Context) error {
 	}
 
 	// 验签信封后持久化（token 仅此一次返回，丢失只能重新激活）
-	if err = this.applyEnvelope(response.Envelope); err != nil {
+	if err = this.applyEnvelope(response.Envelope, response.Keyset); err != nil {
 		return err
 	}
 	this.mu.Lock()
@@ -199,16 +200,22 @@ func (this *Client) validateLocked(ctx context.Context) error {
 		return this.seatReleased()
 	}
 
-	// 放行状态：滑动刷新 + 载荷变化时替换信封
+	// 放行状态：先完成 keyset 与可选业务信封验证，再提交滑动窗口与可信快照。
 	if LicenceProtocol.PassThrough(response.Status) {
+		if len(response.Envelope) > 0 {
+			if err = this.applyEnvelope(response.Envelope, response.Keyset); err != nil {
+				return err
+			}
+		} else {
+			candidate, candidateErr := this.verifyKeysetCandidate(response.Keyset)
+			if candidateErr != nil {
+				return candidateErr
+			}
+			this.commitKeyset(candidate)
+		}
 		this.mu.Lock()
 		this.state.ExpiresAt = response.ExpiresAt
 		this.mu.Unlock()
-		if len(response.Envelope) > 0 {
-			if err = this.applyEnvelope(response.Envelope); err != nil {
-				return err
-			}
-		}
 	}
 
 	this.setStatus(response.Status)
@@ -244,7 +251,7 @@ func (this *Client) currentLocked(ctx context.Context) (LicenceProtocol.Envelope
 		this.persist()
 		return LicenceProtocol.Envelope{}, errors.New("当前授权不可用：" + response.Status)
 	}
-	if err = this.applyEnvelope(response.Envelope); err != nil {
+	if err = this.applyEnvelope(response.Envelope, response.Keyset); err != nil {
 		return LicenceProtocol.Envelope{}, err
 	}
 	this.setStatus(response.Status)
@@ -323,17 +330,21 @@ func (this *Client) signHeaders(method string, requestURI string, body []byte) (
 	}, nil
 }
 
-// applyEnvelope - 验签并替换当前缓存信封（公钥按载荷 keyVersion 选取）
-func (this *Client) applyEnvelope(raw json.RawMessage) error {
+// applyEnvelope - 先验候选 keyset，再用候选公钥验业务信封，全部通过后原子提交。
+func (this *Client) applyEnvelope(raw json.RawMessage, keysetRaw json.RawMessage) error {
 
 	if len(raw) == 0 {
 		return errors.New("响应缺少信封")
+	}
+	candidate, err := this.verifyKeysetCandidate(keysetRaw)
+	if err != nil {
+		return err
 	}
 	envelope, rawPayload, err := LicenceProtocol.ParseEnvelope(raw)
 	if err != nil {
 		return err
 	}
-	publicKey, exist := LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
+	publicKey, exist := LookupPublicKey(this.candidatePublicKeys(candidate, false), envelope.Payload.KeyVersion)
 	if !exist {
 		return errors.New("未内置 keyVersion=" + envelope.Payload.KeyVersion + " 的验签公钥")
 	}
@@ -341,11 +352,7 @@ func (this *Client) applyEnvelope(raw json.RawMessage) error {
 		!LicenceProtocol.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
 		return errors.New("信封验签失败")
 	}
-
-	this.mu.Lock()
-	this.envelope = envelope
-	this.state.Envelope = raw
-	this.mu.Unlock()
+	this.commitEnvelopeAndKeyset(candidate, envelope, raw)
 	return nil
 }
 

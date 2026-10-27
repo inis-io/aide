@@ -33,23 +33,23 @@ import (
 
 // grpcRuntimeTransport - gRPC 运行面传输。
 type grpcRuntimeTransport struct {
-	client         *Client
-	conn           *grpc.ClientConn
-	license        licencev1.LicenseRuntimeServiceClient
-	update         licencev1.UpdateRuntimeServiceClient
-	saas           licencev1.SaasRuntimeServiceClient
-	platformConfig licencev1.PlatformConfigRuntimeServiceClient
-	event          licencev1.EventRuntimeServiceClient
-	pushback       licencev1.ConfigPushbackRuntimeServiceClient
-	plan           licencev1.PlanRuntimeServiceClient
-	command        licencev1.CommandRuntimeServiceClient
-	apis           apisv1.ApisRuntimeServiceClient
-	starDirectory  starv1.StarDirectoryServiceClient
-	starIndex      starv1.StarIndexServiceClient
-	starBilling    starv1.StarBillingServiceClient
+	client          *Client
+	conn            *grpc.ClientConn
+	license         licencev1.LicenseRuntimeServiceClient
+	update          licencev1.UpdateRuntimeServiceClient
+	saas            licencev1.SaasRuntimeServiceClient
+	platformConfig  licencev1.PlatformConfigRuntimeServiceClient
+	event           licencev1.EventRuntimeServiceClient
+	pushback        licencev1.ConfigPushbackRuntimeServiceClient
+	plan            licencev1.PlanRuntimeServiceClient
+	command         licencev1.CommandRuntimeServiceClient
+	apis            apisv1.ApisRuntimeServiceClient
+	starDirectory   starv1.StarDirectoryServiceClient
+	starIndex       starv1.StarIndexServiceClient
+	starBilling     starv1.StarBillingServiceClient
 	starArbitration starv1.StarArbitrationServiceClient
-	closeOnce      sync.Once
-	closeErr       error
+	closeOnce       sync.Once
+	closeErr        error
 }
 
 func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
@@ -59,18 +59,18 @@ func newGRPCRuntimeTransport(client *Client) (*grpcRuntimeTransport, error) {
 	}
 	return &grpcRuntimeTransport{
 		client: client, conn: conn,
-		license:        licencev1.NewLicenseRuntimeServiceClient(conn),
-		update:         licencev1.NewUpdateRuntimeServiceClient(conn),
-		saas:           licencev1.NewSaasRuntimeServiceClient(conn),
-		platformConfig: licencev1.NewPlatformConfigRuntimeServiceClient(conn),
-		event:          licencev1.NewEventRuntimeServiceClient(conn),
-		pushback:       licencev1.NewConfigPushbackRuntimeServiceClient(conn),
-		plan:           licencev1.NewPlanRuntimeServiceClient(conn),
-		command:        licencev1.NewCommandRuntimeServiceClient(conn),
-		apis:           apisv1.NewApisRuntimeServiceClient(conn),
-		starDirectory:  starv1.NewStarDirectoryServiceClient(conn),
-		starIndex:      starv1.NewStarIndexServiceClient(conn),
-		starBilling:    starv1.NewStarBillingServiceClient(conn),
+		license:         licencev1.NewLicenseRuntimeServiceClient(conn),
+		update:          licencev1.NewUpdateRuntimeServiceClient(conn),
+		saas:            licencev1.NewSaasRuntimeServiceClient(conn),
+		platformConfig:  licencev1.NewPlatformConfigRuntimeServiceClient(conn),
+		event:           licencev1.NewEventRuntimeServiceClient(conn),
+		pushback:        licencev1.NewConfigPushbackRuntimeServiceClient(conn),
+		plan:            licencev1.NewPlanRuntimeServiceClient(conn),
+		command:         licencev1.NewCommandRuntimeServiceClient(conn),
+		apis:            apisv1.NewApisRuntimeServiceClient(conn),
+		starDirectory:   starv1.NewStarDirectoryServiceClient(conn),
+		starIndex:       starv1.NewStarIndexServiceClient(conn),
+		starBilling:     starv1.NewStarBillingServiceClient(conn),
 		starArbitration: starv1.NewStarArbitrationServiceClient(conn),
 	}, nil
 }
@@ -195,6 +195,9 @@ func provisionMap(response *licencev1.ProvisionResponse) map[string]any {
 	if response.GetMessage() != "" {
 		result["message"] = response.GetMessage()
 	}
+	if len(response.GetKeysetJson()) > 0 {
+		result["keyset"] = json.RawMessage(response.GetKeysetJson())
+	}
 	return result
 }
 
@@ -217,6 +220,9 @@ func runtimeMap(response *licencev1.RuntimeResponse) map[string]any {
 	}
 	if response.GetMessage() != "" {
 		result["message"] = response.GetMessage()
+	}
+	if len(response.GetKeysetJson()) > 0 {
+		result["keyset"] = json.RawMessage(response.GetKeysetJson())
 	}
 	return result
 }
@@ -456,8 +462,7 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 		}
 		request := &licencev1.ProvisionRequest{
 			ProjectNo: input.ProjectNo, TenantId: input.TenantId,
-			ProvisionToken: input.ProvisionToken,
-			InstallSn:      input.InstallSN, FingerprintHash: input.FingerprintHash,
+			InstallSn: input.InstallSN, FingerprintHash: input.FingerprintHash,
 			DeviceName: input.DeviceName, ClientTime: input.ClientTime,
 		}
 		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_ProvisionByPlan_FullMethodName, request, false)
@@ -685,6 +690,9 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 		}
 		if len(response.GetManifestJson()) > 0 {
 			result["manifest"] = json.RawMessage(response.GetManifestJson())
+		}
+		if len(response.GetKeysetJson()) > 0 {
+			result["keyset"] = json.RawMessage(response.GetKeysetJson())
 		}
 		if response.GetMessage() != "" {
 			result["message"] = response.GetMessage()

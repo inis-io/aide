@@ -101,14 +101,15 @@
 
 > 面向接入方的使用教程见 [`licence/README.md`](licence/README.md)（材料清单、快速开始、在线更新、SaaS 租户、管理面、FAQ）。
 
-- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，144 个导出符号全部别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/装机自动申领（`ProvisionByPlan`）/配置回推/项目套餐目录与订单/实例指令通道（`command.go`：平台远程操作实例，长轮询领取 + 执行回执，内置动作白名单 `runtime_info`/`license_refresh`/`config_refresh`/`update_check`）；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（按能力
+- **子包划分**（2026 门面化重构）：根包 = 纯门面（`doc.go` + `facade.go`，全部导出符号以别名镜像，无实现）；`runtime/` = 运行面 Client + 传输/指纹/存储/SaaS/在线更新/装机自动申领（`ProvisionByPlan`）/配置回推/项目套餐目录与订单/实例指令通道（`command.go`：平台远程操作实例，长轮询领取 + 执行回执，内置动作白名单 `runtime_info`/`license_refresh`/`config_refresh`/`update_check`）；`protocol/` = 平台契约镜像层（信封/签发验签/状态码/版本范围/canonical 助手）；`admin/` 管理面 AdminClient、`updater/` 自更新执行器、`callback/` 回调接收端 + 事件订阅器、`config/` 配置校验引擎（叶子包，licen-hub backend 复用）、`apis/` API 商城 typed 方法包（按能力
   子包分类：`core/` 共享核心件 + `iplocate`/`email` 能力子包，根包挂载能力子资源并 re-export
   共享件，`Invoke`/`Usage` 跨能力方法留根包））。依赖方向：根包（门面）→ `runtime`/`protocol`；`runtime` → `protocol`/`config`/`apis`；`admin`/`updater`/`callback` → `runtime` + `protocol`，编译期保证无环；详见 `licence/AGENTS.md`。
-- **纯函数层**（`protocol/` 包：`envelope.go` / `sign.go` / `licence.go`）：`Issue`（签发）、`VerifyEnvelope`/`VerifyRaw`（验签）、`Parse`/`ParseEnvelope`（解析）、`GenerateKeyPair`、`Nonce`。信封格式（`Envelope`/`Payload`）与平台侧契约保持一致。**`Payload` 字段顺序即签名内容：新增字段只允许追加到结构体末尾，禁止插入或调整既有字段顺序，否则历史签名全部失效。**
-- **验签首选原文模式**：`ParseEnvelope` 返回载荷原始字节，`VerifyRaw` 基于原文验签——平台只追加新字段时重序列化会丢字段导致验签失败，原文验签天然兼容。
-- **运行面客户端**（`runtime/` 包 `client.go` / `transport.go`）：`licence.New(Options)` 创建、`Start/Stop` 管理后台滑动刷新循环；`Options.ServerURL` 是平台 URI 唯一入口；内部完成激活、token 与客户端密钥对管理、逐请求 Ed25519 签名（契约 §2.4）、信封缓存与离线宽限降级、用量合并上报；业务侧只感知 `Status()` / `HasFeature()` / `GetLimit()` / `CheckVersion()` / `ReportUsage()`。
-- **在线更新**（`runtime/` 包 `update.go`，含原 manifest.go 清单契约）：`CheckUpdate`（清单 release-key 验签 + 发布物签名复核）、`DownloadArtifact`（大小 + SHA-256 校验，原子落盘）、`ReportUpgrade` / `ReportUpgradeLog`（升级轨迹）、`VerifyManifest`（离线包清单验签入口）；release 公钥经 `Options.ReleasePublicKeys` 内置。清单/发布物载荷（`ManifestPayload`/`ArtifactPayload`）与平台 `app/common/sign/manifest.go`/`artifact.go` 字节级镜像。
-- **SaaS 租户**（`runtime/` 包 `saas.go`，含原 tenant.go 租户信封）：`TenantSync`（水位线增量 + 信封验签缓存）/`TenantValidate`/`TenantCurrent`/`TenantStatus`/`TenantFeature`；租户载荷（`TenantPayload`）与平台 `app/common/sign/tenant.go` 字节级镜像，license-key 验签（用 `Options.PublicKeys`）。
+- **纯函数层**（`protocol/` 包：`envelope.go` / `sign.go` / `licence.go` / `keyset.go`）：`Issue`、`VerifyRaw`、`ParseEnvelope`、`VerifyKeyset`、`GenerateKeyPair`、`Nonce`。`Payload` 与 `KeysetPayload` 字段顺序即签名内容，禁止插入或重排。
+- **验签首选原文模式**：`ParseEnvelope` / `ParseKeyset` 返回载荷原始字节，`VerifyRaw` / `VerifyKeyset` 基于原文验签，兼容平台只追加的新字段。
+- **projectNo-only 自动授权**（`runtime/` 包 `auto.go` / `defaults.go`）：官方只需 `AutoStart(ctx, projectNo, appVersion...)`；内置 `DefaultServerURL` 与 `DefaultBootstrapPublicKeys`。`auto.json` 仅存非机密元数据，首次才 provision；强制指纹自动挑战一次，返回已启动 `AutoResult.Client`。
+- **运行面客户端**（`runtime/` 包 `client.go` / `transport.go`）：`Options.PublicKeys` 或 `BootstrapPublicKeys` 至少一种；动态模式必须提供 `ProjectNo`。候选 keyset 与业务信封全部通过才原子提交并加密持久化，所有验签点读取最新加锁快照。
+- **在线更新**（`runtime/` 包 `update.go`）：`CheckUpdate` 使用动态或静态 release 公钥验证清单与发布物；空 `Version` 必须明确报「当前版本不能为空」，不得猜测或上报 0.0.0。
+- **SaaS 租户**（`runtime/` 包 `saas.go`）：租户信封为原文验签，license-key 来自当前动态快照或静态 `Options.PublicKeys`。
 - **状态码**（`protocol/` 包 `status.go`）与平台 `app/common/license-status.go` 逐一对应；`LocalStatus` 是离线本地时间维度判定（服务端判定的镜像）。
 - **版本范围**（`protocol/` 包 `version-range.go`）与平台 `app/common/version-range.go` 语义逐一对应，改动必须双侧同步。
 - **实例指纹**（`runtime/` 包 `fingerprint*.go`）：机器 ID + 系统 UUID + 主板序列号多因子加盐 SHA-256，按平台分文件采集（build tags），禁止单用 IP/MAC；`FingerprintProvider` 与 `Options.Fingerprint` 为注入/覆盖入口。

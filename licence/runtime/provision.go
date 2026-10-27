@@ -13,16 +13,13 @@ import (
 	"time"
 )
 
-// ProvisionOptions - 装机自动申领参数（项目编号 + 项目级令牌 + 可选 SaaS 子租户）。
+// ProvisionOptions - 装机自动申领参数（项目编号 + 安装标识 + 可选 SaaS 子租户）。
 // 在 New(Client) 之前调用：先申领拿到证书参数（LicenseNo/Salt），再构造运行面客户端自动激活。
-// ServerURL/ProjectNo/ProvisionToken 由官方二进制内写死，装机用户不可改。
 type ProvisionOptions struct {
 	// ServerURL - 授权平台地址（必填），如 "https://license.example.com"
 	ServerURL string
 	// ProjectNo - 项目编号（必填，官方二进制写死），如 "INIS-AUTO"
 	ProjectNo string
-	// ProvisionToken - 项目级签发令牌（必填，匿名申领凭证，官方二进制写死）
-	ProvisionToken string
 	// TenantId - SaaS 子租户 ID（可选，0 = 普通装机申领；>0 = 按项目子租户发证档位签发）
 	TenantId int64
 	// StorageDir - install.sn 持久化目录（默认 ./runtime/licence）
@@ -31,6 +28,10 @@ type ProvisionOptions struct {
 	InstallSN string
 	// DeviceName - 机器名称（可选，缺省取 os.Hostname）
 	DeviceName string
+	// Fingerprint - 显式指纹哈希（可选，与运行面 Options.Fingerprint 语义一致）
+	Fingerprint string
+	// Provider - 自定义指纹提供者（可选，挑战响应的 salt 与激活使用同一算法）
+	Provider FingerprintProvider
 	// Transport - 传输协议，零值默认 HTTP。
 	Transport Transport
 	// GRPC - gRPC 连接配置，仅 TransportGRPC 时生效。
@@ -53,6 +54,8 @@ type ProvisionResult struct {
 	ExpiresAt int64
 	// Reissued - 本次是否为同 SN 有界续签
 	Reissued bool
+	// Keyset - bootstrap 根签名的项目工作公钥集合原始 JSON
+	Keyset json.RawMessage
 }
 
 // ProvisionError - 申领业务拒绝（errors.As 断言后按 Status 降级处理）。
@@ -73,22 +76,16 @@ func (this *ProvisionError) Error() string {
 	return "授权申领被拒绝：" + this.Status
 }
 
-// ProvisionByPlan - 装机自动申领（匿名 Public，无需平台凭证）。
-// 定位参数为项目编号 + 项目级令牌，签发参数由平台按项目配置的套餐档位（auto_issue_plan_id）
-// 决定；tenantId > 0 时按项目子租户发证档位（tenant_issue_plan_id）为 SaaS 子租户签发。
-// 必须在 New(Client) 之前调用：先申领拿到证书参数，再构造运行面客户端并自动激活。
+// ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public，projectNo + installSN 定位）。
+// 签发参数由平台按项目配置的套餐档位决定；tenantId > 0 时按项目子租户发证档位签发。
+// 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt 时，SDK 计算与激活一致的指纹并只重试一次。
 // 业务拒绝以 *ProvisionError 返回（errors.As 断言后按 Status 降级）。
-// 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已下线，服务端对旧请求返回
-// TEMPLATE_DEPRECATED。
 func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResult, error) {
 	if strings.TrimSpace(opts.ServerURL) == "" {
 		return ProvisionResult{}, errors.New("ServerURL 不能为空（平台 URI 入口）")
 	}
 	if strings.TrimSpace(opts.ProjectNo) == "" {
 		return ProvisionResult{}, errors.New("ProjectNo 不能为空（项目编号由官方二进制写死）")
-	}
-	if strings.TrimSpace(opts.ProvisionToken) == "" {
-		return ProvisionResult{}, errors.New("ProvisionToken 不能为空（项目级签发令牌由官方二进制写死）")
 	}
 	if opts.TenantId < 0 {
 		return ProvisionResult{}, errors.New("TenantId 不能为负数（0 = 普通装机申领，>0 = SaaS 子租户）")
@@ -98,20 +95,38 @@ func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResul
 		return ProvisionResult{}, err
 	}
 	opts.DeviceName = normalizeDeviceName(opts.DeviceName)
-	body, err := json.Marshal(provisionBody{
+	body := provisionBody{
 		ProjectNo: opts.ProjectNo, TenantId: opts.TenantId,
-		ProvisionToken: opts.ProvisionToken,
-		InstallSN:      installSN, DeviceName: opts.DeviceName,
-		ClientTime: time.Now().UnixMilli(),
-	})
+		InstallSN: installSN, DeviceName: opts.DeviceName,
+	}
+	response, err := provisionRequest(ctx, opts, body)
 	if err != nil {
 		return ProvisionResult{}, err
 	}
-	response, err := provisionRoundTrip(ctx, opts, "/api/v1/licenses/provision", body)
-	if err != nil {
-		return ProvisionResult{}, err
+	if response.Status == "FINGERPRINT_REQUIRED" {
+		if strings.TrimSpace(response.Salt) == "" {
+			return ProvisionResult{}, errors.New("指纹挑战响应缺少 salt")
+		}
+		body.FingerprintHash, err = FingerprintHash(response.Salt, opts.Fingerprint, opts.Provider)
+		if err != nil {
+			return ProvisionResult{}, err
+		}
+		response, err = provisionRequest(ctx, opts, body)
+		if err != nil {
+			return ProvisionResult{}, err
+		}
 	}
 	return finishProvision(response)
+}
+
+// provisionRequest - 组装当前毫秒时间并执行一次申领请求；挑战重试复用同一 installSN。
+func provisionRequest(ctx context.Context, opts ProvisionOptions, body provisionBody) (provisionResponse, error) {
+	body.ClientTime = time.Now().UnixMilli()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return provisionResponse{}, err
+	}
+	return provisionRoundTrip(ctx, opts, "/api/v1/licenses/provision", raw)
 }
 
 // provisionRoundTrip - 双协议统一请求出口：选传传输 → RoundTrip → 解析统一响应。
@@ -171,6 +186,7 @@ func finishProvision(response provisionResponse) (ProvisionResult, error) {
 		LicenseNo: response.LicenseNo, Salt: response.Salt,
 		BindingPolicy: response.BindingPolicy, SeatLimit: response.SeatLimit,
 		ExpiresAt: response.ExpiresAt, Reissued: response.Reissued,
+		Keyset: append(json.RawMessage(nil), response.Keyset...),
 	}, nil
 }
 

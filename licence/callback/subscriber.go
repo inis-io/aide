@@ -46,12 +46,14 @@ type EventSubscriber struct {
  * 	go sub.Run(ctx)
  */
 func NewEventSubscriber(puller EventPuller, options CallbackOptions) *EventSubscriber {
+	handler := NewCallbackHandler(options)
 	if provider, ok := puller.(publicKeysProvider); ok {
-		options.PublicKeys = provider.PublicKeys()
+		// 每次验签重新读取客户端加锁快照，支持 keyset 轮换。
+		handler.publicKeys = provider.PublicKeys
 	}
 	return &EventSubscriber{
 		puller:  puller,
-		handler: NewCallbackHandler(options),
+		handler: handler,
 		hold:    15 * time.Second,
 	}
 }

@@ -6,9 +6,10 @@
 ## 模块定位与当前状态
 
 - 本目录是 Licen Hub 的 Go SDK，按职责拆为「门面根包 + 实现子包」：
-  根包 = 纯门面（`doc.go` + `facade.go`，144 个导出符号全部以别名镜像，无任何实现）；
-  `runtime/` = 运行面 `Client` + 传输/指纹/安全存储/SaaS/在线更新/装机自动申领（`ProvisionByPlan`）/配置回推/项目套餐目录与订单/实例指令通道（`command.go`：长轮询领取 + 执行回执）；
-  `protocol/` = 平台契约镜像层（信封/载荷/签发验签/状态码/版本范围/canonical 助手）；
+  根包 = 纯门面（`doc.go` + `facade.go`，全部导出符号以别名镜像，无任何实现）；
+  `runtime/` = 运行面 `Client` + `AutoStart` / `AutoStartWithOptions`（`auto.go`/`defaults.go`）+
+  传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`）/配置回推/套餐/实例指令；
+  `protocol/` = 平台契约镜像层（信封/keyset/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
   RuleSet 校验引擎；`apis/` = API 商城 typed 方法包（按能力子包分类：`Invoke`/`Usage` 跨能力
@@ -156,8 +157,9 @@ licence/
   新字段只允许追加，禁止插入、重排或改名。信封验签始终优先使用解析得到的 payload 原文字节。
 - **载荷 v2 破坏性例外**：双轨菜单重构已获准清表重建，`TenantPayload.manifestVersion`
   在 v2 中更名为 `tenantManifestVersion`；这是无正式存量信封前的一次性例外，后续仍恢复只追加纪律。
-- license-key / release-key 私钥永远不进入 SDK；SDK 只持公钥。客户端 Ed25519 私钥与
-  `activationToken` 只允许经 `Store` 保存，不出本机、不进日志。
+- bootstrap-root / license-key / release-key 私钥永远不进入 SDK；SDK 只持公钥。动态模式由
+  `BootstrapPublicKeys` 验 keyset，再从加锁快照取工作公钥；provision token 已删除且不得恢复。
+  客户端 Ed25519 私钥、`activationToken`、业务信封与 keyset 只允许经 `Store` 保存，不出本机、不进日志。
 - HTTP 现有签名 canonical 不得因 gRPC 上线而改变；gRPC 使用独立、明确版本化的 canonical，
   两种协议共用同一激活记录、公钥、token 与 nonce 防重放存储。
 - 日志不得输出完整 token、JWT、私钥、请求签名和指纹；指纹最多记录前 8 位。

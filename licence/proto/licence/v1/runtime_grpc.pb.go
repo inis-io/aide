@@ -34,10 +34,9 @@ type LicenseRuntimeServiceClient interface {
 	Activate(ctx context.Context, in *ActivateRequest, opts ...grpc.CallOption) (*RuntimeResponse, error)
 	Validate(ctx context.Context, in *ValidateRequest, opts ...grpc.CallOption) (*RuntimeResponse, error)
 	Current(ctx context.Context, in *CurrentLicenseRequest, opts ...grpc.CallOption) (*RuntimeResponse, error)
-	// ProvisionByPlan - 装机自动申领（匿名 Public；官方二进制内写死项目编号与项目级签发令牌，
-	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发）。
-	// 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已整体下线，
-	// 旧客户端按模板编码申领一律返回 TEMPLATE_DEPRECATED。
+	// ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
+	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
+	// 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
 	ProvisionByPlan(ctx context.Context, in *ProvisionRequest, opts ...grpc.CallOption) (*ProvisionResponse, error)
 }
 
@@ -98,10 +97,9 @@ type LicenseRuntimeServiceServer interface {
 	Activate(context.Context, *ActivateRequest) (*RuntimeResponse, error)
 	Validate(context.Context, *ValidateRequest) (*RuntimeResponse, error)
 	Current(context.Context, *CurrentLicenseRequest) (*RuntimeResponse, error)
-	// ProvisionByPlan - 装机自动申领（匿名 Public；官方二进制内写死项目编号与项目级签发令牌，
-	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发）。
-	// 旧 Provision（模板编码 + 模板级令牌）与 Redeem（激活码兑换）已整体下线，
-	// 旧客户端按模板编码申领一律返回 TEMPLATE_DEPRECATED。
+	// ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
+	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
+	// 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
 	ProvisionByPlan(context.Context, *ProvisionRequest) (*ProvisionResponse, error)
 	mustEmbedUnimplementedLicenseRuntimeServiceServer()
 }

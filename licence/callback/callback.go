@@ -164,6 +164,7 @@ type callbackDedupItem struct {
 // CallbackHandler - 平台回调接收端，实现 http.Handler
 type CallbackHandler struct {
 	options    CallbackOptions
+	publicKeys func() map[string]string // 可选动态公钥快照，事件订阅按次读取
 	mu         sync.Mutex
 	handlers   map[string]CallbackFunc
 	onAny      CallbackFunc
@@ -238,7 +239,11 @@ func (this *CallbackHandler) dispatchEnvelope(ctx context.Context, envelope Call
 		}
 	}()
 
-	publicKey, exists := LicenceRuntime.LookupPublicKey(this.options.PublicKeys, envelope.Payload.KeyVersion)
+	publicKeys := this.options.PublicKeys
+	if this.publicKeys != nil {
+		publicKeys = this.publicKeys()
+	}
+	publicKey, exists := LicenceRuntime.LookupPublicKey(publicKeys, envelope.Payload.KeyVersion)
 	if !exists || !LicenceProtocol.Licence.VerifyRaw(rawPayload, envelope.Signature, publicKey) {
 		return "", errors.New("callback signature verification failed")
 	}
