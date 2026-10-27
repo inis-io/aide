@@ -138,3 +138,73 @@ func TestBootstrapStartLegacyStateWithoutKeysetReturnsActivationError(t *testing
 		t.Fatal("激活失败后不得恢复或保留旧凭证状态")
 	}
 }
+
+// TestBootstrapStartPreservesLegacySeatReleasedWithoutKeyset - 静态模式落盘的席位释放终态
+// 即使缺 keyset 也必须原样恢复，动态模式不得清缓存或自动重激活。
+func TestBootstrapStartPreservesLegacySeatReleasedWithoutKeyset(t *testing.T) {
+	platform := newAutoTestPlatform(t)
+	platform.issue(1, "license-key-v1", false)
+	server := platform.httpServer()
+	dir := t.TempDir()
+	options := platform.options(server.URL, dir)
+	options.PublicKeys = map[string]string{"license-key-v1": platform.licensePublic["license-key-v1"]}
+	options.BootstrapPublicKeys = nil
+	staticClient, err := New(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staticClient.opMu.Lock()
+	if err = staticClient.activateLocked(t.Context()); err != nil {
+		staticClient.opMu.Unlock()
+		t.Fatalf("静态模式制备激活状态失败: %v", err)
+	}
+	staticClient.opMu.Unlock()
+	staticClient.mu.Lock()
+	staticClient.state.SeatNo = "SEAT-LEGACY-001"
+	staticClient.mu.Unlock()
+	if err = staticClient.seatReleased(); err == nil {
+		t.Fatal("seatReleased 应返回既有终态提示")
+	}
+	rawBefore, err := staticClient.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var released runtimeState
+	if err = json.Unmarshal(rawBefore, &released); err != nil {
+		t.Fatal(err)
+	}
+	if released.Status != "SEAT_RELEASED" || (len(released.Envelope) != 0 && string(released.Envelope) != "null") || len(released.Keyset) != 0 ||
+		released.ActivationToken == "" || released.ClientSeed == "" || released.SeatNo == "" || released.ActivationNo == "" {
+		t.Fatalf("席位释放夹具不符合要求: %+v", released)
+	}
+	if err = staticClient.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, _, activationsBefore, _, _ := platform.counts()
+	server.Close()
+	client, store := newLegacyBootstrapClient(t, platform, server.URL, dir)
+
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("SEAT_RELEASED 终态应离线恢复且不得自动激活，实际: %v", err)
+	}
+	if err = client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if store.clearCalls != 0 {
+		t.Fatalf("SEAT_RELEASED 状态不得 store.Clear，实际 %d 次", store.clearCalls)
+	}
+	_, _, activationsAfter, _, _ := platform.counts()
+	if activationsAfter != activationsBefore {
+		t.Fatalf("SEAT_RELEASED 不得自动 activate/Reactivate: before=%d after=%d", activationsBefore, activationsAfter)
+	}
+	if client.Status() != "SEAT_RELEASED" {
+		t.Fatalf("恢复后终态被改变: %s", client.Status())
+	}
+	rawAfter, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rawAfter) != string(rawBefore) {
+		t.Fatal("SEAT_RELEASED 状态文件必须逐字保留 token/ClientSeed/SeatNo/ActivationNo 与状态")
+	}
+}

@@ -580,17 +580,21 @@ func (this *Client) restore() error {
 		return this.store.Clear()
 	}
 	rawKeyset := bytes.TrimSpace(state.Keyset)
-	if len(rawKeyset) == 0 && len(this.options.BootstrapPublicKeys) > 0 {
+	if len(rawKeyset) == 0 && len(this.options.BootstrapPublicKeys) > 0 && state.Status != LicenceProtocol.StatusSeatReleased {
 		// 静态模式旧状态缺少可验根的 keyset，按陈旧缓存清理并落入重新激活。
 		return this.store.Clear()
 	}
 	if len(rawKeyset) > 0 && len(this.options.BootstrapPublicKeys) == 0 {
 		return errors.New("本地缓存 keyset 缺少 bootstrap 根公钥")
 	}
-	candidate, err := this.verifyKeysetCandidate(state.Keyset)
-	if err != nil {
-		return err
+	var candidate *keysetCandidate
+	if len(rawKeyset) > 0 || state.Status != LicenceProtocol.StatusSeatReleased {
+		candidate, err = this.verifyKeysetCandidate(state.Keyset)
+		if err != nil {
+			return err
+		}
 	}
+	// SEAT_RELEASED 无业务信封可验，缺少 keyset 时仍须原样保留终态凭证。
 
 	var envelope LicenceProtocol.Envelope
 	if len(rawEnvelope) > 0 && !bytes.Equal(rawEnvelope, []byte("null")) {
