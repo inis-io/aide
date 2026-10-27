@@ -579,7 +579,12 @@ func (this *Client) restore() error {
 	if (len(rawEnvelope) == 0 || bytes.Equal(rawEnvelope, []byte("null"))) && state.Status != LicenceProtocol.StatusSeatReleased {
 		return this.store.Clear()
 	}
-	if len(bytes.TrimSpace(state.Keyset)) > 0 && len(this.options.BootstrapPublicKeys) == 0 {
+	rawKeyset := bytes.TrimSpace(state.Keyset)
+	if len(rawKeyset) == 0 && len(this.options.BootstrapPublicKeys) > 0 {
+		// 静态模式旧状态缺少可验根的 keyset，按陈旧缓存清理并落入重新激活。
+		return this.store.Clear()
+	}
+	if len(rawKeyset) > 0 && len(this.options.BootstrapPublicKeys) == 0 {
 		return errors.New("本地缓存 keyset 缺少 bootstrap 根公钥")
 	}
 	candidate, err := this.verifyKeysetCandidate(state.Keyset)
