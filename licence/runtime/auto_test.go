@@ -21,22 +21,24 @@ import (
 // autoTestPlatform - AutoStart 双协议假平台，记录申领/挑战/激活次数与指纹。
 type autoTestPlatform struct {
 	*keysetTestPlatform
-	requireFingerprint   bool
-	autoMu               sync.Mutex
-	provisionRequests    int
-	provisioned          int
-	activateRequests     int
-	provisionFingerprint string
-	activateFingerprint  string
+	requireFingerprint     bool
+	autoMu                 sync.Mutex
+	provisionRequests      int
+	provisioned            int
+	activateRequests       int
+	provisionFingerprint   string
+	provisionMigrationCode string
+	activateFingerprint    string
 }
 
 func newAutoTestPlatform(t *testing.T) *autoTestPlatform {
 	return &autoTestPlatform{keysetTestPlatform: newKeysetTestPlatform(t), requireFingerprint: true}
 }
 
-func (this *autoTestPlatform) provision(fingerprint string) (status, salt string) {
+func (this *autoTestPlatform) provision(fingerprint, migrationCode string) (status, salt string) {
 	this.autoMu.Lock()
 	this.provisionRequests++
+	this.provisionMigrationCode = migrationCode
 	if this.requireFingerprint && fingerprint == "" {
 		this.autoMu.Unlock()
 		return "FINGERPRINT_REQUIRED", "zero-salt"
@@ -46,6 +48,12 @@ func (this *autoTestPlatform) provision(fingerprint string) (status, salt string
 	this.autoMu.Unlock()
 	this.issue(1, "license-key-v1", false)
 	return "OK", "zero-salt"
+}
+
+func (this *autoTestPlatform) migrationCode() string {
+	this.autoMu.Lock()
+	defer this.autoMu.Unlock()
+	return this.provisionMigrationCode
 }
 
 func (this *autoTestPlatform) activate(fingerprint string) {
@@ -71,7 +79,7 @@ func (this *autoTestPlatform) httpServer() *httptest.Server {
 				writer.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			status, salt := this.provision(body.FingerprintHash)
+			status, salt := this.provision(body.FingerprintHash, body.MigrationCode)
 			if status != "OK" {
 				writeJson(writer, map[string]any{"status": status, "salt": salt, "serverTime": time.Now().UnixMilli()})
 				return
@@ -110,7 +118,7 @@ type autoGRPCLicenseServer struct {
 }
 
 func (this *autoGRPCLicenseServer) ProvisionByPlan(_ context.Context, request *licencev1.ProvisionRequest) (*licencev1.ProvisionResponse, error) {
-	status, salt := this.platform.provision(request.GetFingerprintHash())
+	status, salt := this.platform.provision(request.GetFingerprintHash(), request.GetMigrationCode())
 	if status != "OK" {
 		return &licencev1.ProvisionResponse{Status: status, Salt: salt, ServerTime: time.Now().UnixMilli()}, nil
 	}
@@ -242,6 +250,48 @@ func TestAutoStartGRPC(t *testing.T) {
 	requests, provisioned, activations, provisionFingerprint, activateFingerprint := platform.counts()
 	if requests != 2 || provisioned != 1 || activations != 1 || provisionFingerprint != activateFingerprint {
 		t.Fatalf("gRPC 首装/挑战次数或指纹异常: %d/%d/%d", requests, provisioned, activations)
+	}
+}
+
+// TestAutoStartWithMigrationCode - 新服务器迁移：AutoOptions.MigrationCode 必须透传到申领请求，
+// 平台签发的许可证参数写入 auto.json。
+func TestAutoStartWithMigrationCode(t *testing.T) {
+
+	platform := newAutoTestPlatform(t)
+	server := platform.httpServer()
+	dir := t.TempDir()
+	result, err := AutoStartWithOptions(t.Context(), AutoOptions{
+		ProjectNo: platform.projectNo, AppVersion: "1.0.0",
+		ServerURL: server.URL, BootstrapPublicKeys: platform.roots(),
+		StorageDir: dir, MigrationCode: "ABCD-EFGH",
+		Provider:        func() (string, error) { return "migrate-machine", nil },
+		DisableCommands: true, DisableConsumptionReport: true, HTTPTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("迁移码 AutoStart 失败: %v", err)
+	}
+	if result.Client == nil {
+		t.Fatal("AutoStart 未返回客户端")
+	}
+	if err = result.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if code := platform.migrationCode(); code != "ABCD-EFGH" {
+		t.Fatalf("迁移码未透传到申领请求: %q", code)
+	}
+	if result.LicenseNo != "LIC-ZERO-000001" || result.Salt != "zero-salt" {
+		t.Fatalf("申领结果映射不符: %s %s", result.LicenseNo, result.Salt)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(dir, autoMetadataFile))
+	if readErr != nil {
+		t.Fatalf("auto.json 未写入: %v", readErr)
+	}
+	var metadata autoMetadata
+	if err = json.Unmarshal(raw, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.LicenseNo != "LIC-ZERO-000001" || metadata.Salt != "zero-salt" {
+		t.Fatalf("auto.json 未写入返回的许可证参数: %+v", metadata)
 	}
 }
 

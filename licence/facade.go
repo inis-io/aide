@@ -137,6 +137,7 @@ type (
 	ProvisionError   = LicenceRuntime.ProvisionError
 	ProvisionOptions = LicenceRuntime.ProvisionOptions
 	ProvisionResult  = LicenceRuntime.ProvisionResult
+	CustomerView     = LicenceRuntime.CustomerView
 )
 
 var ProvisionByPlan = LicenceRuntime.ProvisionByPlan

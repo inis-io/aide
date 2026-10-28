@@ -22,6 +22,8 @@ type ProvisionOptions struct {
 	ProjectNo string
 	// TenantId - SaaS 子租户 ID（可选，0 = 普通装机申领；>0 = 按项目子租户发证档位签发）
 	TenantId int64
+	// MigrationCode - 一次性迁移码（可选；仅新服务器迁移场景使用，为空保持常规 sdk_auto 申领）
+	MigrationCode string
 	// StorageDir - install.sn 持久化目录（默认 ./runtime/licence）
 	StorageDir string
 	// InstallSN - 安装唯一标识（可选；为空时懒生成 UUID v4 并持久化到 StorageDir/install.sn）
@@ -56,6 +58,16 @@ type ProvisionResult struct {
 	Reissued bool
 	// Keyset - bootstrap 根签名的项目工作公钥集合原始 JSON
 	Keyset json.RawMessage
+	// Customer - 客户账号视图（仅许可证已绑定客户账号时下发，未绑定为 nil）
+	Customer *CustomerView
+}
+
+// CustomerView - 许可证已绑定的客户账号视图（仅展示平台下发的脱敏信息）。
+type CustomerView struct {
+	// MaskAccount - 脱敏账号（如 r***@x.com）
+	MaskAccount string
+	// BoundAt - 绑定时间（毫秒）
+	BoundAt int64
 }
 
 // ProvisionError - 申领业务拒绝（errors.As 断言后按 Status 降级处理）。
@@ -98,6 +110,7 @@ func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResul
 	body := provisionBody{
 		ProjectNo: opts.ProjectNo, TenantId: opts.TenantId,
 		InstallSN: installSN, DeviceName: opts.DeviceName,
+		MigrationCode: opts.MigrationCode,
 	}
 	response, err := provisionRequest(ctx, opts, body)
 	if err != nil {
@@ -182,12 +195,18 @@ func finishProvision(response provisionResponse) (ProvisionResult, error) {
 	if strings.TrimSpace(response.LicenseNo) == "" || strings.TrimSpace(response.Salt) == "" {
 		return ProvisionResult{}, errors.New("申领响应缺少许可证参数")
 	}
-	return ProvisionResult{
+	result := ProvisionResult{
 		LicenseNo: response.LicenseNo, Salt: response.Salt,
 		BindingPolicy: response.BindingPolicy, SeatLimit: response.SeatLimit,
 		ExpiresAt: response.ExpiresAt, Reissued: response.Reissued,
 		Keyset: append(json.RawMessage(nil), response.Keyset...),
-	}, nil
+	}
+	if response.Customer != nil {
+		result.Customer = &CustomerView{
+			MaskAccount: response.Customer.MaskAccount, BoundAt: response.Customer.BoundAt,
+		}
+	}
+	return result, nil
 }
 
 // installSNFile - 安装唯一标识持久化文件名。

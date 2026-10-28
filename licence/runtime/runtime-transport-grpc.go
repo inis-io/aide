@@ -198,6 +198,12 @@ func provisionMap(response *licencev1.ProvisionResponse) map[string]any {
 	if len(response.GetKeysetJson()) > 0 {
 		result["keyset"] = json.RawMessage(response.GetKeysetJson())
 	}
+	if customer := response.GetCustomer(); customer != nil {
+		result["customer"] = map[string]any{
+			"maskAccount": customer.GetMaskAccount(),
+			"boundAt":     customer.GetBoundAt(),
+		}
+	}
 	return result
 }
 
@@ -464,6 +470,7 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			ProjectNo: input.ProjectNo, TenantId: input.TenantId,
 			InstallSn: input.InstallSN, FingerprintHash: input.FingerprintHash,
 			DeviceName: input.DeviceName, ClientTime: input.ClientTime,
+			MigrationCode: input.MigrationCode,
 		}
 		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_ProvisionByPlan_FullMethodName, request, false)
 		if err != nil {

@@ -34,6 +34,7 @@ type validateBody struct {
 
 // provisionBody - 装机自动申领请求体（sdk_auto：projectNo + installSN 定位，无项目级令牌）。
 // tenantId 缺省 0 = 普通装机申领，>0 = SaaS 子租户发证（omitempty 不上送零值）。
+// migrationCode 为末位字段：新增字段只能追加在结构体末尾，既有 JSON 键序不得变化。
 type provisionBody struct {
 	ProjectNo       string `json:"projectNo"`
 	TenantId        int64  `json:"tenantId,omitempty"`
@@ -41,20 +42,28 @@ type provisionBody struct {
 	FingerprintHash string `json:"fingerprintHash,omitempty"`
 	DeviceName      string `json:"deviceName,omitempty"`
 	ClientTime      int64  `json:"clientTime,omitempty"`
+	MigrationCode   string `json:"migrationCode,omitempty"`
 }
 
 // provisionResponse - 装机自动申领统一响应（契约 §6；status 为业务状态码）
 type provisionResponse struct {
-	Status        string          `json:"status"`
-	ServerTime    int64           `json:"serverTime"`
-	LicenseNo     string          `json:"licenseNo"`
-	Salt          string          `json:"salt"`
-	BindingPolicy string          `json:"bindingPolicy"`
-	SeatLimit     int             `json:"seatLimit"`
-	ExpiresAt     int64           `json:"expiresAt"`
-	Reissued      bool            `json:"reissued"`
-	Keyset        json.RawMessage `json:"keyset"`
-	Message       string          `json:"message"`
+	Status        string            `json:"status"`
+	ServerTime    int64             `json:"serverTime"`
+	LicenseNo     string            `json:"licenseNo"`
+	Salt          string            `json:"salt"`
+	BindingPolicy string            `json:"bindingPolicy"`
+	SeatLimit     int               `json:"seatLimit"`
+	ExpiresAt     int64             `json:"expiresAt"`
+	Reissued      bool              `json:"reissued"`
+	Keyset        json.RawMessage   `json:"keyset"`
+	Message       string            `json:"message"`
+	Customer      *customerViewJSON `json:"customer,omitempty"`
+}
+
+// customerViewJSON - 客户账号视图线格式（平台未绑定客户账号时整体缺省）。
+type customerViewJSON struct {
+	MaskAccount string `json:"maskAccount"`
+	BoundAt     int64  `json:"boundAt"`
 }
 
 // runtimeResponse - 运行面统一响应（keyset 与 envelope 均为原始 JSON，验签后原子替换缓存）

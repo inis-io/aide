@@ -26,6 +26,8 @@ type AutoOptions struct {
 	BootstrapPublicKeys map[string]string
 	// TenantId - SaaS 子租户 ID（可选，语义同 ProvisionOptions.TenantId）。
 	TenantId int64
+	// MigrationCode - 一次性迁移码（可选；仅新服务器迁移场景使用，为空保持常规 sdk_auto 申领）。
+	MigrationCode string
 	// StorageDir - auto.json、install.sn 与加密运行状态的存储目录（默认 ./runtime/licence）。
 	StorageDir string
 	// InstallSN - 安装唯一标识（可选，为空时懒生成并持久化）。
@@ -128,6 +130,7 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 			StorageDir: opts.StorageDir, InstallSN: opts.InstallSN, DeviceName: opts.DeviceName,
 			Fingerprint: opts.Fingerprint, Provider: opts.Provider,
 			Transport: opts.Transport, GRPC: opts.GRPC, HTTPTimeout: opts.HTTPTimeout,
+			MigrationCode: opts.MigrationCode,
 		})
 		if provisionErr != nil {
 			return AutoResult{}, provisionErr
