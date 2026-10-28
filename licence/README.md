@@ -12,6 +12,7 @@
 2. [安装](#2-安装)
 3. [快速开始：许可证激活与授权校验（运行面）](#3-快速开始许可证激活与授权校验运行面)
    - [自动申领、指纹挑战与本地恢复](#31-自动申领指纹挑战与本地恢复)
+   - [迁移码接管与客户账号绑定](#32-迁移码接管与客户账号绑定)
 4. [授权状态与降级策略](#4-授权状态与降级策略)
    - [多机席位（一 Client 一机一席）](#41-多机席位一-client-一机一席)
 5. [在线更新（更新代理/自更新程序用）](#5-在线更新更新代理自更新程序用)
@@ -158,6 +159,41 @@ result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
 ```
 
 需要分别编排申领与客户端时仍可调用 `ProvisionByPlan`（`projectNo + installSN`，无 token），其 `ProvisionResult.Keyset` 保留平台原始 JSON；调用方必须先验 keyset，再把许可证参数交给 `New + Start`。通常直接使用 `AutoStart` 即可。
+
+### 3.2 迁移码接管与客户账号绑定
+
+**新服务器接管既有授权（迁移码）**：迁移码由 licen-hub 客户门户生成，**一次性、15 分钟有效**，绑定固定项目与既有许可证。把它交给 `AutoOptions.MigrationCode` 即可：
+
+```go
+result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
+	ProjectNo:     "PRJ-20260815-705406",
+	AppVersion:    "2.3.1",
+	MigrationCode: migrationCode, // 由客户门户生成；留空 = 常规零配置 sdk_auto 申领
+})
+```
+
+- `MigrationCode` 为空时行为与普通零配置申领**完全一致**（请求体不出现该字段，逐字节不变）。
+- 携带迁移码时平台**返回既有许可证**（不新建、不消耗 sdk_auto 配额），旧机器席位被释放、旧激活被吊销；旧实例下一次 `validate`/`current` 收到 `SEAT_RELEASED`，需显式 `Reactivate`/`Reset` 才能恢复。
+- 迁移失败（码错误/过期/撤销/席位状态冲突）以 `*ProvisionError` 原样返回，`Status` 为 `MIGRATION_INVALID`，平台统一文案「迁移码无效或已过期」（不区分码不存在/账号/许可证，防枚举）；失败不改变现有授权状态。
+- 申领响应在许可证已绑定客户账号时附带 `ProvisionResult.Customer`（`*CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`。
+
+**客户账号绑定（绑定码）**：已激活实例可用一次性绑定码把许可证归属到 licen-hub 客户账号（客户门户生成，一次性、默认 10 分钟有效）。接口走 activation-sign-v1 请求签名（凭证族与 activate 同级，必须已激活）：
+
+```go
+bound, err := client.CustomerBind(ctx, bindCode)
+if err != nil {
+	var rejected *licence.ProvisionError
+	if errors.As(err, &rejected) && rejected.Status == "BIND_INVALID" {
+		// 绑定码无效或已过期：提示重新生成，不要重试同一码
+	}
+	panic(err)
+}
+fmt.Println(bound.MaskAccount, bound.BoundAt) // r***@x.com 1786800000000
+```
+
+- 成功返回脱敏客户视图 `CustomerBindResult{MaskAccount, BoundAt}`（毫秒），平台只下发脱敏账号，不返回完整邮箱/手机号。
+- 未激活（无 activation token）直接报错「客户端未激活，无法绑定客户账号」，不发请求。
+- 绑定失败不会改变本地授权状态；连接层 404（模糊语义）与空 body 统一归一为「许可证或实例信息无效」。
 
 > **旧契约已移除**：授权模板、激活码和 provision token 均已下线。旧 `Provision` / `Redeem` 不再存在；sdk_auto 直接用 `ProjectNo`，不再保留令牌配置入口。商业授权改走套餐在线购买（`PlansCatalog` / 套餐订单）。
 
@@ -721,6 +757,7 @@ type Options struct {
 | `ReportUsage` | `func (this *Client) ReportUsage(usage map[string]int64)` | 用量上报：合并进待上报表，随下次 validate 携带，服务端确认后清空 |
 | `Reactivate` | `func (this *Client) Reactivate(ctx context.Context) error` | 重新激活（换机/令牌丢失/EXPIRED 引导路径）：生成新客户端密钥对重新绑定，旧公钥随旧激活记录失效 |
 | `Current` | `func (this *Client) Current(ctx context.Context) (Envelope, error)` | 按需拉取当前生效信封（不做滑动刷新；失败返回错误，不影响本地缓存） |
+| `CustomerBind` | `func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBindResult, error)` | 用一次性绑定码把许可证归属到客户账号（需已激活，走 activation-sign-v1 签名）；成功返回脱敏账号与绑定时间，业务拒绝返回 `*ProvisionError`（如 `BIND_INVALID`），见 §3.2 |
 
 典型接入：
 
@@ -744,13 +781,14 @@ if !client.CheckVersion("2.3.1") { /* 当前版本不在授权范围 */ }
 
 ### 17.4 装机自动申领（包级函数 ProvisionByPlan）
 
-> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用。sdk_auto 仅以 `projectNo + installSN` 定位，**没有 ProvisionToken 参数**。HTTP 与 gRPC 共用响应语义；proto 的字段号 2 与 `provision_token` 名称已永久 reserved。请求字段为 `project_no` / `tenant_id` / `install_sn` / `fingerprint_hash` / `device_name` / `client_time`。
+> 包级函数，无需 `Client` 实例；在 `New`/`Start` 之前调用。sdk_auto 仅以 `projectNo + installSN` 定位，**没有 ProvisionToken 参数**。HTTP 与 gRPC 共用响应语义；proto 的字段号 2 与 `provision_token` 名称已永久 reserved。请求字段为 `project_no` / `tenant_id` / `install_sn` / `fingerprint_hash` / `device_name` / `client_time` / `migration_code`（末位，可选；`omitempty`，留空时请求体逐字节与旧版一致）。
 
 ```go
 type ProvisionOptions struct {
     ServerURL      string        // 平台地址（必填）
     ProjectNo      string        // 项目编号（必填）
     TenantId       int64         // SaaS 子租户 ID（可选）
+    MigrationCode  string        // 一次性迁移码（可选；为空保持常规 sdk_auto 申领）
     StorageDir     string        // install.sn 持久化目录（默认 ./runtime/licence）
     InstallSN      string        // 安装唯一标识（可选，为空懒生成 UUID v4 并持久化）
     DeviceName     string        // 机器名称（可选）
@@ -768,9 +806,14 @@ type ProvisionResult struct {
     ExpiresAt     int64
     Reissued      bool
     Keyset        json.RawMessage // bootstrap 根签名的原始 JSON，交给 New 前必须验证
+    Customer      *CustomerView   // 许可证已绑定客户账号时下发，未绑定为 nil
+}
+type CustomerView struct {
+    MaskAccount string // 脱敏账号（如 r***@x.com）
+    BoundAt     int64  // 绑定时间（毫秒）
 }
 type ProvisionError struct {
-    Status  string // FINGERPRINT_REQUIRED / QUOTA_EXCEEDED / RATE_LIMITED / ...
+    Status  string // FINGERPRINT_REQUIRED / MIGRATION_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
     Message string
 }
 ```
@@ -1769,14 +1812,14 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `protocol/version-range.go` | 版本范围表达式判定 |
 | `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `runtime/store.go` | 安全存储接口与默认加密文件实现 |
-| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报 |
+| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报、客户账号绑定（`CustomerBind`） |
 | `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、keyset 与信封原子提交、HTTP/gRPC 双传输 |
 | `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
 | `runtime/auto.go` / `defaults.go` | `AutoStart` / `AutoStartWithOptions`、`auto.json`、官方地址与 bootstrap 根 |
-| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战，HTTP/gRPC 双协议） |
+| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战；可选 `MigrationCode` 接管既有许可证，响应可带已绑定客户视图 `Customer`，HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |

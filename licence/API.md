@@ -17,6 +17,7 @@
 7. [运行面客户端 Client](#7-运行面客户端-client)
    - [项目套餐（在售目录与套餐订单）](#76-项目套餐在售目录与套餐订单)
    - [远程指令（实例指令通道）](#77-远程指令实例指令通道)
+   - [客户账号绑定（CustomerBind）](#79-客户账号绑定customerbind)
 8. [在线更新模块](#8-在线更新模块)
 9. [SaaS 多租户接口](#9-saas-多租户接口)
 10. [管理面客户端 AdminClient](#10-管理面客户端-adminclient)
@@ -633,6 +634,7 @@ type AutoOptions struct {
     ServerURL          string            // 缺省 DefaultServerURL
     BootstrapPublicKeys map[string]string // 缺省 DefaultBootstrapPublicKeys
     TenantId           int64
+    MigrationCode      string            // 一次性迁移码（可选；为空保持常规 sdk_auto 申领）
     StorageDir         string            // 默认 ./runtime/licence
     InstallSN          string
     InstanceNo         string
@@ -657,7 +659,67 @@ type AutoOptions struct {
 
 执行顺序：读取 `auto.json` → 无元数据才 `ProvisionByPlan` → 验证 keyset → 写非机密元数据 → 复用 `New + Start` → 从签名信封回填 `InstanceNo`。强制指纹项目自动用挑战盐计算与激活一致的指纹，并复用 installSN 重试一次。任何失败原样返回，不得包装成激活成功。
 
-低层 `ProvisionByPlan(ctx, ProvisionOptions)` 仍可独立使用；`ProvisionOptions` 已无 `ProvisionToken`，新增 `Fingerprint/Provider`，`ProvisionResult` 新增 `Keyset json.RawMessage`。直接使用低层入口时，调用方必须先 `VerifyKeyset`，不得把匿名公钥列表当作信任根。
+低层 `ProvisionByPlan(ctx, ProvisionOptions)` 仍可独立使用；`ProvisionOptions` 已无 `ProvisionToken`，新增 `Fingerprint/Provider/MigrationCode`，`ProvisionResult` 新增 `Keyset json.RawMessage` 与 `Customer *CustomerView`。直接使用低层入口时，调用方必须先 `VerifyKeyset`，不得把匿名公钥列表当作信任根。
+
+**迁移码（新服务器接管既有授权）**：`MigrationCode` 只在首次申领生效（`auto.json` 恢复的后续启动不再申领），语义与契约见 README §3.2：
+
+```go
+result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
+	ProjectNo:     "PRJ-20260815-705406",
+	AppVersion:    "2.3.1",
+	MigrationCode: migrationCode, // licen-hub 客户门户生成，一次性、15 分钟有效；留空 = 常规零配置
+})
+if err != nil {
+	var rejected *licence.ProvisionError
+	if errors.As(err, &rejected) && rejected.Status == "MIGRATION_INVALID" {
+		// 迁移码无效或已过期（平台统一文案，防枚举）；不改变现有授权状态
+	}
+	panic(err)
+}
+defer result.Client.Close() // AutoStart 已 Start，不再使用时必须 Close
+```
+
+- 请求体 `migrationCode` 为末位可选字段（`omitempty`）：留空时与旧版请求逐字节一致，平台按常规 sdk_auto 处理。
+- 携带迁移码成功时平台返回**既有许可证**（`LicenseNo/Salt`），不新建、不消耗 sdk_auto 配额；旧席位释放、旧激活吊销（旧实例下一次 validate/current 收到 `SEAT_RELEASED`）。
+- 申领响应在许可证已绑定客户账号时附带 `result.Customer`（`*licence.CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`；该视图只是展示用脱敏信息，不参与授权判定。
+
+### 7.9 客户账号绑定（CustomerBind）
+
+已激活实例用一次性绑定码把许可证归属到 licen-hub 客户账号（客户门户生成，一次性、默认 10 分钟有效）。绑定后平台回填该许可证已支付订单的客户归属，用于客户自助查看授权与套餐订单。
+
+| 方法 | 签名 | 说明 |
+|---|---|---|
+| `CustomerBind` | `func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBindResult, error)` | 消费绑定码。必须已激活（无 activation token 直接报错「客户端未激活，无法绑定客户账号」，不发请求）；走 activation-sign-v1 请求签名（凭证族与 activate 同级，`POST /api/v1/licenses/customer-bind`，gRPC `LicenseRuntimeService/CustomerBind`）；成功返回脱敏客户视图，业务拒绝返回 `*ProvisionError`（如 `BIND_INVALID`） |
+
+```go
+// CustomerBindResult - 绑定成功回执（平台只下发脱敏账号）
+type CustomerBindResult struct {
+    MaskAccount string // 脱敏账号（如 r***@x.com）
+    BoundAt     int64  // 绑定时间（毫秒）
+}
+```
+
+```go
+func bindCustomer(ctx context.Context, client *licence.Client, bindCode string) error {
+	bound, err := client.CustomerBind(ctx, bindCode)
+	if err != nil {
+		var rejected *licence.ProvisionError
+		if errors.As(err, &rejected) && rejected.Status == "BIND_INVALID" {
+			// 绑定码无效或已过期（不区分码不存在/账号/许可证，防枚举）：提示重新生成，勿重试同一码
+		}
+		return err
+	}
+	fmt.Println(bound.MaskAccount, bound.BoundAt)
+	return nil
+}
+```
+
+要点：
+
+- **幂等**：成功响应 `status=OK` + `customer{maskAccount,boundAt}`；绑定码消费即失效，重复提交同一码按 `BIND_INVALID` 拒绝（错误尝试累计到上限后锁定）。
+- **错误归一**：业务拒绝以 `*ProvisionError{Status, Message}` 原样透出，`Status` 为空时 SDK 兜底为 `ERROR`；传输层 404 与空 body 统一归一为「许可证或实例信息无效」（模糊语义，不泄露存在性），其余非 200 返回「客户绑定请求失败（HTTP …）」。
+- **不改授权状态**：绑定失败不清信封、不改 `Status()`；成功后授权判定仍以签名信封为准，`customer` 仅作展示。
+- **双协议**：HTTP 与 gRPC 同形响应，协议矩阵见 `proto/licence/v1/protocol-matrix.yaml` 的 `Client.CustomerBind` 行（domain `license`、action `write`、风险 `critical`、非幂等、附加响应字段 `customer`）。
 
 ---
 
@@ -1440,14 +1502,14 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `protocol/version-range.go` | 版本范围表达式判定 |
 | `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `runtime/store.go` | 安全存储接口与默认加密文件实现 |
-| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报 |
+| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报、客户账号绑定（`CustomerBind`） |
 | `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、keyset 与信封原子提交、HTTP/gRPC 双传输 |
 | `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
 | `runtime/auto.go` / `defaults.go` | `AutoStart` / `AutoStartWithOptions`、`auto.json`、官方地址与 bootstrap 根 |
-| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战，HTTP/gRPC 双协议） |
+| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战；可选 `MigrationCode` 接管既有许可证，响应可带已绑定客户视图 `Customer`，HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |

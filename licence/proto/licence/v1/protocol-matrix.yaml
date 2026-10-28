@@ -4,12 +4,23 @@ defaults:
   transport_fallback: false
   envelope: raw_json_bytes
   keyset: bootstrap_signed_raw_json
+# 许可证运行面/管理面协议矩阵（强制维护）。运行面行列序固定 11 列（末列可省略），
+# 由同目录 protocol_matrix_test.go 校验 RPC 覆盖与 SDK 传输绑定：
+#   0 SDK 方法  1 HTTP 方法  2 HTTP 路径  3 gRPC full method
+#   4 认证（public 匿名 / activation-sign-v1 = 许可证凭证 + Ed25519 请求签名）
+#   5 权限码（运行面身份由许可证凭证推导，不进 IAM 权限码体系，留空）
+#   6 数据域  7 操作（read / write）  8 风险（normal / high / critical）
+#   9 幂等（true 可重放 / false 非幂等）
+#   10 附加字段（可选；该行特有的请求/响应字段，如 keyset 恒为响应字段、
+#      customer 为客户视图响应字段 customer{maskAccount,boundAt}——字段口径以 licen-hub
+#      docs/md/license-core/许可证运行面接口契约.md 为准，改行前先对齐契约）
 runtime:
   # keyset = 响应附带 bootstrap 根签名的项目工作公钥集合；HTTP 字段 keyset，gRPC 字段 keyset_json bytes。
   - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, "deviceName,keyset"]
+  # migrationCode = 请求末位可选字段（omitempty；为空请求体逐字节不变），成功返回既有许可证与 customer 视图。
   - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false, keyset]
   # 客户账号绑定（一次性绑定码，由 licen-hub 客户门户签发；activation-sign-v1 实例签名防重放，
-  # 与 activate 同级别）；成功返回脱敏 customer 视图，码消费即失效、重复提交按 BIND_INVALID 拒绝。
+  # 与 activate 同级别）；成功返回脱敏 customer 视图（契约 §12.3），码消费即失效、重复提交按 BIND_INVALID 拒绝。
   - [Client.CustomerBind, POST, /api/v1/licenses/customer-bind, LicenseRuntimeService/CustomerBind, activation-sign-v1, "", license, write, critical, false, customer]
   - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, keyset]
   - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true, keyset]
