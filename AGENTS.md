@@ -216,6 +216,7 @@ cd openpay && go build ./... && go vet ./... && go test ./...   # openpay 模块
 
 - 文件编码：UTF-8
 - 注释语言：中文
+- 提交信息与 tag 注解：一律使用中文（Conventional Commits 类型前缀 `feat/fix/docs` 等保留英文关键字），**这是硬性要求**
 - 时区：UTC+8（北京时间）
 - local：简体中文
 - 每次输出内容前，必须先问候：`🚀 你好，兔子！`
