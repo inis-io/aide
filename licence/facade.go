@@ -142,6 +142,12 @@ type (
 
 var ProvisionByPlan = LicenceRuntime.ProvisionByPlan
 
+// ============================= 客户账号绑定（镜像 runtime 包） =============================
+
+type (
+	CustomerBindResult = LicenceRuntime.CustomerBindResult
+)
+
 // ============================= projectNo-only 自动授权（镜像 runtime 包） =============================
 
 var (
