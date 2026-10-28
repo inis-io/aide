@@ -13,6 +13,9 @@ service LicenseRuntimeService {
   // 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
   // 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
   rpc ProvisionByPlan(ProvisionRequest) returns (ProvisionResponse);
+  // CustomerBind - 客户账号绑定（一次性绑定码；activation-sign-v1 实例签名防重放）。
+  // 绑定成功后许可证归属客户账号，后续 provision 响应经 customer 视图下发脱敏账号。
+  rpc CustomerBind(CustomerBindRequest) returns (CustomerBindResponse);
 }
 
 // UpdateRuntimeService - 在线更新运行面。
@@ -96,6 +99,8 @@ message ProvisionRequest {
   string device_name = 5;
   // client_time - 客户端当前时间（毫秒，可选）
   int64 client_time = 6;
+  // migration_code - 一次性迁移码（可选；携带时平台返回既有许可证、不消耗 sdk_auto 配额）
+  string migration_code = 9;
 }
 
 // RedeemRequest（商业激活码兑换请求）已随「激活码体系整体下线」删除：激活码兑换不再存在。
@@ -116,6 +121,30 @@ message ProvisionResponse {
   string message = 9;
   // keyset_json - bootstrap 根签名的项目工作公钥集合原文。
   bytes keyset_json = 10;
+  // customer - 客户账号视图（仅许可证已绑定客户账号时下发，未绑定为 null）
+  ProvisionCustomerView customer = 11;
+}
+
+// ProvisionCustomerView - 许可证已绑定的客户账号视图（仅展示脱敏信息）。
+message ProvisionCustomerView {
+  // mask_account - 脱敏账号（如 r***@x.com）
+  string mask_account = 1;
+  // bound_at - 绑定时间（毫秒）
+  int64 bound_at = 2;
+}
+
+// CustomerBindRequest - 客户账号绑定请求。
+message CustomerBindRequest {
+  // code - 一次性绑定码
+  string code = 1;
+}
+
+// CustomerBindResponse - 客户账号绑定响应。
+message CustomerBindResponse {
+  string status = 1;
+  string message = 2;
+  // customer - 绑定成功后的客户账号视图
+  ProvisionCustomerView customer = 3;
 }
 
 // RuntimeResponse - 许可证运行面统一响应。
