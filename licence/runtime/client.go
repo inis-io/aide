@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/inis-io/aide/licence/apis"
 	LicenceProtocol "github.com/inis-io/aide/licence/protocol"
 	"math"
@@ -479,11 +480,19 @@ func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBind
 	if err != nil {
 		return CustomerBindResult{}, err
 	}
+	// 非 200 不解析 body：404（gRPC NotFound 经传输层归一为 404 + nil body）与空 body
+	// 统一按模糊语义归一，其余状态码返回传输层错误，避免把空 body 的 JSON 解析错误抛给调用方
+	if statusCode != http.StatusOK {
+		if statusCode == http.StatusNotFound || len(raw) == 0 {
+			return CustomerBindResult{}, errors.New("许可证或实例信息无效")
+		}
+		return CustomerBindResult{}, fmt.Errorf("客户绑定请求失败（HTTP %d）", statusCode)
+	}
 	var response customerBindResponse
 	if err = json.Unmarshal(raw, &response); err != nil {
 		return CustomerBindResult{}, err
 	}
-	if statusCode != http.StatusOK || response.Status != "OK" {
+	if response.Status != "OK" {
 		status := response.Status
 		if status == "" {
 			status = "ERROR"

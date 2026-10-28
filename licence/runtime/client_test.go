@@ -106,6 +106,8 @@ type fakePlatform struct {
 	customerBindMessage string
 	// customerBindCalls - 客户绑定调用计数
 	customerBindCalls int
+	// customerBindCode - 非 0 时客户绑定直接返回该 HTTP 状态码 + 空 body（404 模糊语义模拟）
+	customerBindCode int
 	// server - httptest 实例
 	server *httptest.Server
 }
@@ -415,6 +417,10 @@ func (this *fakePlatform) handleCustomerBind(writer http.ResponseWriter, request
 		"nonce":     request.Header.Get("X-License-Nonce"),
 		"signature": request.Header.Get("X-License-Sign"),
 	})
+	if this.customerBindCode != 0 {
+		writer.WriteHeader(this.customerBindCode)
+		return
+	}
 	if this.customerBindStatus != "" && this.customerBindStatus != "OK" {
 		writeJson(writer, map[string]any{
 			"status": this.customerBindStatus, "serverTime": time.Now().UnixMilli(), "message": this.customerBindMessage,
@@ -1735,5 +1741,26 @@ func TestClientCustomerBindNotActivated(t *testing.T) {
 	platform.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("未激活不应发起绑定请求，实际 %d 次", calls)
+	}
+}
+
+// TestClientCustomerBindNotFound - 平台 404（许可证已删除/路由模糊语义）与空 body
+// 统一归一为「许可证或实例信息无效」，不得把空 body 的 JSON 解析错误抛给调用方。
+func TestClientCustomerBindNotFound(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	platform.customerBindCode = http.StatusNotFound
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	_, err = client.CustomerBind(t.Context(), "ABCD-EFGH")
+	if err == nil || err.Error() != "许可证或实例信息无效" {
+		t.Fatalf("404 应归一为「许可证或实例信息无效」，实际 %v", err)
 	}
 }

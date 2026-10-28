@@ -446,10 +446,11 @@ func TestGRPCRuntimeActivateMapsDeviceNameAndSeatNo(t *testing.T) {
 // status 非空且非 OK 时返回业务拒绝（与 HTTP 侧同形的 status/message）。
 type runtimeCustomerBindServer struct {
 	licencev1.UnimplementedLicenseRuntimeServiceServer
-	code    string
-	status  string
-	message string
-	missing []string
+	code     string
+	status   string
+	message  string
+	missing  []string
+	failCode codes.Code
 }
 
 func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request *licencev1.CustomerBindRequest) (*licencev1.CustomerBindResponse, error) {
@@ -461,6 +462,9 @@ func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request
 		}
 	}
 	this.code = request.GetCode()
+	if this.failCode != codes.OK {
+		return nil, status.Error(this.failCode, "许可证或实例信息无效")
+	}
 	status := this.status
 	if status == "" {
 		status = "OK"
@@ -533,5 +537,17 @@ func TestGRPCCustomerBindRejected(t *testing.T) {
 	}
 	if provisionErr.Status != "BIND_INVALID" || provisionErr.Message != "绑定码无效或已过期" {
 		t.Fatalf("gRPC 业务拒绝透传不符: %+v", provisionErr)
+	}
+}
+
+// TestGRPCCustomerBindNotFound - gRPC NotFound（许可证已删除）经 transport 归一为 404 + 空 body，
+// 公开方法必须返回「许可证或实例信息无效」而非空 body 的 JSON 解析错误。
+func TestGRPCCustomerBindNotFound(t *testing.T) {
+
+	server := &runtimeCustomerBindServer{failCode: codes.NotFound}
+	client := newCustomerBindGRPCClient(t, server)
+	_, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
+	if err == nil || err.Error() != "许可证或实例信息无效" {
+		t.Fatalf("gRPC NotFound 应归一为「许可证或实例信息无效」，实际 %v", err)
 	}
 }
