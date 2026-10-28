@@ -137,7 +137,7 @@ func main() {
 }
 ```
 
-第三个参数 `appVersion` 可省略且最多一个；为空不影响授权，但 `CheckUpdate` 会明确返回“当前版本不能为空”。返回的 `AutoResult` 还包含 `Salt`；`Provisioned` 仅本次实际执行申领时为 true。
+第三个参数 `appVersion` 可省略且最多一个；为空不影响授权，但 `CheckUpdate` 会明确返回“当前版本不能为空”。返回的 `AutoResult` 还包含 `Salt` 与 `Customer`（许可证已绑定客户账号时的脱敏视图，恢复路径为 `nil`）；`Provisioned` 仅本次实际执行申领时为 true。
 
 启动后 SDK 自动完成：每 12 小时滑动刷新（可配）、逐请求 Ed25519 签名、断网离线降级，以及 license/release 工作密钥轮换。所有网络响应先验 bootstrap 根签署的 keyset，再验业务信封，二者通过才提交。
 
@@ -162,7 +162,7 @@ result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
 
 ### 3.2 迁移码接管与客户账号绑定
 
-**新服务器接管既有授权（迁移码）**：迁移码由 licen-hub 客户门户生成，**一次性、15 分钟有效**，绑定固定项目与既有许可证。把它交给 `AutoOptions.MigrationCode` 即可：
+**新服务器接管既有授权（迁移码）**：迁移码由 licen-hub 客户门户生成，**一次性、15 分钟有效**，绑定固定项目与既有许可证。把它交给 `AutoOptions.MigrationCode` 即可；识别 `MIGRATION_INVALID` 后必须直接返回，**不要**继续落到兜底的 `panic(err)`：
 
 ```go
 result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
@@ -170,12 +170,23 @@ result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
 	AppVersion:    "2.3.1",
 	MigrationCode: migrationCode, // 由客户门户生成；留空 = 常规零配置 sdk_auto 申领
 })
+if err != nil {
+	var rejected *licence.ProvisionError
+	if errors.As(err, &rejected) && rejected.Status == "MIGRATION_INVALID" {
+		// 迁移码无效或已过期：提示重新生成，不要重试同一码；现有授权状态未变
+		return err
+	}
+	panic(err) // 其余错误（网络、keyset 验签等）按部署环境自行处置
+}
+defer result.Client.Close() // AutoStart 已 Start，不再使用时必须 Close
 ```
 
 - `MigrationCode` 为空时行为与普通零配置申领**完全一致**（请求体不出现该字段，逐字节不变）。
+- `MigrationCode` 只在**首次申领**（`StorageDir` 下没有 `auto.json`）时生效；`auto.json` 已存在时该字段被静默忽略（启动直接恢复，不再申领），要重新接管请先清理本机元数据与运行状态。
+- **平台前置**：迁移能力要求 licen-hub 平台先升级到支持 `migration_code` 的版本；旧平台会静默忽略该字段并退化为常规新签发（不报错，但拿不到既有许可证），迁移前请先确认平台版本。
 - 携带迁移码时平台**返回既有许可证**（不新建、不消耗 sdk_auto 配额），旧机器席位被释放、旧激活被吊销；旧实例下一次 `validate`/`current` 收到 `SEAT_RELEASED`，需显式 `Reactivate`/`Reset` 才能恢复。
 - 迁移失败（码错误/过期/撤销/席位状态冲突）以 `*ProvisionError` 原样返回，`Status` 为 `MIGRATION_INVALID`，平台统一文案「迁移码无效或已过期」（不区分码不存在/账号/许可证，防枚举）；失败不改变现有授权状态。
-- 申领响应在许可证已绑定客户账号时附带 `ProvisionResult.Customer`（`*CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`。
+- 申领响应在许可证已绑定客户账号时附带客户视图，`ProvisionResult.Customer` 与 `AutoResult.Customer`（`*CustomerView{MaskAccount, BoundAt}`）同源；未绑定为 `nil`，`auto.json` 恢复路径没有申领响应，同样为 `nil`。
 
 **客户账号绑定（绑定码）**：已激活实例可用一次性绑定码把许可证归属到 licen-hub 客户账号（客户门户生成，一次性、默认 10 分钟有效）。接口走 activation-sign-v1 请求签名（凭证族与 activate 同级，必须已激活）：
 
@@ -185,15 +196,16 @@ if err != nil {
 	var rejected *licence.ProvisionError
 	if errors.As(err, &rejected) && rejected.Status == "BIND_INVALID" {
 		// 绑定码无效或已过期：提示重新生成，不要重试同一码
+		return err
 	}
-	panic(err)
+	panic(err) // 其余错误（网络、未激活等）按部署环境自行处置
 }
 fmt.Println(bound.MaskAccount, bound.BoundAt) // r***@x.com 1786800000000
 ```
 
 - 成功返回脱敏客户视图 `CustomerBindResult{MaskAccount, BoundAt}`（毫秒），平台只下发脱敏账号，不返回完整邮箱/手机号。
 - 未激活（无 activation token）直接报错「客户端未激活，无法绑定客户账号」，不发请求。
-- 绑定失败不会改变本地授权状态；连接层 404（模糊语义）与空 body 统一归一为「许可证或实例信息无效」。
+- 绑定失败不会改变本地授权状态；连接层 404（模糊语义）归一为「许可证或实例信息无效」，其余非 200（含网关 502/504 的空响应）返回「客户绑定请求失败（HTTP …）」，不把非凭证故障误报成凭证终态。
 
 > **旧契约已移除**：授权模板、激活码和 provision token 均已下线。旧 `Provision` / `Redeem` 不再存在；sdk_auto 直接用 `ProjectNo`，不再保留令牌配置入口。商业授权改走套餐在线购买（`PlansCatalog` / 套餐订单）。
 

@@ -29,6 +29,7 @@ type autoTestPlatform struct {
 	provisionFingerprint   string
 	provisionMigrationCode string
 	activateFingerprint    string
+	customer               *CustomerView
 }
 
 func newAutoTestPlatform(t *testing.T) *autoTestPlatform {
@@ -69,6 +70,20 @@ func (this *autoTestPlatform) counts() (requests, provisioned, activations int, 
 	return this.provisionRequests, this.provisioned, this.activateRequests, this.provisionFingerprint, this.activateFingerprint
 }
 
+// setCustomer - 让申领响应携带客户账号视图（迁移/已绑定场景平台会下发）。
+func (this *autoTestPlatform) setCustomer(customer *CustomerView) {
+	this.autoMu.Lock()
+	this.customer = customer
+	this.autoMu.Unlock()
+}
+
+// customerView - 读取当前应下发的客户视图。
+func (this *autoTestPlatform) customerView() *CustomerView {
+	this.autoMu.Lock()
+	defer this.autoMu.Unlock()
+	return this.customer
+}
+
 func (this *autoTestPlatform) httpServer() *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
@@ -85,11 +100,15 @@ func (this *autoTestPlatform) httpServer() *httptest.Server {
 				return
 			}
 			keysetRaw, _, _ := this.snapshot()
-			writeJson(writer, map[string]any{
+			response := map[string]any{
 				"status": status, "salt": salt, "serverTime": time.Now().UnixMilli(),
 				"licenseNo": "LIC-ZERO-000001", "bindingPolicy": "single", "seatLimit": 1,
 				"expiresAt": time.Now().Add(time.Hour).UnixMilli(), "keyset": keysetRaw,
-			})
+			}
+			if customer := this.customerView(); customer != nil {
+				response["customer"] = map[string]any{"maskAccount": customer.MaskAccount, "boundAt": customer.BoundAt}
+			}
+			writeJson(writer, response)
 		case "/api/v1/licenses/activate":
 			var body activateBody
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
@@ -123,10 +142,14 @@ func (this *autoGRPCLicenseServer) ProvisionByPlan(_ context.Context, request *l
 		return &licencev1.ProvisionResponse{Status: status, Salt: salt, ServerTime: time.Now().UnixMilli()}, nil
 	}
 	keysetRaw, _, _ := this.platform.snapshot()
-	return &licencev1.ProvisionResponse{
+	response := &licencev1.ProvisionResponse{
 		Status: status, Salt: salt, ServerTime: time.Now().UnixMilli(), LicenseNo: "LIC-ZERO-000001",
 		BindingPolicy: "single", SeatLimit: 1, ExpiresAt: time.Now().Add(time.Hour).UnixMilli(), KeysetJson: keysetRaw,
-	}, nil
+	}
+	if customer := this.platform.customerView(); customer != nil {
+		response.Customer = &licencev1.ProvisionCustomerView{MaskAccount: customer.MaskAccount, BoundAt: customer.BoundAt}
+	}
+	return response, nil
 }
 func (this *autoGRPCLicenseServer) Activate(_ context.Context, request *licencev1.ActivateRequest) (*licencev1.RuntimeResponse, error) {
 	this.platform.activate(request.GetFingerprintHash())
@@ -254,10 +277,11 @@ func TestAutoStartGRPC(t *testing.T) {
 }
 
 // TestAutoStartWithMigrationCode - 新服务器迁移：AutoOptions.MigrationCode 必须透传到申领请求，
-// 平台签发的许可证参数写入 auto.json。
+// 平台签发的许可证参数写入 auto.json，平台下发的客户账号视图透传到 AutoResult.Customer。
 func TestAutoStartWithMigrationCode(t *testing.T) {
 
 	platform := newAutoTestPlatform(t)
+	platform.setCustomer(&CustomerView{MaskAccount: "m***@x.com", BoundAt: 1735689600000})
 	server := platform.httpServer()
 	dir := t.TempDir()
 	result, err := AutoStartWithOptions(t.Context(), AutoOptions{
@@ -281,6 +305,9 @@ func TestAutoStartWithMigrationCode(t *testing.T) {
 	}
 	if result.LicenseNo != "LIC-ZERO-000001" || result.Salt != "zero-salt" {
 		t.Fatalf("申领结果映射不符: %s %s", result.LicenseNo, result.Salt)
+	}
+	if result.Customer == nil || result.Customer.MaskAccount != "m***@x.com" || result.Customer.BoundAt != 1735689600000 {
+		t.Fatalf("AutoResult.Customer 未透传申领客户视图: %+v", result.Customer)
 	}
 	raw, readErr := os.ReadFile(filepath.Join(dir, autoMetadataFile))
 	if readErr != nil {

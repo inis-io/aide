@@ -76,6 +76,9 @@ type AutoResult struct {
 	InstanceNo string
 	// Provisioned - 本次调用是否实际执行了申领；auto.json 恢复为 false。
 	Provisioned bool
+	// Customer - 客户账号视图（仅首次申领且平台侧许可证已绑定客户账号时非空，迁移/已绑定
+	// 场景由平台在申领响应中下发；auto.json 恢复路径没有申领响应，恒为 nil）。
+	Customer *CustomerView
 }
 
 // autoMetadata - auto.json 非机密元数据；token、客户端私钥与工作公钥仍由 Store 加密保存。
@@ -124,6 +127,7 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 	}
 	provisioned := !restored
 	var provisionKeyset json.RawMessage
+	var customer *CustomerView
 	if provisioned {
 		provision, provisionErr := ProvisionByPlan(ctx, ProvisionOptions{
 			ServerURL: opts.ServerURL, ProjectNo: opts.ProjectNo, TenantId: opts.TenantId,
@@ -140,6 +144,7 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 			Salt: provision.Salt, InstanceNo: opts.InstanceNo,
 		}
 		provisionKeyset = provision.Keyset
+		customer = provision.Customer
 	}
 
 	client, err := New(Options{
@@ -188,7 +193,7 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 	}
 	return AutoResult{
 		Client: client, LicenseNo: metadata.LicenseNo, Salt: metadata.Salt,
-		InstanceNo: instanceNo, Provisioned: provisioned,
+		InstanceNo: instanceNo, Provisioned: provisioned, Customer: customer,
 	}, nil
 }
 

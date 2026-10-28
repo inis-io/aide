@@ -18,7 +18,7 @@ runtime:
   # keyset = 响应附带 bootstrap 根签名的项目工作公钥集合；HTTP 字段 keyset，gRPC 字段 keyset_json bytes。
   - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, "deviceName,keyset"]
   # migrationCode = 请求末位可选字段（omitempty；为空请求体逐字节不变），成功返回既有许可证与 customer 视图。
-  - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false, keyset]
+  - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false, "keyset,customer"]
   # 客户账号绑定（一次性绑定码，由 licen-hub 客户门户签发；activation-sign-v1 实例签名防重放，
   # 与 activate 同级别）；成功返回脱敏 customer 视图（契约 §12.3），码消费即失效、重复提交按 BIND_INVALID 拒绝。
   - [Client.CustomerBind, POST, /api/v1/licenses/customer-bind, LicenseRuntimeService/CustomerBind, activation-sign-v1, "", license, write, critical, false, customer]

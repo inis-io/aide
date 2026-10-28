@@ -17,6 +17,7 @@
 7. [运行面客户端 Client](#7-运行面客户端-client)
    - [项目套餐（在售目录与套餐订单）](#76-项目套餐在售目录与套餐订单)
    - [远程指令（实例指令通道）](#77-远程指令实例指令通道)
+   - [projectNo-only 自动授权（AutoStart）](#78-projectno-only-自动授权autostart)
    - [客户账号绑定（CustomerBind）](#79-客户账号绑定customerbind)
 8. [在线更新模块](#8-在线更新模块)
 9. [SaaS 多租户接口](#9-saas-多租户接口)
@@ -626,6 +627,7 @@ type AutoResult struct {
     Salt       string
     InstanceNo string
     Provisioned bool  // 本次实际申领为 true；auto.json 恢复为 false
+    Customer   *CustomerView // 客户账号视图；仅首次申领且平台侧许可证已绑定客户账号时非空，恢复路径为 nil
 }
 
 type AutoOptions struct {
@@ -673,13 +675,17 @@ if err != nil {
 	var rejected *licence.ProvisionError
 	if errors.As(err, &rejected) && rejected.Status == "MIGRATION_INVALID" {
 		// 迁移码无效或已过期（平台统一文案，防枚举）；不改变现有授权状态
+		// 提示重新生成，不要重试同一码 —— 处理后必须直接返回，不要落到兜底 panic
+		return err
 	}
-	panic(err)
+	panic(err) // 其余错误（网络、keyset 验签等）按部署环境自行处置
 }
 defer result.Client.Close() // AutoStart 已 Start，不再使用时必须 Close
 ```
 
 - 请求体 `migrationCode` 为末位可选字段（`omitempty`）：留空时与旧版请求逐字节一致，平台按常规 sdk_auto 处理。
+- `MigrationCode` 只在首次申领（无 `auto.json`）时生效；`auto.json` 已存在时静默忽略该字段（启动直接恢复，不再申领）。
+- **平台前置**：迁移能力要求 licen-hub 平台先升级到支持 `migration_code` 的版本；旧平台静默忽略该字段并退化为常规新签发（不报错，但拿不到既有许可证）。
 - 携带迁移码成功时平台返回**既有许可证**（`LicenseNo/Salt`），不新建、不消耗 sdk_auto 配额；旧席位释放、旧激活吊销（旧实例下一次 validate/current 收到 `SEAT_RELEASED`）。
 - 申领响应在许可证已绑定客户账号时附带 `result.Customer`（`*licence.CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`；该视图只是展示用脱敏信息，不参与授权判定。
 
@@ -717,7 +723,7 @@ func bindCustomer(ctx context.Context, client *licence.Client, bindCode string) 
 要点：
 
 - **幂等**：成功响应 `status=OK` + `customer{maskAccount,boundAt}`；绑定码消费即失效，重复提交同一码按 `BIND_INVALID` 拒绝（错误尝试累计到上限后锁定）。
-- **错误归一**：业务拒绝以 `*ProvisionError{Status, Message}` 原样透出，`Status` 为空时 SDK 兜底为 `ERROR`；传输层 404 与空 body 统一归一为「许可证或实例信息无效」（模糊语义，不泄露存在性），其余非 200 返回「客户绑定请求失败（HTTP …）」。
+- **错误归一**：业务拒绝以 `*ProvisionError{Status, Message}` 原样透出，`Status` 为空时 SDK 兜底为 `ERROR`；传输层 404 归一为「许可证或实例信息无效」（模糊语义，不泄露存在性），其余非 200（含网关 502/504 的空响应）返回「客户绑定请求失败（HTTP …）」——只有 404 是凭证终态锚点，空 body 不再被误报成凭证无效。
 - **不改授权状态**：绑定失败不清信封、不改 `Status()`；成功后授权判定仍以签名信封为准，`customer` 仅作展示。
 - **双协议**：HTTP 与 gRPC 同形响应，协议矩阵见 `proto/licence/v1/protocol-matrix.yaml` 的 `Client.CustomerBind` 行（domain `license`、action `write`、风险 `critical`、非幂等、附加响应字段 `customer`）。
 
