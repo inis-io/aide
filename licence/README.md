@@ -206,7 +206,10 @@ if err != nil {
 	}
 	panic(err) // 其余错误（网络、未激活等）按部署环境自行处置
 }
-defer result.Client.Close() // 换证返回已 Start 的新 Client；同证幂等时为当前 Client（不得重复 Close）
+// 换证返回已 Start 的新 Client；同证幂等时为当前 Client（按指针区分，避免误关运行中的客户端）
+if result.Client != client {
+	defer result.Client.Close()
+}
 ```
 
 - **三种情形**：全新实例匿名入座（provision 激活码分支）；已激活且当前证≠目标证 → 换证（新 Client 激活占席，平台同事务释放旧证席位，`auto.json` 先落目标证再激活）；已激活且当前证=目标证 → 幂等刷新（不重复占席）。

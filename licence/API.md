@@ -723,7 +723,13 @@ func activateByCode(ctx context.Context, client *licence.Client, code string) er
 		}
 		return err
 	}
-	defer result.Client.Close() // 换证返回新 Client；同证幂等时为当前 Client（不得重复 Close）
+	defer func() {
+		// 换证返回新 Client 需要 Close；同证幂等时 result.Client 就是当前 client，
+		// 重复 Close 会关掉运行中的客户端——按指针区分
+		if result.Client != client {
+			result.Client.Close()
+		}
+	}()
 	return nil
 }
 ```
