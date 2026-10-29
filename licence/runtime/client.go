@@ -511,10 +511,13 @@ func (this *Client) ActivateByCode(ctx context.Context, code string, confirmRepl
 	// 换证：构造新客户端 → 验证目标证 keyset → 落 auto.json → Start 激活占席。
 	// auto.json 必须先于 Start 落盘：激活码在 provision 时已消费，Start 失败由下次启动
 	// 经 auto.json 恢复目标证重试，不得回退到旧证（旧席位已被平台同事务释放）。
+	// 新客户端不继承旧客户端的自定义 Store：Store 是单blob状态载体，跨证复用会把旧证
+	// 信封/token 带进新证；换证后一律回到默认加密文件存储（按 licenseNo 分文件隔离）。
 	options := this.options
 	options.LicenseNo = provision.LicenseNo
 	options.Salt = provision.Salt
 	options.InstanceNo = ""
+	options.Store = nil
 	client, err := New(options)
 	if err != nil {
 		return AutoResult{}, err
