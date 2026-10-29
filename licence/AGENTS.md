@@ -10,7 +10,7 @@
   `runtime/` = 运行面 `Client` + `AutoStart` / `AutoStartWithOptions`（`auto.go`/`defaults.go`）+
   传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`，支持一次性激活码
   `ActivationCode` 入座客户既有许可证席位）/账号绑定（`Client.CustomerBind`，门户授权票据 +
-  activation-sign-v1 实例签名）/激活码换证（`Client.ActivateByCode`，签名换证 + ACTIVATION_CONFLICT 冲突确认）/
+  activation-sign-v1 实例签名）/激活码换证（`Client.ActivateByCode`，签名换证 + ACTIVATION_CONFLICT 冲突确认；首次缺指纹先挑战且不消费码，SDK 计算指纹后重试一次）/
   配置回推/套餐/实例指令；
   `protocol/` = 平台契约镜像层（信封/keyset/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端

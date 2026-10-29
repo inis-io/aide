@@ -119,6 +119,8 @@ type fakePlatform struct {
 	provisionLicenseNo string
 	// provisionConflict - 激活码 provision 返回 ACTIVATION_CONFLICT + 对比载荷（不消费码）
 	provisionConflict bool
+	// provisionRequireFingerprint - 缺指纹时先返回挑战，不直接签发目标证
+	provisionRequireFingerprint bool
 	// provisionUnsigned - 激活码 provision 收到的请求是否未带签名头（供断言签名强制）
 	provisionUnsigned bool
 	// server - httptest 实例
@@ -502,6 +504,12 @@ func (this *fakePlatform) handleProvision(writer http.ResponseWriter, request *h
 	if this.provisionStatus != "" && this.provisionStatus != "OK" {
 		writeJson(writer, map[string]any{
 			"status": this.provisionStatus, "serverTime": time.Now().UnixMilli(), "message": this.provisionMessage,
+		})
+		return
+	}
+	if this.provisionRequireFingerprint && params.FingerprintHash == "" {
+		writeJson(writer, map[string]any{
+			"status": "FINGERPRINT_REQUIRED", "serverTime": time.Now().UnixMilli(), "salt": "salt-switch",
 		})
 		return
 	}
@@ -1814,6 +1822,44 @@ func TestClientActivateByCode(t *testing.T) {
 	}
 	if metadata.LicenseNo != "LIC-2026-000999" || metadata.Salt != "salt-switch" {
 		t.Fatalf("auto.json 目标证不符: %+v", metadata)
+	}
+}
+
+// TestClientActivateByCodeFingerprintChallenge - 换证缺指纹时先完成挑战，
+// 第二次签名请求必须携带与后续激活一致的指纹，不能直接按业务拒绝返回。
+func TestClientActivateByCodeFingerprintChallenge(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.provisionRequireFingerprint = true
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	result, err := client.ActivateByCode(t.Context(), "ABCD-EFGH-IJKL", false)
+	if err != nil {
+		t.Fatalf("挑战后换证失败: %v", err)
+	}
+	defer result.Client.Stop()
+	expected, err := FingerprintHash("salt-switch", "test-fingerprint", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	platform.mu.Lock()
+	requests := append([]map[string]string(nil), platform.provisionRequests...)
+	platform.mu.Unlock()
+	if len(requests) != 2 {
+		t.Fatalf("缺指纹应先挑战再重试一次，实际请求 %d 次", len(requests))
+	}
+	var body map[string]any
+	if err = json.Unmarshal([]byte(requests[1]["body"]), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["fingerprintHash"] != expected {
+		t.Fatalf("挑战后的指纹不符: got %v want %s", body["fingerprintHash"], expected)
 	}
 }
 

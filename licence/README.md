@@ -207,6 +207,7 @@ if result.Client != client {
 ```
 
 - **三种情形**：全新实例匿名入座（provision 激活码分支）；已激活且当前证≠目标证 → 换证（新 Client 激活占席，平台同事务释放旧证席位，`auto.json` 先落目标证再激活）；已激活且当前证=目标证 → 幂等刷新（不重复占席）。
+- **指纹挑战**：两条激活码路径首次缺指纹都会收到 `FINGERPRINT_REQUIRED + salt`，平台不消费激活码；SDK 用同一安装标识计算指纹并重试一次，确保消费记录与后续 activate 使用同一指纹。
 - **付费证冲突保护**：当前证已持付费套餐且未确认时，平台返回 `ACTIVATION_CONFLICT` + 双方套餐对比载荷，以 `*ActivationConflictError` 透出（含 `CurrentPlan/TargetPlan/SeatUsed/SeatLimit`），激活码不消费。
 - 成功返回 `AutoResult`，`Customer`（`*CustomerView{MaskAccount, BoundAt}`）随响应落地——目标证生而归属客户，入座即完成归属，无需再绑定。
 - 未激活（无 activation token）直接报错且不发请求；连接层 404（模糊语义）归一为「许可证或实例信息无效」。

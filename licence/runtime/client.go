@@ -532,31 +532,53 @@ func (this *Client) ActivateByCode(ctx context.Context, code string, confirmRepl
 	if err != nil {
 		return AutoResult{}, err
 	}
-	body, err := json.Marshal(provisionBody{
+	body := provisionBody{
 		ProjectNo: this.options.ProjectNo, InstallSN: installSN,
-		DeviceName: this.options.DeviceName, ClientTime: time.Now().UnixMilli(),
+		DeviceName:     this.options.DeviceName,
 		ActivationCode: code, CurrentLicenseNo: this.options.LicenseNo,
 		ReleaseOldSeat: true, ConfirmReplace: confirmReplace,
-	})
-	if err != nil {
-		return AutoResult{}, err
 	}
-	statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/provision", body, true)
-	if err != nil {
-		return AutoResult{}, err
-	}
-	// 非 200 不解析 body：404（含 gRPC NotFound 归一）锚定模糊凭证终态，其余按传输层错误上报。
-	if statusCode != http.StatusOK {
-		if statusCode == http.StatusNotFound {
-			return AutoResult{}, errors.New("许可证或实例信息无效")
+	request := func() (provisionResponse, error) {
+		body.ClientTime = time.Now().UnixMilli()
+		rawBody, err := json.Marshal(body)
+		if err != nil {
+			return provisionResponse{}, err
 		}
-		return AutoResult{}, fmt.Errorf("激活码请求失败（HTTP %d）", statusCode)
+		statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/provision", rawBody, true)
+		if err != nil {
+			return provisionResponse{}, err
+		}
+		// 非 200 不解析 body：404（含 gRPC NotFound 归一）锚定模糊凭证终态，其余按传输层错误上报。
+		if statusCode != http.StatusOK {
+			if statusCode == http.StatusNotFound {
+				return provisionResponse{}, errors.New("许可证或实例信息无效")
+			}
+			return provisionResponse{}, fmt.Errorf("激活码请求失败（HTTP %d）", statusCode)
+		}
+		var response provisionResponse
+		if err = json.Unmarshal(raw, &response); err != nil {
+			return provisionResponse{}, err
+		}
+		this.updateClockOffset(response.ServerTime)
+		return response, nil
 	}
-	var response provisionResponse
-	if err = json.Unmarshal(raw, &response); err != nil {
+	response, err := request()
+	if err != nil {
 		return AutoResult{}, err
 	}
-	this.updateClockOffset(response.ServerTime)
+	if response.Status == "FINGERPRINT_REQUIRED" {
+		if strings.TrimSpace(response.Salt) == "" {
+			return AutoResult{}, errors.New("指纹挑战响应缺少 salt")
+		}
+		body.FingerprintHash, err = FingerprintHash(response.Salt, this.options.Fingerprint, this.options.Provider)
+		if err != nil {
+			return AutoResult{}, err
+		}
+		response, err = request()
+		if err != nil {
+			return AutoResult{}, err
+		}
+	}
 	provision, err := finishProvision(response)
 	if err != nil {
 		return AutoResult{}, err

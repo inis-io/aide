@@ -448,16 +448,19 @@ func TestGRPCRuntimeActivateMapsDeviceNameAndSeatNo(t *testing.T) {
 // conflict 非空时随 ACTIVATION_CONFLICT 下发对比载荷；licenseNo 空 = 与当前证同号（同证幂等短路）。
 type runtimeProvisionCodeServer struct {
 	licencev1.UnimplementedLicenseRuntimeServiceServer
-	activationCode   string
-	currentLicenseNo string
-	releaseOldSeat   bool
-	confirmReplace   bool
-	status           string
-	message          string
-	licenseNo        string
-	conflict         *licencev1.ProvisionConflictView
-	missing          []string
-	failCode         codes.Code
+	activationCode     string
+	currentLicenseNo   string
+	releaseOldSeat     bool
+	confirmReplace     bool
+	status             string
+	message            string
+	licenseNo          string
+	fingerprintHash    string
+	requireFingerprint bool
+	provisionCalls     int
+	conflict           *licencev1.ProvisionConflictView
+	missing            []string
+	failCode           codes.Code
 }
 
 func (this *runtimeProvisionCodeServer) ProvisionByPlan(ctx context.Context, request *licencev1.ProvisionRequest) (*licencev1.ProvisionResponse, error) {
@@ -475,6 +478,11 @@ func (this *runtimeProvisionCodeServer) ProvisionByPlan(ctx context.Context, req
 	if this.failCode != codes.OK {
 		return nil, status.Error(this.failCode, "许可证或实例信息无效")
 	}
+	this.provisionCalls++
+	if this.requireFingerprint && request.GetFingerprintHash() == "" {
+		return &licencev1.ProvisionResponse{Status: "FINGERPRINT_REQUIRED", Salt: "salt-grpc", ServerTime: time.Now().UnixMilli()}, nil
+	}
+	this.fingerprintHash = request.GetFingerprintHash()
 	code := this.status
 	if code == "" {
 		code = "OK"
@@ -523,8 +531,9 @@ func newProvisionCodeGRPCClient(t *testing.T, server licencev1.LicenseRuntimeSer
 // 未实现 Activate 而报错，请求映射断言在错误返回前已完成；同证全链路见 HTTP 侧 TestClientActivateByCodeSameLicence）。
 func TestGRPCActivateByCodeFields(t *testing.T) {
 
-	server := &runtimeProvisionCodeServer{}
+	server := &runtimeProvisionCodeServer{requireFingerprint: true}
 	client := newProvisionCodeGRPCClient(t, server)
+	client.options.Fingerprint = "test-fingerprint"
 	_, err := client.ActivateByCode(context.Background(), "ABCD-EFGH-IJKL", true)
 	if err == nil {
 		t.Fatal("假服务端未实现 Activate，同证幂等应随 Reactivate 报错")
@@ -543,6 +552,9 @@ func TestGRPCActivateByCodeFields(t *testing.T) {
 	}
 	if !server.confirmReplace {
 		t.Fatal("冲突确认标记未随 gRPC 上送")
+	}
+	if server.provisionCalls != 2 || server.fingerprintHash == "" {
+		t.Fatalf("缺指纹应挑战后重试并携带指纹: calls=%d fingerprint=%q", server.provisionCalls, server.fingerprintHash)
 	}
 }
 

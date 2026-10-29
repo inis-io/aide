@@ -715,6 +715,7 @@ func activateByCode(ctx context.Context, client *licence.Client, code string) er
 要点：
 
 - **三种情形**：全新实例匿名入座（`AutoOptions.ActivationCode`）；当前证≠目标证 → 换证（目标证 keyset 验证 → `auto.json` 先落目标证 → 新 Client 激活占席，平台同事务释放旧证席位）；当前证=目标证 → 幂等（平台不重复占席，SDK 短路为 `Reactivate` 刷新信封）。
+- **指纹挑战**：首次缺指纹时平台返回 `FINGERPRINT_REQUIRED + salt` 且不消费激活码；`AutoStartWithOptions` 与 `ActivateByCode` 都计算与 activate 一致的指纹并用同一安装标识重试一次，第二次仍挑战才按错误返回。
 - **冲突保护**：当前证已持付费套餐且 `confirmReplace=false` 时平台返回 `ACTIVATION_CONFLICT` + 对比载荷且不消费激活码；确认后 `confirmReplace=true` 重发才执行换证。
 - **错误归一**：业务拒绝以 `*ProvisionError{Status, Message}` 原样透出；传输层 404 归一为「许可证或实例信息无效」（模糊语义，不泄露存在性），其余非 200 返回「激活码请求失败（HTTP …）」。
 - **双协议**：HTTP 与 gRPC 同形同语义，协议矩阵见 `proto/licence/v1/protocol-matrix.yaml` 的 `Client.ActivateByCode` 行（domain `license`、action `write`、风险 `critical`、非幂等、附加响应字段 `keyset,customer,conflict`）。
