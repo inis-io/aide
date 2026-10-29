@@ -19,9 +19,6 @@ const (
 	provisionGoldenRequest = `{"projectNo":"INIS-AUTO","installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","deviceName":"dev\u003cpro\u003e\u0026","clientTime":1789459200000}`
 	// provisionGoldenTenantRequest - SaaS 子租户发证：tenantId > 0 时按声明序紧随 projectNo 上送。
 	provisionGoldenTenantRequest = `{"projectNo":"INIS-SAAS","tenantId":42,"installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","clientTime":1789459200000}`
-	// provisionGoldenMigrationRequest - 一次性迁移码：migrationCode 是结构体末位字段，
-	// 只能追加在既有键序之后；为空时 omitempty 省略（上两条 golden 逐字节不变的回归保证）。
-	provisionGoldenMigrationRequest = `{"projectNo":"INIS-MIGRATE","installSN":"7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f","clientTime":1789459200000,"migrationCode":"ABCD-EFGH"}`
 )
 
 // TestProvisionBodyGoldenWire - 申领请求体 JSON 必须与契约 §6 逐字节一致（含 <>& 转义）。
@@ -54,17 +51,6 @@ func TestProvisionBodyGoldenWire(t *testing.T) {
 		t.Fatalf("子租户请求线格式漂移\n期望: %s\n实际: %s", provisionGoldenTenantRequest, string(tenantBody))
 	}
 
-	// 迁移码方向：新字段只能追加在结构体末尾，既有键序不得变化
-	migrationBody, err := json.Marshal(provisionBody{
-		ProjectNo: "INIS-MIGRATE", MigrationCode: "ABCD-EFGH",
-		InstallSN: "7d3b9f2e-4c1a-4b6d-9e8f-0a1b2c3d4e5f", ClientTime: 1789459200000,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(migrationBody) != provisionGoldenMigrationRequest {
-		t.Fatalf("迁移码请求线格式漂移\n期望: %s\n实际: %s", provisionGoldenMigrationRequest, string(migrationBody))
-	}
 }
 
 // TestProvisionResponseGoldenWire - 契约 §6 响应 JSON 原文 → 统一响应 → 结果映射。

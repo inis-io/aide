@@ -34,22 +34,20 @@ type validateBody struct {
 
 // provisionBody - 装机自动申领请求体（sdk_auto：projectNo + installSN 定位，无项目级令牌）。
 // tenantId 缺省 0 = 普通装机申领，>0 = SaaS 子租户发证（omitempty 不上送零值）。
-// migrationCode 及之后为末位码分支字段：新增字段只能追加在结构体末尾，既有 JSON 键序不得变化。
-// migrationCode（换机迁移）与 activationCode（激活码入座）互斥，同时携带平台判无效请求。
+// activationCode 及之后为末位码分支字段：新增字段只能追加在结构体末尾，既有 JSON 键序不得变化。
 // currentLicenseNo/releaseOldSeat/confirmReplace 仅在已激活实例换证入座时上送，
 // 携带 currentLicenseNo 的请求必须带 activation-sign-v1 实例签名（Client.ActivateByCode 保证）。
 type provisionBody struct {
-	ProjectNo       string `json:"projectNo"`
-	TenantId        int64  `json:"tenantId,omitempty"`
-	InstallSN       string `json:"installSN"`
-	FingerprintHash string `json:"fingerprintHash,omitempty"`
-	DeviceName      string `json:"deviceName,omitempty"`
-	ClientTime      int64  `json:"clientTime,omitempty"`
-	MigrationCode   string `json:"migrationCode,omitempty"`
-	ActivationCode  string `json:"activationCode,omitempty"`
+	ProjectNo        string `json:"projectNo"`
+	TenantId         int64  `json:"tenantId,omitempty"`
+	InstallSN        string `json:"installSN"`
+	FingerprintHash  string `json:"fingerprintHash,omitempty"`
+	DeviceName       string `json:"deviceName,omitempty"`
+	ClientTime       int64  `json:"clientTime,omitempty"`
+	ActivationCode   string `json:"activationCode,omitempty"`
 	CurrentLicenseNo string `json:"currentLicenseNo,omitempty"`
-	ReleaseOldSeat  bool   `json:"releaseOldSeat,omitempty"`
-	ConfirmReplace  bool   `json:"confirmReplace,omitempty"`
+	ReleaseOldSeat   bool   `json:"releaseOldSeat,omitempty"`
+	ConfirmReplace   bool   `json:"confirmReplace,omitempty"`
 }
 
 // provisionResponse - 装机自动申领统一响应（契约 §6；status 为业务状态码）

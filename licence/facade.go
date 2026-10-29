@@ -138,6 +138,7 @@ type (
 	ProvisionOptions        = LicenceRuntime.ProvisionOptions
 	ProvisionResult         = LicenceRuntime.ProvisionResult
 	CustomerView            = LicenceRuntime.CustomerView
+	CustomerBindResult      = LicenceRuntime.CustomerBindResult
 	ActivationConflictError = LicenceRuntime.ActivationConflictError
 	ActivationConflictPlan  = LicenceRuntime.ActivationConflictPlan
 )

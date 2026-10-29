@@ -12,11 +12,12 @@ service LicenseRuntimeService {
   // ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
   // 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
   // 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
-  // 末位可选码分支（互斥，同时携带判无效请求）：migration_code = 换机迁移（接管既有许可证、释放旧席位）；
-  // activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）。
+  // activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）；
+  // migration_code 仅用于识别旧客户端并返回 MIGRATION_REMOVED，不再提供迁移成功路径。
   rpc ProvisionByPlan(ProvisionRequest) returns (ProvisionResponse);
-  // CustomerBind RPC 已随「绑定码升级为激活码」删除：客户归属改由激活码入座天然达成。
-  // 方法名 CustomerBind 与消息名 CustomerBindRequest/CustomerBindResponse 永久锁定，禁止复用。
+  // CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
+  // 绑定成功后许可证归属客户账号，不改变席位或套餐。
+  rpc CustomerBind(CustomerBindRequest) returns (CustomerBindResponse);
 }
 
 // UpdateRuntimeService - 在线更新运行面。
@@ -100,10 +101,9 @@ message ProvisionRequest {
   string device_name = 5;
   // client_time - 客户端当前时间（毫秒，可选）
   int64 client_time = 6;
-  // migration_code - 一次性迁移码（可选；携带时平台返回既有许可证、不消耗 sdk_auto 配额）
-  string migration_code = 9;
-  // activation_code - 一次性激活码（可选；携带时入座客户既有许可证的一个席位，不签发新证、
-  // 不消耗 sdk_auto 配额；与 migration_code 互斥，同时携带判无效请求）
+  // migration_code - 已下线的迁移码字段，仅为拒绝旧客户端保留；平台返回 MIGRATION_REMOVED，绝不消费或建证。
+  string migration_code = 9 [deprecated = true];
+  // activation_code - 一次性激活码（可选；携带时入座客户既有许可证的一个席位，不签发新证、不消耗 sdk_auto 配额）
   string activation_code = 10;
   // current_license_no - 当前许可证编号（可选；已激活实例换证入座时上送，携带时请求必须
   // 带 activation-sign-v1 实例签名，平台据此做冲突评估与旧席位释放）
@@ -165,9 +165,19 @@ message ProvisionConflictView {
   int32 seat_limit = 4;                    // 目标证席位上限
 }
 
-// CustomerBindRequest / CustomerBindResponse 已随「绑定码升级为激活码」删除：
-// 消息名与字段号 code=1 永久锁定（proto3 不支持文件级消息名 reserved，以注释锁定），
-// 客户归属语义由激活码入座承接（ProvisionRequest.activation_code），禁止以绑定码形态重新引入。
+// CustomerBindRequest - 客户账号绑定请求。
+message CustomerBindRequest {
+  // code - 门户授权确认页签发的一次性授权票据
+  string code = 1;
+}
+
+// CustomerBindResponse - 客户账号绑定响应。
+message CustomerBindResponse {
+  string status = 1;
+  string message = 2;
+  // customer - 绑定成功后的客户账号视图
+  ProvisionCustomerView customer = 3;
+}
 
 // RuntimeResponse - 许可证运行面统一响应。
 // envelope_json 与 keyset_json 必须保留平台 JSON 原文，客户端分别基于 payload 原文验签。

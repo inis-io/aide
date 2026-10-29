@@ -434,6 +434,71 @@ func (this *Client) Reactivate(ctx context.Context) error {
 	return this.activateLocked(ctx)
 }
 
+// CustomerBindResult - 客户账号绑定回执（平台下发的脱敏客户视图）。
+type CustomerBindResult struct {
+	// MaskAccount - 脱敏账号（如 r***@x.com）
+	MaskAccount string
+	// BoundAt - 绑定时间（毫秒）
+	BoundAt int64
+}
+
+// customerBindBody - 客户账号绑定请求体（一次性授权票据由 licen-hub 门户授权确认页签发）。
+type customerBindBody struct {
+	Code string `json:"code"`
+}
+
+// customerBindResponse - 客户账号绑定统一响应（HTTP 为平台原文，gRPC 由传输层合成）。
+type customerBindResponse struct {
+	Status   string            `json:"status"`
+	Message  string            `json:"message"`
+	Customer *customerViewJSON `json:"customer,omitempty"`
+}
+
+// CustomerBind - 客户账号绑定（一次性授权票据；activation-sign-v1 实例签名防重放）。
+// 未激活（无 token）直接报错且不发请求；业务拒绝以 *ProvisionError 原样透传。
+func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBindResult, error) {
+	this.mu.RLock()
+	token := this.state.ActivationToken
+	this.mu.RUnlock()
+	if token == "" {
+		return CustomerBindResult{}, errors.New("客户端未激活，无法绑定客户账号")
+	}
+	if strings.TrimSpace(code) == "" {
+		return CustomerBindResult{}, errors.New("授权票据不能为空")
+	}
+	body, err := json.Marshal(customerBindBody{Code: code})
+	if err != nil {
+		return CustomerBindResult{}, err
+	}
+	statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/customer-bind", body, true)
+	if err != nil {
+		return CustomerBindResult{}, err
+	}
+	if statusCode != http.StatusOK {
+		if statusCode == http.StatusNotFound {
+			return CustomerBindResult{}, errors.New("许可证或实例信息无效")
+		}
+		return CustomerBindResult{}, fmt.Errorf("客户绑定请求失败（HTTP %d）", statusCode)
+	}
+	var response customerBindResponse
+	if err = json.Unmarshal(raw, &response); err != nil {
+		return CustomerBindResult{}, err
+	}
+	if response.Status != "OK" {
+		status := response.Status
+		if status == "" {
+			status = "ERROR"
+		}
+		return CustomerBindResult{}, &ProvisionError{Status: status, Message: response.Message}
+	}
+	result := CustomerBindResult{}
+	if response.Customer != nil {
+		result.MaskAccount = response.Customer.MaskAccount
+		result.BoundAt = response.Customer.BoundAt
+	}
+	return result, nil
+}
+
 // ActivateByCode - 激活码换证入座（已激活实例专用；全新未激活实例用 AutoStartWithOptions 的 ActivationCode）。
 // 以当前实例凭证签名（activation-sign-v1）调 provision 激活码分支：
 // 当前证≠目标证时换证——返回的目标证经 keyset 验证、auto.json 落盘、新 Client 激活占席后返回，

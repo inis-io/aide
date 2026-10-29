@@ -23,6 +23,7 @@ const (
 	LicenseRuntimeService_Validate_FullMethodName        = "/licenhub.licence.v1.LicenseRuntimeService/Validate"
 	LicenseRuntimeService_Current_FullMethodName         = "/licenhub.licence.v1.LicenseRuntimeService/Current"
 	LicenseRuntimeService_ProvisionByPlan_FullMethodName = "/licenhub.licence.v1.LicenseRuntimeService/ProvisionByPlan"
+	LicenseRuntimeService_CustomerBind_FullMethodName    = "/licenhub.licence.v1.LicenseRuntimeService/CustomerBind"
 )
 
 // LicenseRuntimeServiceClient is the client API for LicenseRuntimeService service.
@@ -37,9 +38,12 @@ type LicenseRuntimeServiceClient interface {
 	// ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
 	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
 	// 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
-	// 末位可选码分支（互斥，同时携带判无效请求）：migration_code = 换机迁移（接管既有许可证、释放旧席位）；
-	// activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）。
+	// activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）；
+	// migration_code 仅用于识别旧客户端并返回 MIGRATION_REMOVED，不再提供迁移成功路径。
 	ProvisionByPlan(ctx context.Context, in *ProvisionRequest, opts ...grpc.CallOption) (*ProvisionResponse, error)
+	// CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
+	// 绑定成功后许可证归属客户账号，不改变席位或套餐。
+	CustomerBind(ctx context.Context, in *CustomerBindRequest, opts ...grpc.CallOption) (*CustomerBindResponse, error)
 }
 
 type licenseRuntimeServiceClient struct {
@@ -90,6 +94,16 @@ func (c *licenseRuntimeServiceClient) ProvisionByPlan(ctx context.Context, in *P
 	return out, nil
 }
 
+func (c *licenseRuntimeServiceClient) CustomerBind(ctx context.Context, in *CustomerBindRequest, opts ...grpc.CallOption) (*CustomerBindResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CustomerBindResponse)
+	err := c.cc.Invoke(ctx, LicenseRuntimeService_CustomerBind_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LicenseRuntimeServiceServer is the server API for LicenseRuntimeService service.
 // All implementations must embed UnimplementedLicenseRuntimeServiceServer
 // for forward compatibility.
@@ -102,9 +116,12 @@ type LicenseRuntimeServiceServer interface {
 	// ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
 	// 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
 	// 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
-	// 末位可选码分支（互斥，同时携带判无效请求）：migration_code = 换机迁移（接管既有许可证、释放旧席位）；
-	// activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）。
+	// activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）；
+	// migration_code 仅用于识别旧客户端并返回 MIGRATION_REMOVED，不再提供迁移成功路径。
 	ProvisionByPlan(context.Context, *ProvisionRequest) (*ProvisionResponse, error)
+	// CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
+	// 绑定成功后许可证归属客户账号，不改变席位或套餐。
+	CustomerBind(context.Context, *CustomerBindRequest) (*CustomerBindResponse, error)
 	mustEmbedUnimplementedLicenseRuntimeServiceServer()
 }
 
@@ -126,6 +143,9 @@ func (UnimplementedLicenseRuntimeServiceServer) Current(context.Context, *Curren
 }
 func (UnimplementedLicenseRuntimeServiceServer) ProvisionByPlan(context.Context, *ProvisionRequest) (*ProvisionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProvisionByPlan not implemented")
+}
+func (UnimplementedLicenseRuntimeServiceServer) CustomerBind(context.Context, *CustomerBindRequest) (*CustomerBindResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CustomerBind not implemented")
 }
 func (UnimplementedLicenseRuntimeServiceServer) mustEmbedUnimplementedLicenseRuntimeServiceServer() {}
 func (UnimplementedLicenseRuntimeServiceServer) testEmbeddedByValue()                               {}
@@ -220,6 +240,24 @@ func _LicenseRuntimeService_ProvisionByPlan_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LicenseRuntimeService_CustomerBind_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CustomerBindRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LicenseRuntimeServiceServer).CustomerBind(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LicenseRuntimeService_CustomerBind_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LicenseRuntimeServiceServer).CustomerBind(ctx, req.(*CustomerBindRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LicenseRuntimeService_ServiceDesc is the grpc.ServiceDesc for LicenseRuntimeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -242,6 +280,10 @@ var LicenseRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProvisionByPlan",
 			Handler:    _LicenseRuntimeService_ProvisionByPlan_Handler,
+		},
+		{
+			MethodName: "CustomerBind",
+			Handler:    _LicenseRuntimeService_CustomerBind_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

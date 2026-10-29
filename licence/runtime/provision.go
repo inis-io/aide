@@ -22,10 +22,7 @@ type ProvisionOptions struct {
 	ProjectNo string
 	// TenantId - SaaS 子租户 ID（可选，0 = 普通装机申领；>0 = 按项目子租户发证档位签发）
 	TenantId int64
-	// MigrationCode - 一次性迁移码（可选；仅新服务器迁移场景使用，为空保持常规 sdk_auto 申领）
-	MigrationCode string
-	// ActivationCode - 一次性激活码（可选；入座客户既有许可证的一个席位，不签发新证；
-	// 与 MigrationCode 互斥，同时携带平台判无效请求）
+	// ActivationCode - 一次性激活码（可选；入座客户既有许可证的一个席位，不签发新证）
 	ActivationCode string
 	// CurrentLicenseNo - 当前许可证编号（可选；已激活实例换证入座时由 Client.ActivateByCode 注入，
 	// 携带时请求带 activation-sign-v1 实例签名，平台据此做冲突评估与旧席位释放）
@@ -184,7 +181,7 @@ func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResul
 	body := provisionBody{
 		ProjectNo: opts.ProjectNo, TenantId: opts.TenantId,
 		InstallSN: installSN, DeviceName: opts.DeviceName,
-		MigrationCode: opts.MigrationCode, ActivationCode: opts.ActivationCode,
+		ActivationCode:   opts.ActivationCode,
 		CurrentLicenseNo: opts.CurrentLicenseNo, ReleaseOldSeat: opts.ReleaseOldSeat,
 		ConfirmReplace: opts.ConfirmReplace,
 	}

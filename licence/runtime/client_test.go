@@ -89,6 +89,15 @@ type fakePlatform struct {
 	// 调用计数
 	activateCalls int
 	validateCalls int
+	// customerBindCalls - 客户账号绑定调用计数
+	customerBindCalls int
+	// customerBindRequests - 客户账号绑定请求快照（body 与签名头）
+	customerBindRequests []map[string]string
+	// customerBindStatus / customerBindMessage - 绑定业务拒绝注入
+	customerBindStatus  string
+	customerBindMessage string
+	// customerBindCode - 非 0 时绑定接口直接返回该 HTTP 状态码 + 空 body
+	customerBindCode int
 	// events - 项目事件订阅队列（callback_events 简化镜像，eventId 单调递增）
 	events   []fakeEvent
 	eventSeq int64
@@ -269,6 +278,8 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleCurrent(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/licenses/provision":
 		this.handleProvision(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/licenses/customer-bind":
+		this.handleCustomerBind(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/updates/check":
 		this.handleUpdateCheck(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/updates/report":
@@ -402,6 +413,37 @@ func (this *fakePlatform) handleValidate(writer http.ResponseWriter, request *ht
 		}
 	}
 	writeJson(writer, response)
+}
+
+// handleCustomerBind - 客户账号绑定：凭证校验 + 请求验签 → 记录授权票据与签名头快照。
+func (this *fakePlatform) handleCustomerBind(writer http.ResponseWriter, request *http.Request, body []byte) {
+	this.mu.Lock()
+	defer this.mu.Unlock()
+
+	this.customerBindCalls++
+	if !this.credential(writer, request, body) {
+		return
+	}
+	this.customerBindRequests = append(this.customerBindRequests, map[string]string{
+		"body": string(body), "token": request.Header.Get("X-License-Token"),
+		"timestamp": request.Header.Get("X-License-Timestamp"),
+		"nonce":     request.Header.Get("X-License-Nonce"),
+		"signature": request.Header.Get("X-License-Sign"),
+	})
+	if this.customerBindCode != 0 {
+		writer.WriteHeader(this.customerBindCode)
+		return
+	}
+	if this.customerBindStatus != "" && this.customerBindStatus != "OK" {
+		writeJson(writer, map[string]any{
+			"status": this.customerBindStatus, "serverTime": time.Now().UnixMilli(), "message": this.customerBindMessage,
+		})
+		return
+	}
+	writeJson(writer, map[string]any{
+		"status": "OK", "serverTime": time.Now().UnixMilli(),
+		"customer": map[string]any{"maskAccount": "r***@x.com", "boundAt": 123},
+	})
 }
 
 // handleProvision - 激活码 provision 分支模拟：携带 currentLicenseNo 时强制凭证验签，
@@ -1934,5 +1976,100 @@ func TestClientActivateByCodeSameLicence(t *testing.T) {
 	}
 	if _, err = os.Stat(filepath.Join(dir, autoMetadataFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("同证幂等不应写 auto.json: %v", err)
+	}
+}
+
+// ============================= 客户账号绑定（CustomerBind） =============================
+
+// TestClientCustomerBind - 激活后以签名请求上送一次性授权票据，成功返回脱敏客户视图。
+func TestClientCustomerBind(t *testing.T) {
+	platform := newFakePlatform(t)
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	result, err := client.CustomerBind(t.Context(), "ABCD-EFGH")
+	if err != nil {
+		t.Fatalf("CustomerBind 失败: %v", err)
+	}
+	if result.MaskAccount != "r***@x.com" || result.BoundAt != 123 {
+		t.Fatalf("客户视图映射不符: %+v", result)
+	}
+	platform.mu.Lock()
+	requests := append([]map[string]string(nil), platform.customerBindRequests...)
+	platform.mu.Unlock()
+	if len(requests) != 1 || requests[0]["body"] != `{"code":"ABCD-EFGH"}` {
+		t.Fatalf("绑定请求体不符: %+v", requests)
+	}
+	for _, key := range []string{"token", "timestamp", "nonce", "signature"} {
+		if requests[0][key] == "" {
+			t.Fatalf("缺少签名头 %s", key)
+		}
+	}
+}
+
+// TestClientCustomerBindRejected - 业务拒绝以 *ProvisionError 原样透传。
+func TestClientCustomerBindRejected(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.customerBindStatus = "BIND_INVALID"
+	platform.customerBindMessage = "授权票据无效或已过期"
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	_, err = client.CustomerBind(t.Context(), "EXPIRED-CODE")
+	var provisionErr *ProvisionError
+	if !errors.As(err, &provisionErr) || provisionErr.Status != "BIND_INVALID" || provisionErr.Message != "授权票据无效或已过期" {
+		t.Fatalf("业务拒绝透传不符: %T %+v", err, err)
+	}
+}
+
+// TestClientCustomerBindNotActivated - 未激活直接报错且不发请求。
+func TestClientCustomerBindNotActivated(t *testing.T) {
+	platform := newFakePlatform(t)
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	defer client.Stop()
+
+	_, err = client.CustomerBind(t.Context(), "ABCD-EFGH")
+	if err == nil || err.Error() != "客户端未激活，无法绑定客户账号" {
+		t.Fatalf("未激活应返回指定错误，实际 %v", err)
+	}
+	platform.mu.Lock()
+	calls := platform.customerBindCalls
+	platform.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("未激活不应发起绑定请求，实际 %d 次", calls)
+	}
+}
+
+// TestClientCustomerBindNotFound - 404 与空 body 归一为模糊凭证错误。
+func TestClientCustomerBindNotFound(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.customerBindCode = http.StatusNotFound
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	_, err = client.CustomerBind(t.Context(), "ABCD-EFGH")
+	if err == nil || err.Error() != "许可证或实例信息无效" {
+		t.Fatalf("404 应归一为「许可证或实例信息无效」，实际 %v", err)
 	}
 }

@@ -17,15 +17,15 @@ defaults:
 runtime:
   # keyset = 响应附带 bootstrap 根签名的项目工作公钥集合；HTTP 字段 keyset，gRPC 字段 keyset_json bytes。
   - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, "deviceName,keyset"]
-  # migrationCode/activationCode = 请求末位可选字段（omitempty；为空请求体逐字节不变），互斥；
+  # activationCode = 激活码入座；migrationCode 已下线，仅为旧请求识别返回 MIGRATION_REMOVED，SDK 不再提供公开入口。
   # 激活码换证（Client.ActivateByCode）携带 currentLicenseNo 时请求带 activation-sign-v1 签名，
   # 成功返回目标许可证与 customer 视图；付费证冲突返回 ACTIVATION_CONFLICT + conflict 对比载荷（不消费码）。
   - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false, "keyset,customer,conflict"]
   # 激活码换证入座（已激活实例专用；与 ProvisionByPlan 同端点，activationCode+currentLicenseNo 分支，
   # 必须 activation-sign-v1 签名）；冲突返回 ACTIVATION_CONFLICT 不消费码，confirmReplace=true 重发才换证。
   - [Client.ActivateByCode, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, activation-sign-v1, "", license, write, critical, false, "keyset,customer,conflict"]
-  # 客户账号绑定已随「绑定码升级为激活码」下线（LicenseRuntimeService/CustomerBind 与
-  # /api/v1/licenses/customer-bind 均已删除）；客户归属由激活码入座天然达成。
+  # 客户账号绑定：门户授权确认页签发一次性票据，仅关联客户归属，不改变席位或套餐。
+  - [Client.CustomerBind, POST, /api/v1/licenses/customer-bind, LicenseRuntimeService/CustomerBind, activation-sign-v1, "", license, write, critical, false, customer]
   - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, keyset]
   - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true, keyset]
   - [Client.CheckUpdate, POST, /api/v1/updates/check, UpdateRuntimeService/Check, activation-sign-v1, "", update, read, normal, true, keyset]

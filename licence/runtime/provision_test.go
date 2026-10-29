@@ -162,53 +162,21 @@ func TestProvisionByPlanHTTPTenant(t *testing.T) {
 	}
 }
 
-// TestProvisionByPlanMigrationCodeHTTP - 迁移码透传（HTTP）：申领 body 携带 migrationCode，
-// 平台下发已绑定客户视图时 ProvisionResult.Customer 正确解析且 Reissued 保持 false。
-func TestProvisionByPlanMigrationCodeHTTP(t *testing.T) {
-
-	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
-		return "OK", map[string]any{
-			"licenseNo": "LIC-2026-000777", "salt": "salt-migrate",
-			"bindingPolicy": "single", "seatLimit": 1,
-			"expiresAt": time.Now().UnixMilli() + 30*24*3600*1000, "reissued": false,
-			"customer": map[string]any{"maskAccount": "r***@x.com", "boundAt": 123},
+// TestProvisionByPlanMigrationRemoved - 平台对旧迁移请求的下线错误原样透传，
+// SDK 不得把它误当作可重试的普通故障。
+func TestProvisionByPlanMigrationRemoved(t *testing.T) {
+	server := newFakeProvisionServer(t, func(body map[string]any) (string, map[string]any) {
+		if _, exists := body["migrationCode"]; exists {
+			t.Fatalf("新 SDK 不应上送 migrationCode: %v", body)
 		}
-	})
-	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: server.server.URL, ProjectNo: "INIS-MIGRATE",
-		MigrationCode: "ABCD-EFGH", StorageDir: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("迁移码申领失败: %v", err)
-	}
-	if body := server.body(); body["migrationCode"] != "ABCD-EFGH" {
-		t.Fatalf("迁移码未上送: %v", body)
-	}
-	if result.Customer == nil || result.Customer.MaskAccount != "r***@x.com" || result.Customer.BoundAt != 123 {
-		t.Fatalf("客户账号视图映射不符: %+v", result.Customer)
-	}
-	if result.Reissued {
-		t.Fatalf("迁移申领不应标记续签: %+v", result)
-	}
-}
-
-// TestProvisionByPlanMigrationRejected - 迁移码被平台拒绝：status/message 原样以 *ProvisionError
-// 透传，SDK 不特判、不改写（调用方可按 MIGRATION_INVALID 降级提示）。
-func TestProvisionByPlanMigrationRejected(t *testing.T) {
-
-	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
-		return "MIGRATION_INVALID", map[string]any{"message": "迁移码无效或已过期"}
+		return "MIGRATION_REMOVED", map[string]any{"message": "迁移码已下线，请先解绑旧席位再使用激活码"}
 	})
 	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: server.server.URL, ProjectNo: "INIS-MIGRATE",
-		MigrationCode: "EXPIRED-CODE", StorageDir: t.TempDir(),
+		ServerURL: server.server.URL, ProjectNo: "INIS-MIGRATE", StorageDir: t.TempDir(),
 	})
 	var provisionErr *ProvisionError
-	if !errors.As(err, &provisionErr) {
-		t.Fatalf("迁移码拒绝应可断言为 *ProvisionError，实际 %T", err)
-	}
-	if provisionErr.Status != "MIGRATION_INVALID" || provisionErr.Message != "迁移码无效或已过期" {
-		t.Fatalf("业务状态/提示透传不符: %s %s", provisionErr.Status, provisionErr.Message)
+	if !errors.As(err, &provisionErr) || provisionErr.Status != "MIGRATION_REMOVED" {
+		t.Fatalf("下线错误应原样透传: %T %v", err, err)
 	}
 }
 
@@ -221,7 +189,7 @@ func TestProvisionByPlanActivationCodeHTTP(t *testing.T) {
 			"licenseNo": "LIC-2026-000666", "salt": "salt-activate",
 			"bindingPolicy": "seats", "seatLimit": 3,
 			"expiresAt": time.Now().UnixMilli() + 365*24*3600*1000, "reissued": false,
-			"customer":  map[string]any{"maskAccount": "r***@x.com", "boundAt": 123},
+			"customer": map[string]any{"maskAccount": "r***@x.com", "boundAt": 123},
 		}
 	})
 	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
@@ -419,41 +387,6 @@ func TestProvisionByPlanGRPC(t *testing.T) {
 	}
 	if fake.request.GetInstallSn() != string(raw) {
 		t.Fatalf("gRPC 上送 SN 与落盘不一致: %q vs %q", fake.request.GetInstallSn(), string(raw))
-	}
-}
-
-// TestProvisionByPlanMigrationCodeGRPC - 迁移码透传（gRPC）：请求字段与响应 customer 映射
-// 必须与 HTTP 线格式一致（重点防 provisionMap 漏同步）。
-func TestProvisionByPlanMigrationCodeGRPC(t *testing.T) {
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fake := &provisionGRPCServer{t: t, customer: &licencev1.ProvisionCustomerView{MaskAccount: "r***@x.com", BoundAt: 123}}
-	server := grpc.NewServer()
-	licencev1.RegisterLicenseRuntimeServiceServer(server, fake)
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
-
-	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
-		ServerURL: "grpc://" + listener.Addr().String(),
-		ProjectNo: "INIS-MIGRATE", MigrationCode: "ABCD-EFGH",
-		StorageDir: t.TempDir(), DeviceName: "g-migrate",
-		Transport: TransportGRPC, GRPC: GRPCOptions{AllowInsecure: true},
-		HTTPTimeout: 2 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("gRPC 迁移码申领失败: %v", err)
-	}
-	if fake.request.GetMigrationCode() != "ABCD-EFGH" {
-		t.Fatalf("gRPC 迁移码未上送: %q", fake.request.GetMigrationCode())
-	}
-	if result.Customer == nil || result.Customer.MaskAccount != "r***@x.com" || result.Customer.BoundAt != 123 {
-		t.Fatalf("gRPC 客户账号视图映射不符: %+v", result.Customer)
-	}
-	if result.Reissued {
-		t.Fatalf("迁移申领不应标记续签: %+v", result)
 	}
 }
 

@@ -599,3 +599,97 @@ func TestGRPCActivateByCodeNotFound(t *testing.T) {
 		t.Fatalf("gRPC NotFound 应归一为「许可证或实例信息无效」，实际 %v", err)
 	}
 }
+
+// ============================= 客户账号绑定（CustomerBind） =============================
+
+// runtimeCustomerBindServer - 客户账号绑定 gRPC 假服务端：校验签名 metadata、捕获授权票据。
+type runtimeCustomerBindServer struct {
+	licencev1.UnimplementedLicenseRuntimeServiceServer
+	code     string
+	status   string
+	message  string
+	missing  []string
+	failCode codes.Code
+}
+
+func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request *licencev1.CustomerBindRequest) (*licencev1.CustomerBindResponse, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	for _, key := range []string{LicenceProtocol.MetadataToken, LicenceProtocol.MetadataTimestamp, LicenceProtocol.MetadataNonce, LicenceProtocol.MetadataSignature, LicenceProtocol.MetadataSignVersion} {
+		if len(md.Get(key)) == 0 {
+			this.missing = append(this.missing, key)
+		}
+	}
+	this.code = request.GetCode()
+	if this.failCode != codes.OK {
+		return nil, status.Error(this.failCode, "许可证或实例信息无效")
+	}
+	code := this.status
+	if code == "" {
+		code = "OK"
+	}
+	response := &licencev1.CustomerBindResponse{Status: code}
+	if code != "OK" {
+		response.Message = this.message
+		return response, nil
+	}
+	response.Customer = &licencev1.ProvisionCustomerView{MaskAccount: "r***@x.com", BoundAt: 123}
+	return response, nil
+}
+
+func newCustomerBindGRPCClient(t *testing.T, server licencev1.LicenseRuntimeServiceServer) *Client {
+	t.Helper()
+	listener := bufconn.Listen(1 << 20)
+	grpcServer := grpc.NewServer()
+	licencev1.RegisterLicenseRuntimeServiceServer(grpcServer, server)
+	go func() { _ = grpcServer.Serve(listener) }()
+	t.Cleanup(grpcServer.Stop)
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	seed, _, err := LicenceProtocol.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
+	client.transport = &grpcRuntimeTransport{client: client, conn: conn, license: licencev1.NewLicenseRuntimeServiceClient(conn)}
+	return client
+}
+
+// TestGRPCCustomerBind - 绑定票据随请求上送、签名 metadata 齐全，客户视图映射一致。
+func TestGRPCCustomerBind(t *testing.T) {
+	server := &runtimeCustomerBindServer{}
+	client := newCustomerBindGRPCClient(t, server)
+	result, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
+	if err != nil {
+		t.Fatalf("gRPC CustomerBind 失败: %v", err)
+	}
+	if len(server.missing) > 0 {
+		t.Fatalf("缺少签名 metadata: %v", server.missing)
+	}
+	if server.code != "ABCD-EFGH" || result.MaskAccount != "r***@x.com" || result.BoundAt != 123 {
+		t.Fatalf("gRPC 绑定请求/响应映射不符: %q %+v", server.code, result)
+	}
+}
+
+// TestGRPCCustomerBindRejected - 业务拒绝以 *ProvisionError 原样透传。
+func TestGRPCCustomerBindRejected(t *testing.T) {
+	server := &runtimeCustomerBindServer{status: "BIND_INVALID", message: "授权票据无效或已过期"}
+	client := newCustomerBindGRPCClient(t, server)
+	_, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
+	provisionErr, ok := err.(*ProvisionError)
+	if !ok || provisionErr.Status != "BIND_INVALID" || provisionErr.Message != "授权票据无效或已过期" {
+		t.Fatalf("gRPC 业务拒绝透传不符: %T %+v", err, err)
+	}
+}
+
+// TestGRPCCustomerBindNotFound - NotFound 归一为模糊凭证错误。
+func TestGRPCCustomerBindNotFound(t *testing.T) {
+	server := &runtimeCustomerBindServer{failCode: codes.NotFound}
+	client := newCustomerBindGRPCClient(t, server)
+	_, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
+	if err == nil || err.Error() != "许可证或实例信息无效" {
+		t.Fatalf("gRPC NotFound 应归一为「许可证或实例信息无效」，实际 %v", err)
+	}
+}
