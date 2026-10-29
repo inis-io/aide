@@ -8,9 +8,9 @@
 - 本目录是 Licen Hub 的 Go SDK，按职责拆为「门面根包 + 实现子包」：
   根包 = 纯门面（`doc.go` + `facade.go`，全部导出符号以别名镜像，无任何实现）；
   `runtime/` = 运行面 `Client` + `AutoStart` / `AutoStartWithOptions`（`auto.go`/`defaults.go`）+
-  传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`，支持一次性迁移码
-  `MigrationCode` 接管既有许可证、一次性激活码 `ActivationCode` 入座客户既有许可证席位）/
-  激活码换证（`Client.ActivateByCode`，已激活实例签名换证 + ACTIVATION_CONFLICT 冲突确认）/
+  传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`，支持一次性激活码
+  `ActivationCode` 入座客户既有许可证席位）/账号绑定（`Client.CustomerBind`，门户授权票据 +
+  activation-sign-v1 实例签名）/激活码换证（`Client.ActivateByCode`，签名换证 + ACTIVATION_CONFLICT 冲突确认）/
   配置回推/套餐/实例指令；
   `protocol/` = 平台契约镜像层（信封/keyset/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
@@ -169,12 +169,12 @@ licence/
   两种协议共用同一激活记录、公钥、token 与 nonce 防重放存储。
 - 日志不得输出完整 token、JWT、私钥、请求签名和指纹；指纹最多记录前 8 位。
 - **一次性码只过内存**：激活码（`ProvisionOptions/AutoOptions.ActivationCode`、`Client.ActivateByCode`）
-  与迁移码（`ProvisionOptions/AutoOptions.MigrationCode`）短时效、单次使用，禁止落盘、写日志或进错误文案；
-  失败统一按平台业务码（`ACTIVATION_INVALID` / `MIGRATION_INVALID`）与模糊文案「激活码无效或已过期」/
-  「迁移码无效或已过期」透传，防枚举；付费证换证冲突以 `*ActivationConflictError`
+  与账号绑定票据（`Client.CustomerBind`）短时效、单次使用，禁止落盘、写日志或进错误文案；
+  激活失败按 `ACTIVATION_INVALID`、绑定失败按 `BIND_INVALID` 模糊文案透传；旧迁移请求只返回
+  `MIGRATION_REMOVED`，不会建证或落入普通申领。付费证换证冲突以 `*ActivationConflictError`
   （ACTIVATION_CONFLICT + 对比载荷）透出，平台不消费码，确认后 `ConfirmReplace=true` 重发。
 
-## 多机席位约定（开发/预发许可证）
+## 多机席位约定
 
 - 信封载荷含 `bindingPolicy`（`single` 单机 / `seats` 多机席位）与 `seatLimit`（席位上限，
   single 固定 1）；历史无席位字段的信封按 `single`/1 缺省解释（`normalizePayload`），

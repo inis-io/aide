@@ -391,7 +391,7 @@ func TestProvisionByPlanGRPC(t *testing.T) {
 }
 
 // TestProvisionByPlanActivationCodeGRPC - 激活码透传（gRPC）：请求字段与响应 customer 映射
-// 必须与 HTTP 线格式一致（重点防 provisionMap 漏同步）；激活码与迁移码互斥不同时上送。
+// 必须与 HTTP 线格式一致（重点防 provisionMap 漏同步）；新 SDK 不再上送 migrationCode。
 func TestProvisionByPlanActivationCodeGRPC(t *testing.T) {
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

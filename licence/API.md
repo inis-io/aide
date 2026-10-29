@@ -636,7 +636,7 @@ type AutoOptions struct {
     ServerURL          string            // 缺省 DefaultServerURL
     BootstrapPublicKeys map[string]string // 缺省 DefaultBootstrapPublicKeys
     TenantId           int64
-    MigrationCode      string            // 一次性迁移码（可选；为空保持常规 sdk_auto 申领）
+    ActivationCode     string            // 一次性激活码（可选；为空保持常规 sdk_auto 申领）
     StorageDir         string            // 默认 ./runtime/licence
     InstallSN          string
     InstanceNo         string
@@ -661,37 +661,15 @@ type AutoOptions struct {
 
 执行顺序：读取 `auto.json` → 无元数据才 `ProvisionByPlan` → 验证 keyset → 写非机密元数据 → 复用 `New + Start` → 从签名信封回填 `InstanceNo`。强制指纹项目自动用挑战盐计算与激活一致的指纹，并复用 installSN 重试一次。任何失败原样返回，不得包装成激活成功。
 
-低层 `ProvisionByPlan(ctx, ProvisionOptions)` 仍可独立使用；`ProvisionOptions` 已无 `ProvisionToken`，新增 `Fingerprint/Provider/MigrationCode`，`ProvisionResult` 新增 `Keyset json.RawMessage` 与 `Customer *CustomerView`。直接使用低层入口时，调用方必须先 `VerifyKeyset`，不得把匿名公钥列表当作信任根。
+低层 `ProvisionByPlan(ctx, ProvisionOptions)` 仍可独立使用；`ProvisionOptions` 已无 `ProvisionToken`，新增 `Fingerprint/Provider/ActivationCode`，`ProvisionResult` 新增 `Keyset json.RawMessage` 与 `Customer *CustomerView`。直接使用低层入口时，调用方必须先 `VerifyKeyset`，不得把匿名公钥列表当作信任根。
 
-**迁移码（新服务器接管既有授权）**：`MigrationCode` 只在首次申领生效（`auto.json` 恢复的后续启动不再申领），语义与契约见 README §3.2：
+**账号绑定与换机**：已激活实例经 `Client.CustomerBind(ctx, ticket)` 消费门户授权确认页签发的一次性票据，把当前许可证绑定到客户账号（activation-sign-v1 签名，HTTP `POST /api/v1/licenses/customer-bind`，gRPC `LicenseRuntimeService/CustomerBind`）。绑定只建立归属，不改变席位或套餐；未激活直接报错且不发请求，业务拒绝以 `*ProvisionError`（如 `BIND_INVALID`）返回。
 
-```go
-result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
-	ProjectNo:     "PRJ-20260815-705406",
-	AppVersion:    "2.3.1",
-	MigrationCode: migrationCode, // licen-hub 客户门户生成，一次性、15 分钟有效；留空 = 常规零配置
-})
-if err != nil {
-	var rejected *licence.ProvisionError
-	if errors.As(err, &rejected) && rejected.Status == "MIGRATION_INVALID" {
-		// 迁移码无效或已过期（平台统一文案，防枚举）；不改变现有授权状态
-		// 提示重新生成，不要重试同一码 —— 处理后必须直接返回，不要落到兜底 panic
-		return err
-	}
-	panic(err) // 其余错误（网络、keyset 验签等）按部署环境自行处置
-}
-defer result.Client.Close() // AutoStart 已 Start，不再使用时必须 Close
-```
-
-- 请求体 `migrationCode` 为末位可选字段（`omitempty`）：留空时与旧版请求逐字节一致，平台按常规 sdk_auto 处理。
-- `MigrationCode` 只在首次申领（无 `auto.json`）时生效；`auto.json` 已存在时静默忽略该字段（启动直接恢复，不再申领）。
-- **平台前置**：迁移能力要求 licen-hub 平台先升级到支持 `migration_code` 的版本；旧平台静默忽略该字段并退化为常规新签发（不报错，但拿不到既有许可证）。
-- 携带迁移码成功时平台返回**既有许可证**（`LicenseNo/Salt`），不新建、不消耗 sdk_auto 配额；旧席位释放、旧激活吊销（旧实例下一次 validate/current 收到 `SEAT_RELEASED`）。
-- 申领响应在许可证已绑定客户账号时附带 `result.Customer`（`*licence.CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`；该视图只是展示用脱敏信息，不参与授权判定。
+换机/重装不使用迁移码：客户先在门户解绑旧席位，再用 `ActivationCode` 让新实例入座。SDK 已删除 `MigrationCode` 入口，旧迁移请求只返回 `MIGRATION_REMOVED`，不会落入普通免费申领。申领响应在许可证已绑定客户账号时附带 `result.Customer`（`*licence.CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`；该视图只是展示用脱敏信息，不参与授权判定。
 
 ### 7.9 激活码入座与换证（ActivateByCode）
 
-客户在 licen-hub 门户对已购套餐的许可证生成一次性激活码（默认 15 分钟有效），实例凭码入座该证的一个席位，套餐随签名信封下发。全新未激活实例经 `AutoStartWithOptions` 的 `ActivationCode` 首次申领即入座（匿名 provision 分支，不签发新证、不消耗 sdk_auto 配额）；已激活实例经 `Client.ActivateByCode` 换证入座。目标证生而归属客户账号，入座即完成归属（客户绑定码机制已下线，由激活码承接）。
+客户在 licen-hub 门户对已购套餐的许可证生成一次性激活码（默认 15 分钟有效），实例凭码入座该证的一个席位，套餐随签名信封下发。全新未激活实例经 `AutoStartWithOptions` 的 `ActivationCode` 首次申领即入座（匿名 provision 分支，不签发新证、不消耗 sdk_auto 配额）；已激活实例经 `Client.ActivateByCode` 换证入座。目标证生而归属客户账号，入座即完成归属；既有未归属证也可通过 `CustomerBind` 独立绑定账号，两条链路互不替代。
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
@@ -1529,7 +1507,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `runtime/platform-config.go` | 平台配置签名同步与本地快照（`PlatformConfigSync`/`PlatformConfig`/`PlatformConfigMust`） |
 | `runtime/pushback.go` | 配置回推（`PushConfig`/`PushTenantConfig`）+ 定义反推（`PushConfigDefinitions`，403 开关闸门 / 400 errors 明细）+ `Client.ValidateConfig*` 薄壳（校验引擎与定义类型在 `config` 子包），HTTP/gRPC 双协议 |
 | `runtime/auto.go` / `defaults.go` | `AutoStart` / `AutoStartWithOptions`、`auto.json`、官方地址与 bootstrap 根 |
-| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战；可选 `MigrationCode` 接管既有许可证，响应可带已绑定客户视图 `Customer`，HTTP/gRPC 双协议） |
+| `runtime/provision.go` | sdk_auto 装机申领（projectNo + installSN，无 token，一次指纹挑战；可选 `ActivationCode` 入座既有许可证，响应可带已绑定客户视图 `Customer`，HTTP/gRPC 双协议） |
 | `runtime/apis.go` | API 商城挂载：`Client.Apis` 字段 + `apisDoer` 适配器（未激活闸门，withSign=true 请求出口，幂等键经 context 传给传输层） |
 | `runtime/plan.go` | 项目套餐运行面：在售目录 `PlansCatalog` + 套餐订单 `PlanOrderCreate` / `PlanOrderQuery` / `PlanOrderCancel` / `PlanOrderRows`（下单幂等键 = requestId、取消幂等键 = 订单号，未激活闸门 `ErrPlanNotActivated`，信封经 `apis/core.ParseEnvelope` 归一为 `*apis.Error`），HTTP/gRPC 双协议 |
 | `config/` | 配置定义与 RuleSet 校验引擎（全系统唯一实现，licen-hub backend import 复用）：`ConfigRuleSet`/`ParseConfigRuleSet`/`ValidateConfigDefinition`/`ValidateConfigValue`/`ConfigValidationError`/`ConfigDefinitions`/`PushbackDiffStats` |
