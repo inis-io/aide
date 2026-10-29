@@ -442,6 +442,67 @@ type CustomerBindResult struct {
 	BoundAt int64
 }
 
+// CustomerBindPrepareResult - 预注册授权请求回执。
+type CustomerBindPrepareResult struct {
+	// RequestNo - 一次性授权请求号（门户只允许按此确认，不能改选回跳上下文）
+	RequestNo string
+	// ExpiresAt - 请求有效期（毫秒）
+	ExpiresAt int64
+}
+
+type customerBindPrepareBody struct {
+	RedirectUri string `json:"redirectUri"`
+	State       string `json:"state"`
+}
+
+type customerBindPrepareResponse struct {
+	Status     string `json:"status"`
+	ServerTime int64  `json:"serverTime"`
+	RequestNo  string `json:"requestNo"`
+	ExpiresAt  int64  `json:"expiresAt"`
+	Message    string `json:"message"`
+}
+
+// CustomerBindPrepare - 预注册一次性账号授权请求，防止开放回跳和票据上下文错配。
+func (this *Client) CustomerBindPrepare(ctx context.Context, redirectURI, state string) (CustomerBindPrepareResult, error) {
+	this.mu.RLock()
+	token := this.state.ActivationToken
+	this.mu.RUnlock()
+	if token == "" {
+		return CustomerBindPrepareResult{}, errors.New("客户端未激活，无法预注册账号授权")
+	}
+	if strings.TrimSpace(redirectURI) == "" || strings.TrimSpace(state) == "" {
+		return CustomerBindPrepareResult{}, errors.New("回跳地址与授权状态不能为空")
+	}
+	body, err := json.Marshal(customerBindPrepareBody{RedirectUri: redirectURI, State: state})
+	if err != nil {
+		return CustomerBindPrepareResult{}, err
+	}
+	statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/customer-bind-prepare", body, true)
+	if err != nil {
+		return CustomerBindPrepareResult{}, err
+	}
+	if statusCode != http.StatusOK {
+		if statusCode == http.StatusNotFound {
+			return CustomerBindPrepareResult{}, errors.New("许可证或实例信息无效")
+		}
+		return CustomerBindPrepareResult{}, fmt.Errorf("授权预注册请求失败（HTTP %d）", statusCode)
+	}
+	var response customerBindPrepareResponse
+	if err = json.Unmarshal(raw, &response); err != nil {
+		return CustomerBindPrepareResult{}, err
+	}
+	this.updateClockOffset(response.ServerTime)
+	if response.Status != "OK" {
+		status := response.Status
+		if status == "" {
+			status = "ERROR"
+		}
+		return CustomerBindPrepareResult{}, &ProvisionError{Status: status, Message: response.Message}
+	}
+	return CustomerBindPrepareResult{RequestNo: response.RequestNo, ExpiresAt: response.ExpiresAt}, nil
+}
+
 // customerBindBody - 客户账号绑定请求体（一次性授权票据由 licen-hub 门户授权确认页签发）。
 type customerBindBody struct {
 	Code string `json:"code"`

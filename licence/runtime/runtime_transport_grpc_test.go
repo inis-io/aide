@@ -617,11 +617,13 @@ func TestGRPCActivateByCodeNotFound(t *testing.T) {
 // runtimeCustomerBindServer - 客户账号绑定 gRPC 假服务端：校验签名 metadata、捕获授权票据。
 type runtimeCustomerBindServer struct {
 	licencev1.UnimplementedLicenseRuntimeServiceServer
-	code     string
-	status   string
-	message  string
-	missing  []string
-	failCode codes.Code
+	code        string
+	redirectUri string
+	state       string
+	status      string
+	message     string
+	missing     []string
+	failCode    codes.Code
 }
 
 func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request *licencev1.CustomerBindRequest) (*licencev1.CustomerBindResponse, error) {
@@ -645,6 +647,32 @@ func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request
 		return response, nil
 	}
 	response.Customer = &licencev1.ProvisionCustomerView{MaskAccount: "r***@x.com", BoundAt: 123}
+	return response, nil
+}
+
+func (this *runtimeCustomerBindServer) CustomerBindPrepare(ctx context.Context, request *licencev1.CustomerBindPrepareRequest) (*licencev1.CustomerBindPrepareResponse, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	for _, key := range []string{LicenceProtocol.MetadataToken, LicenceProtocol.MetadataTimestamp, LicenceProtocol.MetadataNonce, LicenceProtocol.MetadataSignature, LicenceProtocol.MetadataSignVersion} {
+		if len(md.Get(key)) == 0 {
+			this.missing = append(this.missing, key)
+		}
+	}
+	this.redirectUri = request.GetRedirectUri()
+	this.state = request.GetState()
+	if this.failCode != codes.OK {
+		return nil, status.Error(this.failCode, "许可证或实例信息无效")
+	}
+	code := this.status
+	if code == "" {
+		code = "OK"
+	}
+	response := &licencev1.CustomerBindPrepareResponse{Status: code, ServerTime: time.Now().UnixMilli()}
+	if code != "OK" {
+		response.Message = this.message
+		return response, nil
+	}
+	response.RequestNo = "REQ-GRPC-0001"
+	response.ExpiresAt = 1735689600000
 	return response, nil
 }
 
@@ -682,6 +710,27 @@ func TestGRPCCustomerBind(t *testing.T) {
 	}
 	if server.code != "ABCD-EFGH" || result.MaskAccount != "r***@x.com" || result.BoundAt != 123 {
 		t.Fatalf("gRPC 绑定请求/响应映射不符: %q %+v", server.code, result)
+	}
+}
+
+// TestGRPCCustomerBindPrepare - 预注册回跳与 state 原样上送，响应字段与 HTTP 一致。
+func TestGRPCCustomerBindPrepare(t *testing.T) {
+	server := &runtimeCustomerBindServer{}
+	client := newCustomerBindGRPCClient(t, server)
+	const redirectURI = "https://im.example.com/admin/fed/bind-callback"
+	const state = "0123456789abcdef0123456789abcdef"
+	result, err := client.CustomerBindPrepare(context.Background(), redirectURI, state)
+	if err != nil {
+		t.Fatalf("gRPC 预注册失败: %v", err)
+	}
+	if len(server.missing) > 0 {
+		t.Fatalf("缺少签名 metadata: %v", server.missing)
+	}
+	if server.redirectUri != redirectURI || server.state != state {
+		t.Fatalf("回跳与 state 映射不符: %q %q", server.redirectUri, server.state)
+	}
+	if result.RequestNo != "REQ-GRPC-0001" || result.ExpiresAt != 1735689600000 {
+		t.Fatalf("预注册响应映射不符: %+v", result)
 	}
 }
 

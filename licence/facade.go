@@ -134,13 +134,14 @@ var ParseManifest = LicenceRuntime.ParseManifest
 // ============================= 装机自动申领（镜像 runtime 包） =============================
 
 type (
-	ProvisionError          = LicenceRuntime.ProvisionError
-	ProvisionOptions        = LicenceRuntime.ProvisionOptions
-	ProvisionResult         = LicenceRuntime.ProvisionResult
-	CustomerView            = LicenceRuntime.CustomerView
-	CustomerBindResult      = LicenceRuntime.CustomerBindResult
-	ActivationConflictError = LicenceRuntime.ActivationConflictError
-	ActivationConflictPlan  = LicenceRuntime.ActivationConflictPlan
+	ProvisionError            = LicenceRuntime.ProvisionError
+	ProvisionOptions          = LicenceRuntime.ProvisionOptions
+	ProvisionResult           = LicenceRuntime.ProvisionResult
+	CustomerView              = LicenceRuntime.CustomerView
+	CustomerBindResult        = LicenceRuntime.CustomerBindResult
+	CustomerBindPrepareResult = LicenceRuntime.CustomerBindPrepareResult
+	ActivationConflictError   = LicenceRuntime.ActivationConflictError
+	ActivationConflictPlan    = LicenceRuntime.ActivationConflictPlan
 )
 
 var ProvisionByPlan = LicenceRuntime.ProvisionByPlan

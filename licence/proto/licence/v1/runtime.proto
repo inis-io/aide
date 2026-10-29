@@ -18,6 +18,8 @@ service LicenseRuntimeService {
   // CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
   // 绑定成功后许可证归属客户账号，不改变席位或套餐。
   rpc CustomerBind(CustomerBindRequest) returns (CustomerBindResponse);
+  // CustomerBindPrepare - 已激活实例预注册一次性授权请求（固定许可证、回跳地址与 state）。
+  rpc CustomerBindPrepare(CustomerBindPrepareRequest) returns (CustomerBindPrepareResponse);
 }
 
 // UpdateRuntimeService - 在线更新运行面。
@@ -177,6 +179,21 @@ message CustomerBindResponse {
   string message = 2;
   // customer - 绑定成功后的客户账号视图
   ProvisionCustomerView customer = 3;
+}
+
+// CustomerBindPrepareRequest - 一次性授权预注册上下文。
+message CustomerBindPrepareRequest {
+  string redirect_uri = 1;
+  string state = 2;
+}
+
+// CustomerBindPrepareResponse - 预注册授权请求结果。
+message CustomerBindPrepareResponse {
+  string status = 1;
+  string message = 2;
+  string request_no = 3;
+  int64 expires_at = 4;
+  int64 server_time = 5;
 }
 
 // RuntimeResponse - 许可证运行面统一响应。

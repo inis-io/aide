@@ -162,7 +162,7 @@ result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
 
 ### 3.2 账号绑定、席位解绑与激活码
 
-**账号绑定**：已激活实例可从本系统跳转到 licen-hub 门户授权确认页，客户在页面确认后获得一次性授权票据并回跳。部署侧调用 `Client.CustomerBind` 后，当前许可证归属到该客户账号，客户可在门户查看证件与订单、生成激活码、解绑席位。绑定只建立账号归属，**不改变席位或套餐**，也不能接管已归属其他账号的许可证。
+**账号绑定**：已激活实例先调用 `Client.CustomerBindPrepare(ctx, redirectURI, state)` 以 activation-sign-v1 预注册固定许可证、回跳地址和 state，再跳转门户 `/admin/authorize?requestNo=...`。门户只按请求号确认，不接受 query 中的项目或回跳覆盖；客户确认获得一次性票据后回跳。部署侧调用 `Client.CustomerBind` 后，预注册许可证归属到该客户账号，客户可在门户查看证件与订单、生成激活码、解绑席位。绑定只建立账号归属，**不改变席位或套餐**，也不能接管已归属其他账号的许可证。
 
 ```go
 bound, err := client.CustomerBind(ctx, ticket)

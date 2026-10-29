@@ -230,6 +230,14 @@ func customerBindMap(response *licencev1.CustomerBindResponse) map[string]any {
 	return result
 }
 
+// customerBindPrepareMap - 授权预注册响应 → 与 HTTP 同形的 JSON。
+func customerBindPrepareMap(response *licencev1.CustomerBindPrepareResponse) map[string]any {
+	return map[string]any{
+		"status": response.GetStatus(), "serverTime": response.GetServerTime(),
+		"requestNo": response.GetRequestNo(), "expiresAt": response.GetExpiresAt(), "message": response.GetMessage(),
+	}
+}
+
 // conflictPlanMap - 换证冲突单证套餐视图 → 与 HTTP 同形的 JSON。
 func conflictPlanMap(plan *licencev1.ProvisionConflictPlan) map[string]any {
 	if plan == nil {
@@ -522,6 +530,24 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return code, nil, mapped
 		}
 		return marshalMap(provisionMap(response))
+
+	case http.MethodPost + " /api/v1/licenses/customer-bind-prepare":
+		var input customerBindPrepareBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.CustomerBindPrepareRequest{RedirectUri: input.RedirectUri, State: input.State}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_CustomerBindPrepare_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.license.CustomerBindPrepare(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		return marshalMap(customerBindPrepareMap(response))
 
 	case http.MethodPost + " /api/v1/licenses/customer-bind":
 		var input customerBindBody

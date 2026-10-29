@@ -663,7 +663,7 @@ type AutoOptions struct {
 
 低层 `ProvisionByPlan(ctx, ProvisionOptions)` 仍可独立使用；`ProvisionOptions` 已无 `ProvisionToken`，新增 `Fingerprint/Provider/ActivationCode`，`ProvisionResult` 新增 `Keyset json.RawMessage` 与 `Customer *CustomerView`。直接使用低层入口时，调用方必须先 `VerifyKeyset`，不得把匿名公钥列表当作信任根。
 
-**账号绑定与换机**：已激活实例经 `Client.CustomerBind(ctx, ticket)` 消费门户授权确认页签发的一次性票据，把当前许可证绑定到客户账号（activation-sign-v1 签名，HTTP `POST /api/v1/licenses/customer-bind`，gRPC `LicenseRuntimeService/CustomerBind`）。绑定只建立归属，不改变席位或套餐；未激活直接报错且不发请求，业务拒绝以 `*ProvisionError`（如 `BIND_INVALID`）返回。
+**账号绑定与换机**：已激活实例先经 `Client.CustomerBindPrepare(ctx, redirectURI, state)` 预注册固定许可证、回跳地址和 state（HTTP `POST /api/v1/licenses/customer-bind-prepare`，gRPC `LicenseRuntimeService/CustomerBindPrepare`），门户只按 requestNo 确认，禁止开放重定向。随后经 `Client.CustomerBind(ctx, ticket)` 消费一次性票据，把预注册许可证绑定到客户账号（activation-sign-v1 签名，HTTP `POST /api/v1/licenses/customer-bind`，gRPC `LicenseRuntimeService/CustomerBind`）。绑定只建立归属，不改变席位或套餐；未激活直接报错且不发请求，业务拒绝以 `*ProvisionError`（如 `BIND_INVALID`）返回。
 
 换机/重装不使用迁移码：客户先在门户解绑旧席位，再用 `ActivationCode` 让新实例入座。SDK 已删除 `MigrationCode` 入口，旧迁移请求只返回 `MIGRATION_REMOVED`，不会落入普通免费申领。申领响应在许可证已绑定客户账号时附带 `result.Customer`（`*licence.CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`；该视图只是展示用脱敏信息，不参与授权判定。
 
