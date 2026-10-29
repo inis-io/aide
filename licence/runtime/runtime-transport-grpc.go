@@ -204,22 +204,27 @@ func provisionMap(response *licencev1.ProvisionResponse) map[string]any {
 			"boundAt":     customer.GetBoundAt(),
 		}
 	}
-	return result
-}
-
-// customerBindMap - 客户账号绑定响应 → 与 HTTP 同形的 JSON（复用 HTTP 侧 customerBindResponse 解析）。
-func customerBindMap(response *licencev1.CustomerBindResponse) map[string]any {
-	result := map[string]any{"status": response.GetStatus()}
-	if response.GetMessage() != "" {
-		result["message"] = response.GetMessage()
-	}
-	if customer := response.GetCustomer(); customer != nil {
-		result["customer"] = map[string]any{
-			"maskAccount": customer.GetMaskAccount(),
-			"boundAt":     customer.GetBoundAt(),
+	if conflict := response.GetConflict(); conflict != nil {
+		result["conflict"] = map[string]any{
+			"currentPlan": conflictPlanMap(conflict.GetCurrentPlan()),
+			"targetPlan":  conflictPlanMap(conflict.GetTargetPlan()),
+			"seatUsed":    conflict.GetSeatUsed(),
+			"seatLimit":   conflict.GetSeatLimit(),
 		}
 	}
 	return result
+}
+
+// conflictPlanMap - 换证冲突单证套餐视图 → 与 HTTP 同形的 JSON。
+func conflictPlanMap(plan *licencev1.ProvisionConflictPlan) map[string]any {
+	if plan == nil {
+		return nil
+	}
+	return map[string]any{
+		"licenseNo": plan.GetLicenseNo(), "planCode": plan.GetPlanCode(),
+		"planName": plan.GetPlanName(), "billing": plan.GetBilling(),
+		"validUntil": plan.GetValidUntil(), "paid": plan.GetPaid(),
+	}
 }
 
 func runtimeMap(response *licencev1.RuntimeResponse) map[string]any {
@@ -485,9 +490,13 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			ProjectNo: input.ProjectNo, TenantId: input.TenantId,
 			InstallSn: input.InstallSN, FingerprintHash: input.FingerprintHash,
 			DeviceName: input.DeviceName, ClientTime: input.ClientTime,
-			MigrationCode: input.MigrationCode,
+			MigrationCode: input.MigrationCode, ActivationCode: input.ActivationCode,
+			CurrentLicenseNo: input.CurrentLicenseNo, ReleaseOldSeat: input.ReleaseOldSeat,
+			ConfirmReplace: input.ConfirmReplace,
 		}
-		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_ProvisionByPlan_FullMethodName, request, false)
+		// withSign 透传：sdk_auto 匿名申领为 false；激活码换证（ActivateByCode）为 true，
+		// 携带 activation-sign-v1 签名 metadata 供平台做冲突评估与旧席位释放。
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_ProvisionByPlan_FullMethodName, request, withSign)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -498,24 +507,6 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return code, nil, mapped
 		}
 		return marshalMap(provisionMap(response))
-
-	case http.MethodPost + " /api/v1/licenses/customer-bind":
-		var input customerBindBody
-		if err := json.Unmarshal(body, &input); err != nil {
-			return 0, nil, err
-		}
-		request := &licencev1.CustomerBindRequest{Code: input.Code}
-		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_CustomerBind_FullMethodName, request, withSign)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer cancel()
-		response, err := this.license.CustomerBind(callCtx, request)
-		if err != nil {
-			code, mapped := grpcHTTPCode(err)
-			return code, nil, mapped
-		}
-		return marshalMap(customerBindMap(response))
 
 	case http.MethodPost + " /api/v1/platform/configs/consume":
 		var input platformConfigConsumeBody

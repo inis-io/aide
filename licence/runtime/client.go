@@ -434,78 +434,123 @@ func (this *Client) Reactivate(ctx context.Context) error {
 	return this.activateLocked(ctx)
 }
 
-// CustomerBindResult - 客户账号绑定回执（平台下发的脱敏客户视图）。
-type CustomerBindResult struct {
-	// MaskAccount - 脱敏账号（如 r***@x.com）
-	MaskAccount string
-	// BoundAt - 绑定时间（毫秒）
-	BoundAt int64
-}
-
-// customerBindBody - 客户账号绑定请求体（一次性绑定码由 licen-hub 客户门户签发）。
-type customerBindBody struct {
-	Code string `json:"code"`
-}
-
-// customerBindResponse - 客户账号绑定统一响应（双协议同形：HTTP 为平台原文，gRPC 由传输层合成）。
-type customerBindResponse struct {
-	Status   string            `json:"status"`
-	Message  string            `json:"message"`
-	Customer *customerViewJSON `json:"customer,omitempty"`
-}
-
-// CustomerBind - 客户账号绑定（一次性绑定码；凭证族与 activate 同级，实例签名防重放）。
-// 未激活（无 token）直接报错且不发请求；成功返回脱敏客户视图，业务拒绝（如 BIND_INVALID）
-// 以 *ProvisionError 原样透传，errors.As 断言后可按 Status 降级。
+// ActivateByCode - 激活码换证入座（已激活实例专用；全新未激活实例用 AutoStartWithOptions 的 ActivationCode）。
+// 以当前实例凭证签名（activation-sign-v1）调 provision 激活码分支：
+// 当前证≠目标证时换证——返回的目标证经 keyset 验证、auto.json 落盘、新 Client 激活占席后返回，
+// releaseOldSeat=true 由平台同事务释放当前证上的旧席位；当前证已持付费套餐且 confirmReplace=false 时
+// 平台返回 ACTIVATION_CONFLICT（*ActivationConflictError，不消费激活码），调用方展示对比载荷
+// 由用户确认后以 confirmReplace=true 重发；当前证=目标证时幂等（平台不重复占席），SDK 短路为
+// Reactivate 刷新信封后直接返回当前 Client。激活码只过内存：禁止落盘、写日志或进错误文案，
+// 业务拒绝统一模糊文案「激活码无效或已过期」（ACTIVATION_INVALID）防枚举。
 /**
  * @param ctx context.Context - 调用上下文
- * @param code string - 一次性绑定码
- * @return CustomerBindResult - 绑定后的脱敏客户视图（脱敏账号 + 绑定时间）
+ * @param code string - 一次性激活码（licen-hub 客户门户签发）
+ * @param confirmReplace bool - 付费证冲突确认（收到 *ActivationConflictError 后由用户确认置 true 重发）
+ * @return AutoResult - 换证结果（Client 为已 Start 的新客户端；同证幂等时为当前客户端）
  * @example：
- * 	result, err := client.CustomerBind(ctx, "ABCD-EFGH")
+ * 	result, err := client.ActivateByCode(ctx, "ABCD-EFGH-IJKL", false)
+ * 	var conflict *licence.ActivationConflictError
+ * 	if errors.As(err, &conflict) { // 展示 conflict.CurrentPlan / conflict.TargetPlan 后确认重发 }
  */
-func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBindResult, error) {
+func (this *Client) ActivateByCode(ctx context.Context, code string, confirmReplace bool) (AutoResult, error) {
 
 	this.mu.RLock()
 	token := this.state.ActivationToken
 	this.mu.RUnlock()
 	if token == "" {
-		return CustomerBindResult{}, errors.New("客户端未激活，无法绑定客户账号")
+		return AutoResult{}, errors.New("客户端未激活，无法使用激活码（全新实例请用 AutoStartWithOptions 的 ActivationCode）")
 	}
-	body, err := json.Marshal(customerBindBody{Code: code})
+	if strings.TrimSpace(code) == "" {
+		return AutoResult{}, errors.New("激活码不能为空")
+	}
+	installSN, err := resolveInstallSN(this.options.StorageDir, "")
 	if err != nil {
-		return CustomerBindResult{}, err
+		return AutoResult{}, err
 	}
-	statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/customer-bind", body, true)
+	body, err := json.Marshal(provisionBody{
+		ProjectNo: this.options.ProjectNo, InstallSN: installSN,
+		DeviceName: this.options.DeviceName, ClientTime: time.Now().UnixMilli(),
+		ActivationCode: code, CurrentLicenseNo: this.options.LicenseNo,
+		ReleaseOldSeat: true, ConfirmReplace: confirmReplace,
+	})
 	if err != nil {
-		return CustomerBindResult{}, err
+		return AutoResult{}, err
 	}
-	// 非 200 不解析 body：只把 404（含 gRPC NotFound 经传输层归一）按模糊语义锚定
-	// 「许可证或实例信息无效」；其余状态码（含网关 502/504 的空 body）一律返回传输层错误，
-	// 不把非凭证故障误报成凭证终态，也不把空 body 的 JSON 解析错误抛给调用方
+	statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/provision", body, true)
+	if err != nil {
+		return AutoResult{}, err
+	}
+	// 非 200 不解析 body：404（含 gRPC NotFound 归一）锚定模糊凭证终态，其余按传输层错误上报。
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotFound {
-			return CustomerBindResult{}, errors.New("许可证或实例信息无效")
+			return AutoResult{}, errors.New("许可证或实例信息无效")
 		}
-		return CustomerBindResult{}, fmt.Errorf("客户绑定请求失败（HTTP %d）", statusCode)
+		return AutoResult{}, fmt.Errorf("激活码请求失败（HTTP %d）", statusCode)
 	}
-	var response customerBindResponse
+	var response provisionResponse
 	if err = json.Unmarshal(raw, &response); err != nil {
-		return CustomerBindResult{}, err
+		return AutoResult{}, err
 	}
-	if response.Status != "OK" {
-		status := response.Status
-		if status == "" {
-			status = "ERROR"
+	this.updateClockOffset(response.ServerTime)
+	provision, err := finishProvision(response)
+	if err != nil {
+		return AutoResult{}, err
+	}
+
+	// 同证幂等：平台未重复占席，本地刷新信封即可，不构造新客户端。
+	if provision.LicenseNo == this.options.LicenseNo {
+		if err = this.Reactivate(ctx); err != nil {
+			return AutoResult{}, err
 		}
-		return CustomerBindResult{}, &ProvisionError{Status: status, Message: response.Message}
+		return AutoResult{
+			Client: this, LicenseNo: this.options.LicenseNo, Salt: this.options.Salt,
+			InstanceNo: this.options.InstanceNo, Customer: provision.Customer,
+		}, nil
 	}
-	result := CustomerBindResult{}
-	if response.Customer != nil {
-		result.MaskAccount = response.Customer.MaskAccount
-		result.BoundAt = response.Customer.BoundAt
+
+	// 换证：构造新客户端 → 验证目标证 keyset → 落 auto.json → Start 激活占席。
+	// auto.json 必须先于 Start 落盘：激活码在 provision 时已消费，Start 失败由下次启动
+	// 经 auto.json 恢复目标证重试，不得回退到旧证（旧席位已被平台同事务释放）。
+	options := this.options
+	options.LicenseNo = provision.LicenseNo
+	options.Salt = provision.Salt
+	options.InstanceNo = ""
+	client, err := New(options)
+	if err != nil {
+		return AutoResult{}, err
 	}
-	return result, nil
+	closeWithError := func(err error) (AutoResult, error) {
+		_ = client.Close()
+		return AutoResult{}, err
+	}
+	candidate, err := client.verifyKeysetCandidate(provision.Keyset)
+	if err != nil {
+		return closeWithError(fmt.Errorf("激活码目标证 keyset 验证失败: %w", err))
+	}
+	metadata := autoMetadata{
+		ProjectNo: this.options.ProjectNo, LicenseNo: provision.LicenseNo, Salt: provision.Salt,
+	}
+	if err = saveAutoMetadata(this.options.StorageDir, metadata); err != nil {
+		return closeWithError(err)
+	}
+	client.commitKeyset(candidate)
+	if err = client.Start(ctx); err != nil {
+		return closeWithError(err)
+	}
+	instanceNo := ""
+	if envelope, exists := client.Envelope(); exists {
+		instanceNo = strings.TrimSpace(envelope.Payload.InstanceId)
+	}
+	if instanceNo != "" {
+		metadata.InstanceNo = instanceNo
+		if err = saveAutoMetadata(this.options.StorageDir, metadata); err != nil {
+			return closeWithError(err)
+		}
+	}
+	return AutoResult{
+		Client: client, LicenseNo: provision.LicenseNo, Salt: provision.Salt,
+		InstanceNo: instanceNo, Provisioned: true, Customer: provision.Customer,
+	}, nil
 }
 
 // Reset - 清除本机运行状态，不通知平台释放席位。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -440,20 +441,26 @@ func TestGRPCRuntimeActivateMapsDeviceNameAndSeatNo(t *testing.T) {
 	}
 }
 
-// ============================= 客户账号绑定（CustomerBind） =============================
+// ============================= 激活码换证入座（ActivateByCode / provision 分支） =============================
 
-// runtimeCustomerBindServer - 客户账号绑定 gRPC 假服务端：校验签名 metadata、捕获绑定码；
-// status 非空且非 OK 时返回业务拒绝（与 HTTP 侧同形的 status/message）。
-type runtimeCustomerBindServer struct {
+// runtimeProvisionCodeServer - 激活码 provision 分支 gRPC 假服务端：校验签名 metadata、
+// 捕获激活码四要素；status 非空且非 OK 时返回业务拒绝（与 HTTP 侧同形的 status/message），
+// conflict 非空时随 ACTIVATION_CONFLICT 下发对比载荷；licenseNo 空 = 与当前证同号（同证幂等短路）。
+type runtimeProvisionCodeServer struct {
 	licencev1.UnimplementedLicenseRuntimeServiceServer
-	code     string
-	status   string
-	message  string
-	missing  []string
-	failCode codes.Code
+	activationCode   string
+	currentLicenseNo string
+	releaseOldSeat   bool
+	confirmReplace   bool
+	status           string
+	message          string
+	licenseNo        string
+	conflict         *licencev1.ProvisionConflictView
+	missing          []string
+	failCode         codes.Code
 }
 
-func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request *licencev1.CustomerBindRequest) (*licencev1.CustomerBindResponse, error) {
+func (this *runtimeProvisionCodeServer) ProvisionByPlan(ctx context.Context, request *licencev1.ProvisionRequest) (*licencev1.ProvisionResponse, error) {
 
 	md, _ := metadata.FromIncomingContext(ctx)
 	for _, key := range []string{LicenceProtocol.MetadataToken, LicenceProtocol.MetadataTimestamp, LicenceProtocol.MetadataNonce, LicenceProtocol.MetadataSignature, LicenceProtocol.MetadataSignVersion} {
@@ -461,25 +468,32 @@ func (this *runtimeCustomerBindServer) CustomerBind(ctx context.Context, request
 			this.missing = append(this.missing, key)
 		}
 	}
-	this.code = request.GetCode()
+	this.activationCode = request.GetActivationCode()
+	this.currentLicenseNo = request.GetCurrentLicenseNo()
+	this.releaseOldSeat = request.GetReleaseOldSeat()
+	this.confirmReplace = request.GetConfirmReplace()
 	if this.failCode != codes.OK {
 		return nil, status.Error(this.failCode, "许可证或实例信息无效")
 	}
-	status := this.status
-	if status == "" {
-		status = "OK"
+	code := this.status
+	if code == "" {
+		code = "OK"
 	}
-	response := &licencev1.CustomerBindResponse{Status: status}
-	if status != "OK" {
-		response.Message = this.message
+	response := &licencev1.ProvisionResponse{Status: code, ServerTime: time.Now().UnixMilli(), Message: this.message, Conflict: this.conflict}
+	if code != "OK" {
 		return response, nil
 	}
+	response.LicenseNo = this.licenseNo
+	if response.LicenseNo == "" {
+		response.LicenseNo = "LIC-2026-000123"
+	}
+	response.Salt = "salt-grpc"
 	response.Customer = &licencev1.ProvisionCustomerView{MaskAccount: "r***@x.com", BoundAt: 123}
 	return response, nil
 }
 
-// newCustomerBindGRPCClient - bufconn 内存 gRPC 承载的裸 Client（预置 token/私钥，免激活）。
-func newCustomerBindGRPCClient(t *testing.T, server licencev1.LicenseRuntimeServiceServer) *Client {
+// newProvisionCodeGRPCClient - bufconn 内存 gRPC 承载的裸 Client（预置 token/私钥，免激活）。
+func newProvisionCodeGRPCClient(t *testing.T, server licencev1.LicenseRuntimeServiceServer) *Client {
 
 	t.Helper()
 	listener := bufconn.Listen(1 << 20)
@@ -496,57 +510,91 @@ func newCustomerBindGRPCClient(t *testing.T, server licencev1.LicenseRuntimeServ
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
+	client := &Client{options: Options{
+		HTTPTimeout: time.Second, StorageDir: t.TempDir(),
+		ProjectNo: "INIS-TEST", LicenseNo: "LIC-2026-000123",
+	}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
 	client.transport = &grpcRuntimeTransport{client: client, conn: conn, license: licencev1.NewLicenseRuntimeServiceClient(conn)}
 	return client
 }
 
-// TestGRPCCustomerBind - gRPC 客户账号绑定：绑定码随 CustomerBindRequest 上送、
-// 签名 metadata 齐全，响应经 transport 合成同形 JSON 后由公开方法解析为同一结果。
-func TestGRPCCustomerBind(t *testing.T) {
+// TestGRPCActivateByCodeFields - gRPC 激活码换证：激活码四要素随 ProvisionRequest 上送、
+// 签名 metadata 齐全（withSign 透传）。平台返回与当前证同号走同证幂等短路（Reactivate 因假服务端
+// 未实现 Activate 而报错，请求映射断言在错误返回前已完成；同证全链路见 HTTP 侧 TestClientActivateByCodeSameLicence）。
+func TestGRPCActivateByCodeFields(t *testing.T) {
 
-	server := &runtimeCustomerBindServer{}
-	client := newCustomerBindGRPCClient(t, server)
-	result, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
-	if err != nil {
-		t.Fatalf("gRPC CustomerBind 失败: %v", err)
+	server := &runtimeProvisionCodeServer{}
+	client := newProvisionCodeGRPCClient(t, server)
+	_, err := client.ActivateByCode(context.Background(), "ABCD-EFGH-IJKL", true)
+	if err == nil {
+		t.Fatal("假服务端未实现 Activate，同证幂等应随 Reactivate 报错")
 	}
 	if len(server.missing) > 0 {
 		t.Fatalf("缺少签名 metadata: %v", server.missing)
 	}
-	if server.code != "ABCD-EFGH" {
-		t.Fatalf("绑定码未随 gRPC 上送: %q", server.code)
+	if server.activationCode != "ABCD-EFGH-IJKL" {
+		t.Fatalf("激活码未随 gRPC 上送: %q", server.activationCode)
 	}
-	if result.MaskAccount != "r***@x.com" || result.BoundAt != 123 {
-		t.Fatalf("gRPC 客户视图映射不符: %+v", result)
+	if server.currentLicenseNo != "LIC-2026-000123" {
+		t.Fatalf("当前许可证编号未随 gRPC 上送: %q", server.currentLicenseNo)
+	}
+	if !server.releaseOldSeat {
+		t.Fatal("旧席位释放标记未随 gRPC 上送")
+	}
+	if !server.confirmReplace {
+		t.Fatal("冲突确认标记未随 gRPC 上送")
 	}
 }
 
-// TestGRPCCustomerBindRejected - gRPC 业务拒绝：status/message 原样以 *ProvisionError 透传。
-func TestGRPCCustomerBindRejected(t *testing.T) {
+// TestGRPCActivateByCodeConflict - gRPC 冲突载荷：ACTIVATION_CONFLICT + conflict 经
+// provisionMap 合成同形 JSON 后解析为 *ActivationConflictError。
+func TestGRPCActivateByCodeConflict(t *testing.T) {
 
-	server := &runtimeCustomerBindServer{status: "BIND_INVALID", message: "绑定码无效或已过期"}
-	client := newCustomerBindGRPCClient(t, server)
-	_, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
-	if err == nil {
-		t.Fatal("gRPC 业务拒绝应返回错误")
+	server := &runtimeProvisionCodeServer{
+		status:  "ACTIVATION_CONFLICT",
+		message: "当前许可证已持付费套餐",
+		conflict: &licencev1.ProvisionConflictView{
+			CurrentPlan: &licencev1.ProvisionConflictPlan{LicenseNo: "LIC-2026-000123", PlanCode: "std", PlanName: "标准版", Billing: "yearly", Paid: true},
+			TargetPlan:  &licencev1.ProvisionConflictPlan{LicenseNo: "LIC-2026-000999", PlanCode: "pro", PlanName: "专业版", Billing: "monthly", Paid: true},
+			SeatUsed:    1, SeatLimit: 3,
+		},
 	}
+	client := newProvisionCodeGRPCClient(t, server)
+	_, err := client.ActivateByCode(context.Background(), "ABCD-EFGH-IJKL", false)
+	var conflict *ActivationConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("gRPC 冲突应可断言为 *ActivationConflictError，实际 %T（%v）", err, err)
+	}
+	if conflict.CurrentPlan.PlanCode != "std" || conflict.TargetPlan.PlanCode != "pro" {
+		t.Fatalf("gRPC 冲突对比载荷不符: %+v", conflict)
+	}
+	if conflict.SeatUsed != 1 || conflict.SeatLimit != 3 {
+		t.Fatalf("gRPC 席位占用载荷不符: %d/%d", conflict.SeatUsed, conflict.SeatLimit)
+	}
+}
+
+// TestGRPCActivateByCodeRejected - gRPC 业务拒绝：status/message 原样以 *ProvisionError 透传。
+func TestGRPCActivateByCodeRejected(t *testing.T) {
+
+	server := &runtimeProvisionCodeServer{status: "ACTIVATION_INVALID", message: "激活码无效或已过期"}
+	client := newProvisionCodeGRPCClient(t, server)
+	_, err := client.ActivateByCode(context.Background(), "ABCD-EFGH-IJKL", false)
 	provisionErr, ok := err.(*ProvisionError)
 	if !ok {
 		t.Fatalf("gRPC 业务拒绝应可断言为 *ProvisionError，实际 %T", err)
 	}
-	if provisionErr.Status != "BIND_INVALID" || provisionErr.Message != "绑定码无效或已过期" {
+	if provisionErr.Status != "ACTIVATION_INVALID" || provisionErr.Message != "激活码无效或已过期" {
 		t.Fatalf("gRPC 业务拒绝透传不符: %+v", provisionErr)
 	}
 }
 
-// TestGRPCCustomerBindNotFound - gRPC NotFound（许可证已删除）经 transport 归一为 404 + 空 body，
+// TestGRPCActivateByCodeNotFound - gRPC NotFound（许可证已删除）经 transport 归一为 404 + 空 body，
 // 公开方法必须返回「许可证或实例信息无效」而非空 body 的 JSON 解析错误。
-func TestGRPCCustomerBindNotFound(t *testing.T) {
+func TestGRPCActivateByCodeNotFound(t *testing.T) {
 
-	server := &runtimeCustomerBindServer{failCode: codes.NotFound}
-	client := newCustomerBindGRPCClient(t, server)
-	_, err := client.CustomerBind(context.Background(), "ABCD-EFGH")
+	server := &runtimeProvisionCodeServer{failCode: codes.NotFound}
+	client := newProvisionCodeGRPCClient(t, server)
+	_, err := client.ActivateByCode(context.Background(), "ABCD-EFGH-IJKL", false)
 	if err == nil || err.Error() != "许可证或实例信息无效" {
 		t.Fatalf("gRPC NotFound 应归一为「许可证或实例信息无效」，实际 %v", err)
 	}

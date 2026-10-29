@@ -34,7 +34,10 @@ type validateBody struct {
 
 // provisionBody - 装机自动申领请求体（sdk_auto：projectNo + installSN 定位，无项目级令牌）。
 // tenantId 缺省 0 = 普通装机申领，>0 = SaaS 子租户发证（omitempty 不上送零值）。
-// migrationCode 为末位字段：新增字段只能追加在结构体末尾，既有 JSON 键序不得变化。
+// migrationCode 及之后为末位码分支字段：新增字段只能追加在结构体末尾，既有 JSON 键序不得变化。
+// migrationCode（换机迁移）与 activationCode（激活码入座）互斥，同时携带平台判无效请求。
+// currentLicenseNo/releaseOldSeat/confirmReplace 仅在已激活实例换证入座时上送，
+// 携带 currentLicenseNo 的请求必须带 activation-sign-v1 实例签名（Client.ActivateByCode 保证）。
 type provisionBody struct {
 	ProjectNo       string `json:"projectNo"`
 	TenantId        int64  `json:"tenantId,omitempty"`
@@ -43,6 +46,10 @@ type provisionBody struct {
 	DeviceName      string `json:"deviceName,omitempty"`
 	ClientTime      int64  `json:"clientTime,omitempty"`
 	MigrationCode   string `json:"migrationCode,omitempty"`
+	ActivationCode  string `json:"activationCode,omitempty"`
+	CurrentLicenseNo string `json:"currentLicenseNo,omitempty"`
+	ReleaseOldSeat  bool   `json:"releaseOldSeat,omitempty"`
+	ConfirmReplace  bool   `json:"confirmReplace,omitempty"`
 }
 
 // provisionResponse - 装机自动申领统一响应（契约 §6；status 为业务状态码）
@@ -58,12 +65,31 @@ type provisionResponse struct {
 	Keyset        json.RawMessage   `json:"keyset"`
 	Message       string            `json:"message"`
 	Customer      *customerViewJSON `json:"customer,omitempty"`
+	Conflict      *conflictViewJSON `json:"conflict,omitempty"`
 }
 
 // customerViewJSON - 客户账号视图线格式（平台未绑定客户账号时整体缺省）。
 type customerViewJSON struct {
 	MaskAccount string `json:"maskAccount"`
 	BoundAt     int64  `json:"boundAt"`
+}
+
+// conflictViewJSON - 激活码换证冲突对比载荷线格式（status=ACTIVATION_CONFLICT 时下发）。
+type conflictViewJSON struct {
+	CurrentPlan *conflictPlanJSON `json:"currentPlan,omitempty"`
+	TargetPlan  *conflictPlanJSON `json:"targetPlan,omitempty"`
+	SeatUsed    int               `json:"seatUsed"`
+	SeatLimit   int               `json:"seatLimit"`
+}
+
+// conflictPlanJSON - 换证冲突对比中的单证套餐视图线格式。
+type conflictPlanJSON struct {
+	LicenseNo  string `json:"licenseNo"`
+	PlanCode   string `json:"planCode"`
+	PlanName   string `json:"planName"`
+	Billing    string `json:"billing"`
+	ValidUntil string `json:"validUntil"`
+	Paid       bool   `json:"paid"`
 }
 
 // runtimeResponse - 运行面统一响应（keyset 与 envelope 均为原始 JSON，验签后原子替换缓存）

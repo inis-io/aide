@@ -28,6 +28,9 @@ type AutoOptions struct {
 	TenantId int64
 	// MigrationCode - 一次性迁移码（可选；仅新服务器迁移场景使用，为空保持常规 sdk_auto 申领）。
 	MigrationCode string
+	// ActivationCode - 一次性激活码（可选；首次申领时入座客户既有许可证的一个席位，
+	// 不签发新证；auto.json 已存在时与 MigrationCode 一样静默忽略；与 MigrationCode 互斥）。
+	ActivationCode string
 	// StorageDir - auto.json、install.sn 与加密运行状态的存储目录（默认 ./runtime/licence）。
 	StorageDir string
 	// InstallSN - 安装唯一标识（可选，为空时懒生成并持久化）。
@@ -134,7 +137,7 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 			StorageDir: opts.StorageDir, InstallSN: opts.InstallSN, DeviceName: opts.DeviceName,
 			Fingerprint: opts.Fingerprint, Provider: opts.Provider,
 			Transport: opts.Transport, GRPC: opts.GRPC, HTTPTimeout: opts.HTTPTimeout,
-			MigrationCode: opts.MigrationCode,
+			MigrationCode: opts.MigrationCode, ActivationCode: opts.ActivationCode,
 		})
 		if provisionErr != nil {
 			return AutoResult{}, provisionErr

@@ -212,6 +212,84 @@ func TestProvisionByPlanMigrationRejected(t *testing.T) {
 	}
 }
 
+// TestProvisionByPlanActivationCodeHTTP - 激活码透传（HTTP）：全新实例申领 body 携带
+// activationCode（不带 currentLicenseNo，匿名路径），平台下发目标证与客户视图。
+func TestProvisionByPlanActivationCodeHTTP(t *testing.T) {
+
+	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
+		return "OK", map[string]any{
+			"licenseNo": "LIC-2026-000666", "salt": "salt-activate",
+			"bindingPolicy": "seats", "seatLimit": 3,
+			"expiresAt": time.Now().UnixMilli() + 365*24*3600*1000, "reissued": false,
+			"customer":  map[string]any{"maskAccount": "r***@x.com", "boundAt": 123},
+		}
+	})
+	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: server.server.URL, ProjectNo: "INIS-ACTIVATE",
+		ActivationCode: "ABCD-EFGH-IJKL", StorageDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("激活码申领失败: %v", err)
+	}
+	body := server.body()
+	if body["activationCode"] != "ABCD-EFGH-IJKL" {
+		t.Fatalf("激活码未上送: %v", body)
+	}
+	if _, exists := body["migrationCode"]; exists {
+		t.Fatalf("激活码与迁移码互斥，不应携带迁移码: %v", body)
+	}
+	if _, exists := body["currentLicenseNo"]; exists {
+		t.Fatalf("全新实例不应上送当前许可证编号: %v", body)
+	}
+	if result.LicenseNo != "LIC-2026-000666" || result.BindingPolicy != "seats" || result.SeatLimit != 3 {
+		t.Fatalf("目标证映射不符: %+v", result)
+	}
+	if result.Customer == nil || result.Customer.MaskAccount != "r***@x.com" {
+		t.Fatalf("客户视图映射不符: %+v", result.Customer)
+	}
+}
+
+// TestProvisionByPlanActivationConflictHTTP - 冲突载荷（HTTP）：ACTIVATION_CONFLICT 以
+// *ActivationConflictError 透出，对比载荷字段完整，且不作为 *ProvisionError 匹配。
+func TestProvisionByPlanActivationConflictHTTP(t *testing.T) {
+
+	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
+		return "ACTIVATION_CONFLICT", map[string]any{
+			"message": "当前许可证已持付费套餐",
+			"conflict": map[string]any{
+				"currentPlan": map[string]any{"licenseNo": "LIC-2026-000123", "planCode": "std", "planName": "标准版", "billing": "yearly", "validUntil": "2027-01-01T00:00:00+08:00", "paid": true},
+				"targetPlan":  map[string]any{"licenseNo": "LIC-2026-000999", "planCode": "pro", "planName": "专业版", "billing": "monthly", "validUntil": "2026-12-01T00:00:00+08:00", "paid": true},
+				"seatUsed":    1, "seatLimit": 3,
+			},
+		}
+	})
+	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: server.server.URL, ProjectNo: "INIS-ACTIVATE",
+		ActivationCode: "ABCD-EFGH-IJKL", CurrentLicenseNo: "LIC-2026-000123",
+		StorageDir: t.TempDir(),
+	})
+	var conflict *ActivationConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("冲突应可断言为 *ActivationConflictError，实际 %T（%v）", err, err)
+	}
+	var provisionErr *ProvisionError
+	if errors.As(err, &provisionErr) {
+		t.Fatal("冲突错误不应同时匹配 *ProvisionError")
+	}
+	if conflict.CurrentPlan.PlanName != "标准版" || !conflict.CurrentPlan.Paid {
+		t.Fatalf("当前套餐载荷不符: %+v", conflict.CurrentPlan)
+	}
+	if conflict.TargetPlan.PlanCode != "pro" || conflict.TargetPlan.Billing != "monthly" {
+		t.Fatalf("目标套餐载荷不符: %+v", conflict.TargetPlan)
+	}
+	if conflict.SeatUsed != 1 || conflict.SeatLimit != 3 {
+		t.Fatalf("席位载荷不符: %d/%d", conflict.SeatUsed, conflict.SeatLimit)
+	}
+	if conflict.Error() == "" {
+		t.Fatal("冲突错误文本不应为空")
+	}
+}
+
 // TestProvisionByPlanBusinessError - 业务拒绝：status != OK → *ProvisionError（HTTP 200 传输）。
 func TestProvisionByPlanBusinessError(t *testing.T) {
 
@@ -376,6 +454,44 @@ func TestProvisionByPlanMigrationCodeGRPC(t *testing.T) {
 	}
 	if result.Reissued {
 		t.Fatalf("迁移申领不应标记续签: %+v", result)
+	}
+}
+
+// TestProvisionByPlanActivationCodeGRPC - 激活码透传（gRPC）：请求字段与响应 customer 映射
+// 必须与 HTTP 线格式一致（重点防 provisionMap 漏同步）；激活码与迁移码互斥不同时上送。
+func TestProvisionByPlanActivationCodeGRPC(t *testing.T) {
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &provisionGRPCServer{t: t, customer: &licencev1.ProvisionCustomerView{MaskAccount: "r***@x.com", BoundAt: 123}}
+	server := grpc.NewServer()
+	licencev1.RegisterLicenseRuntimeServiceServer(server, fake)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+
+	result, err := ProvisionByPlan(t.Context(), ProvisionOptions{
+		ServerURL: "grpc://" + listener.Addr().String(),
+		ProjectNo: "INIS-ACTIVATE", ActivationCode: "ABCD-EFGH-IJKL",
+		StorageDir: t.TempDir(), DeviceName: "g-activate",
+		Transport: TransportGRPC, GRPC: GRPCOptions{AllowInsecure: true},
+		HTTPTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("gRPC 激活码申领失败: %v", err)
+	}
+	if fake.request.GetActivationCode() != "ABCD-EFGH-IJKL" {
+		t.Fatalf("gRPC 激活码未上送: %q", fake.request.GetActivationCode())
+	}
+	if fake.request.GetMigrationCode() != "" {
+		t.Fatalf("激活码与迁移码互斥，不应携带迁移码: %q", fake.request.GetMigrationCode())
+	}
+	if fake.request.GetCurrentLicenseNo() != "" {
+		t.Fatalf("全新实例不应上送当前许可证编号: %q", fake.request.GetCurrentLicenseNo())
+	}
+	if result.Customer == nil || result.Customer.MaskAccount != "r***@x.com" {
+		t.Fatalf("gRPC 客户账号视图映射不符: %+v", result.Customer)
 	}
 }
 

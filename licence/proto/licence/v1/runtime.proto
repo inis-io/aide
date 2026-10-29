@@ -12,10 +12,11 @@ service LicenseRuntimeService {
   // ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public；project_no + install_sn 定位，
   // 平台按项目 issue_mode=sdk_auto 配置的 auto_issue_plan_id 套餐档位签发，不使用项目级令牌）。
   // 强制指纹项目首次返回 FINGERPRINT_REQUIRED + salt，客户端计算指纹后复用 install_sn 重试一次。
+  // 末位可选码分支（互斥，同时携带判无效请求）：migration_code = 换机迁移（接管既有许可证、释放旧席位）；
+  // activation_code = 激活码入座（占用客户既有许可证的一个席位、不签发新证）。
   rpc ProvisionByPlan(ProvisionRequest) returns (ProvisionResponse);
-  // CustomerBind - 客户账号绑定（一次性绑定码；activation-sign-v1 实例签名防重放）。
-  // 绑定成功后许可证归属客户账号，后续 provision 响应经 customer 视图下发脱敏账号。
-  rpc CustomerBind(CustomerBindRequest) returns (CustomerBindResponse);
+  // CustomerBind RPC 已随「绑定码升级为激活码」删除：客户归属改由激活码入座天然达成。
+  // 方法名 CustomerBind 与消息名 CustomerBindRequest/CustomerBindResponse 永久锁定，禁止复用。
 }
 
 // UpdateRuntimeService - 在线更新运行面。
@@ -101,6 +102,17 @@ message ProvisionRequest {
   int64 client_time = 6;
   // migration_code - 一次性迁移码（可选；携带时平台返回既有许可证、不消耗 sdk_auto 配额）
   string migration_code = 9;
+  // activation_code - 一次性激活码（可选；携带时入座客户既有许可证的一个席位，不签发新证、
+  // 不消耗 sdk_auto 配额；与 migration_code 互斥，同时携带判无效请求）
+  string activation_code = 10;
+  // current_license_no - 当前许可证编号（可选；已激活实例换证入座时上送，携带时请求必须
+  // 带 activation-sign-v1 实例签名，平台据此做冲突评估与旧席位释放）
+  string current_license_no = 11;
+  // release_old_seat - 换证入座成功后是否同事务释放当前许可证上的旧席位（仅随 current_license_no 生效）
+  bool release_old_seat = 12;
+  // confirm_replace - 冲突确认（仅随 current_license_no 生效）：当前证已持付费套餐时，
+  // 缺省返回 ACTIVATION_CONFLICT 对比载荷且不消费激活码；显式 true 才执行换证
+  bool confirm_replace = 13;
 }
 
 // RedeemRequest（商业激活码兑换请求）已随「激活码体系整体下线」删除：激活码兑换不再存在。
@@ -123,6 +135,8 @@ message ProvisionResponse {
   bytes keyset_json = 10;
   // customer - 客户账号视图（仅许可证已绑定客户账号时下发，未绑定为 null）
   ProvisionCustomerView customer = 11;
+  // conflict - 激活码换证冲突对比载荷（仅 status=ACTIVATION_CONFLICT 时下发，此时不消费激活码）
+  ProvisionConflictView conflict = 12;
 }
 
 // ProvisionCustomerView - 许可证已绑定的客户账号视图（仅展示脱敏信息）。
@@ -133,19 +147,27 @@ message ProvisionCustomerView {
   int64 bound_at = 2;
 }
 
-// CustomerBindRequest - 客户账号绑定请求。
-message CustomerBindRequest {
-  // code - 一次性绑定码
-  string code = 1;
+// ProvisionConflictPlan - 换证冲突对比中的单证套餐视图。
+message ProvisionConflictPlan {
+  string license_no = 1;     // 许可证编号
+  string plan_code = 2;      // 套餐编码
+  string plan_name = 3;      // 套餐名称
+  string billing = 4;        // 计费周期（monthly/yearly/buyout，免费证为空）
+  string valid_until = 5;    // 到期时间（RFC3339，免费证为空）
+  bool paid = 6;             // 是否付费套餐
 }
 
-// CustomerBindResponse - 客户账号绑定响应。
-message CustomerBindResponse {
-  string status = 1;
-  string message = 2;
-  // customer - 绑定成功后的客户账号视图
-  ProvisionCustomerView customer = 3;
+// ProvisionConflictView - 激活码换证冲突对比载荷（status=ACTIVATION_CONFLICT 时随响应下发）。
+message ProvisionConflictView {
+  ProvisionConflictPlan current_plan = 1;  // 当前许可证套餐
+  ProvisionConflictPlan target_plan = 2;   // 激活码目标许可证套餐
+  int32 seat_used = 3;                     // 目标证已用席位数
+  int32 seat_limit = 4;                    // 目标证席位上限
 }
+
+// CustomerBindRequest / CustomerBindResponse 已随「绑定码升级为激活码」删除：
+// 消息名与字段号 code=1 永久锁定（proto3 不支持文件级消息名 reserved，以注释锁定），
+// 客户归属语义由激活码入座承接（ProvisionRequest.activation_code），禁止以绑定码形态重新引入。
 
 // RuntimeResponse - 许可证运行面统一响应。
 // envelope_json 与 keyset_json 必须保留平台 JSON 原文，客户端分别基于 payload 原文验签。

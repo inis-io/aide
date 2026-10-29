@@ -18,7 +18,7 @@
    - [项目套餐（在售目录与套餐订单）](#76-项目套餐在售目录与套餐订单)
    - [远程指令（实例指令通道）](#77-远程指令实例指令通道)
    - [projectNo-only 自动授权（AutoStart）](#78-projectno-only-自动授权autostart)
-   - [客户账号绑定（CustomerBind）](#79-客户账号绑定customerbind)
+   - [激活码入座与换证（ActivateByCode）](#79-激活码入座与换证activatebycode)
 8. [在线更新模块](#8-在线更新模块)
 9. [SaaS 多租户接口](#9-saas-多租户接口)
 10. [管理面客户端 AdminClient](#10-管理面客户端-adminclient)
@@ -689,43 +689,51 @@ defer result.Client.Close() // AutoStart 已 Start，不再使用时必须 Close
 - 携带迁移码成功时平台返回**既有许可证**（`LicenseNo/Salt`），不新建、不消耗 sdk_auto 配额；旧席位释放、旧激活吊销（旧实例下一次 validate/current 收到 `SEAT_RELEASED`）。
 - 申领响应在许可证已绑定客户账号时附带 `result.Customer`（`*licence.CustomerView{MaskAccount, BoundAt}`），未绑定为 `nil`；该视图只是展示用脱敏信息，不参与授权判定。
 
-### 7.9 客户账号绑定（CustomerBind）
+### 7.9 激活码入座与换证（ActivateByCode）
 
-已激活实例用一次性绑定码把许可证归属到 licen-hub 客户账号（客户门户生成，一次性、默认 10 分钟有效）。绑定后平台回填该许可证已支付订单的客户归属，用于客户自助查看授权与套餐订单。
+客户在 licen-hub 门户对已购套餐的许可证生成一次性激活码（默认 15 分钟有效），实例凭码入座该证的一个席位，套餐随签名信封下发。全新未激活实例经 `AutoStartWithOptions` 的 `ActivationCode` 首次申领即入座（匿名 provision 分支，不签发新证、不消耗 sdk_auto 配额）；已激活实例经 `Client.ActivateByCode` 换证入座。目标证生而归属客户账号，入座即完成归属（客户绑定码机制已下线，由激活码承接）。
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `CustomerBind` | `func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBindResult, error)` | 消费绑定码。必须已激活（无 activation token 直接报错「客户端未激活，无法绑定客户账号」，不发请求）；走 activation-sign-v1 请求签名（凭证族与 activate 同级，`POST /api/v1/licenses/customer-bind`，gRPC `LicenseRuntimeService/CustomerBind`）；成功返回脱敏客户视图，业务拒绝返回 `*ProvisionError`（如 `BIND_INVALID`） |
+| `ActivateByCode` | `func (this *Client) ActivateByCode(ctx context.Context, code string, confirmReplace bool) (AutoResult, error)` | 消费激活码换证。必须已激活（无 activation token 直接报错且不发请求）；走 activation-sign-v1 请求签名（凭证族与 activate 同级，`POST /api/v1/licenses/provision` 激活码分支，gRPC `LicenseRuntimeService/ProvisionByPlan`）；成功返回已 Start 的新 Client（同证幂等返回当前 Client），业务拒绝返回 `*ProvisionError`（如 `ACTIVATION_INVALID`），付费证冲突返回 `*ActivationConflictError` |
 
 ```go
-// CustomerBindResult - 绑定成功回执（平台只下发脱敏账号）
-type CustomerBindResult struct {
-    MaskAccount string // 脱敏账号（如 r***@x.com）
-    BoundAt     int64  // 绑定时间（毫秒）
+// ActivationConflictError - 付费证换证冲突（平台未消费激活码）
+type ActivationConflictError struct {
+    Message     string                 // 平台提示
+    CurrentPlan ActivationConflictPlan // 当前许可证套餐
+    TargetPlan  ActivationConflictPlan // 激活码目标许可证套餐
+    SeatUsed    int                    // 目标证已用席位
+    SeatLimit   int                    // 目标证席位上限
 }
 ```
 
 ```go
-func bindCustomer(ctx context.Context, client *licence.Client, bindCode string) error {
-	bound, err := client.CustomerBind(ctx, bindCode)
+func activateByCode(ctx context.Context, client *licence.Client, code string) error {
+	result, err := client.ActivateByCode(ctx, code, false)
+	var conflict *licence.ActivationConflictError
+	if errors.As(err, &conflict) {
+		// 展示 conflict.CurrentPlan / conflict.TargetPlan 与席位占用，用户确认后重发
+		result, err = client.ActivateByCode(ctx, code, true)
+	}
 	if err != nil {
 		var rejected *licence.ProvisionError
-		if errors.As(err, &rejected) && rejected.Status == "BIND_INVALID" {
-			// 绑定码无效或已过期（不区分码不存在/账号/许可证，防枚举）：提示重新生成，勿重试同一码
+		if errors.As(err, &rejected) && rejected.Status == "ACTIVATION_INVALID" {
+			// 激活码无效或已过期（不区分码不存在/账号/许可证，防枚举）：提示重新生成，勿重试同一码
 		}
 		return err
 	}
-	fmt.Println(bound.MaskAccount, bound.BoundAt)
+	defer result.Client.Close() // 换证返回新 Client；同证幂等时为当前 Client（不得重复 Close）
 	return nil
 }
 ```
 
 要点：
 
-- **幂等**：成功响应 `status=OK` + `customer{maskAccount,boundAt}`；绑定码消费即失效，重复提交同一码按 `BIND_INVALID` 拒绝（错误尝试累计到上限后锁定）。
-- **错误归一**：业务拒绝以 `*ProvisionError{Status, Message}` 原样透出，`Status` 为空时 SDK 兜底为 `ERROR`；传输层 404 归一为「许可证或实例信息无效」（模糊语义，不泄露存在性），其余非 200（含网关 502/504 的空响应）返回「客户绑定请求失败（HTTP …）」——只有 404 是凭证终态锚点，空 body 不再被误报成凭证无效。
-- **不改授权状态**：绑定失败不清信封、不改 `Status()`；成功后授权判定仍以签名信封为准，`customer` 仅作展示。
-- **双协议**：HTTP 与 gRPC 同形响应，协议矩阵见 `proto/licence/v1/protocol-matrix.yaml` 的 `Client.CustomerBind` 行（domain `license`、action `write`、风险 `critical`、非幂等、附加响应字段 `customer`）。
+- **三种情形**：全新实例匿名入座（`AutoOptions.ActivationCode`）；当前证≠目标证 → 换证（目标证 keyset 验证 → `auto.json` 先落目标证 → 新 Client 激活占席，平台同事务释放旧证席位）；当前证=目标证 → 幂等（平台不重复占席，SDK 短路为 `Reactivate` 刷新信封）。
+- **冲突保护**：当前证已持付费套餐且 `confirmReplace=false` 时平台返回 `ACTIVATION_CONFLICT` + 对比载荷且不消费激活码；确认后 `confirmReplace=true` 重发才执行换证。
+- **错误归一**：业务拒绝以 `*ProvisionError{Status, Message}` 原样透出；传输层 404 归一为「许可证或实例信息无效」（模糊语义，不泄露存在性），其余非 200 返回「激活码请求失败（HTTP …）」。
+- **双协议**：HTTP 与 gRPC 同形同语义，协议矩阵见 `proto/licence/v1/protocol-matrix.yaml` 的 `Client.ActivateByCode` 行（domain `license`、action `write`、风险 `critical`、非幂等、附加响应字段 `keyset,customer,conflict`）。
 
 ---
 
@@ -1508,7 +1516,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `protocol/version-range.go` | 版本范围表达式判定 |
 | `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `runtime/store.go` | 安全存储接口与默认加密文件实现 |
-| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报、客户账号绑定（`CustomerBind`） |
+| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报、激活码换证入座（`ActivateByCode`） |
 | `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、keyset 与信封原子提交、HTTP/gRPC 双传输 |
 | `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |

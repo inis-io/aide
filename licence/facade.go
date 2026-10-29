@@ -134,19 +134,15 @@ var ParseManifest = LicenceRuntime.ParseManifest
 // ============================= 装机自动申领（镜像 runtime 包） =============================
 
 type (
-	ProvisionError   = LicenceRuntime.ProvisionError
-	ProvisionOptions = LicenceRuntime.ProvisionOptions
-	ProvisionResult  = LicenceRuntime.ProvisionResult
-	CustomerView     = LicenceRuntime.CustomerView
+	ProvisionError          = LicenceRuntime.ProvisionError
+	ProvisionOptions        = LicenceRuntime.ProvisionOptions
+	ProvisionResult         = LicenceRuntime.ProvisionResult
+	CustomerView            = LicenceRuntime.CustomerView
+	ActivationConflictError = LicenceRuntime.ActivationConflictError
+	ActivationConflictPlan  = LicenceRuntime.ActivationConflictPlan
 )
 
 var ProvisionByPlan = LicenceRuntime.ProvisionByPlan
-
-// ============================= 客户账号绑定（镜像 runtime 包） =============================
-
-type (
-	CustomerBindResult = LicenceRuntime.CustomerBindResult
-)
 
 // ============================= projectNo-only 自动授权（镜像 runtime 包） =============================
 

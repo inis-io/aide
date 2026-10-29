@@ -9,7 +9,9 @@
   根包 = 纯门面（`doc.go` + `facade.go`，全部导出符号以别名镜像，无任何实现）；
   `runtime/` = 运行面 `Client` + `AutoStart` / `AutoStartWithOptions`（`auto.go`/`defaults.go`）+
   传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`，支持一次性迁移码
-  `MigrationCode` 接管既有许可证）/客户账号绑定（`Client.CustomerBind`）/配置回推/套餐/实例指令；
+  `MigrationCode` 接管既有许可证、一次性激活码 `ActivationCode` 入座客户既有许可证席位）/
+  激活码换证（`Client.ActivateByCode`，已激活实例签名换证 + ACTIVATION_CONFLICT 冲突确认）/
+  配置回推/套餐/实例指令；
   `protocol/` = 平台契约镜像层（信封/keyset/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与
@@ -74,8 +76,8 @@ licence/
   metadata `x-request-id`（`LicenceProtocol.MetadataRequestID`），**不进任何签名 canonical**；
 - `proto/licence/v1` 被各包引用，自身不 import 模块内任何包。
 - **截至 2026-10-28，运行面与管理面现有全资源均已实现 HTTP + gRPC**（运行面含许可证、
-  客户账号绑定 `LicenseRuntimeService/CustomerBind`（activation-sign-v1，一次性绑定码，
-  与 activate 同级）、在线更新、
+  激活码换证入座（provision 激活码分支，`activation_code` 全新实例匿名入座 /
+  `Client.ActivateByCode` 已激活实例签名换证，与 activate 同级）、在线更新、
   SaaS 租户、平台配置、事件订阅与配置回推 `ConfigPushbackRuntimeService/Push`、实例指令通道
   `CommandRuntimeService/Pull|Report`——实例长轮询领取 + 执行回执，动作白名单
   `runtime_info`/`license_refresh`/`config_refresh`/`update_check`，回执幂等 command_no 终态先入先赢；
@@ -166,9 +168,11 @@ licence/
 - HTTP 现有签名 canonical 不得因 gRPC 上线而改变；gRPC 使用独立、明确版本化的 canonical，
   两种协议共用同一激活记录、公钥、token 与 nonce 防重放存储。
 - 日志不得输出完整 token、JWT、私钥、请求签名和指纹；指纹最多记录前 8 位。
-- **一次性码只过内存**：客户绑定码（`CustomerBind`）与迁移码（`ProvisionOptions/AutoOptions.MigrationCode`）
-  短时效、单次使用，禁止落盘、写日志或进错误文案；失败统一按平台业务码
-  （`BIND_INVALID` / `MIGRATION_INVALID`）与模糊文案「绑定码无效或已过期」/「迁移码无效或已过期」透传，防枚举。
+- **一次性码只过内存**：激活码（`ProvisionOptions/AutoOptions.ActivationCode`、`Client.ActivateByCode`）
+  与迁移码（`ProvisionOptions/AutoOptions.MigrationCode`）短时效、单次使用，禁止落盘、写日志或进错误文案；
+  失败统一按平台业务码（`ACTIVATION_INVALID` / `MIGRATION_INVALID`）与模糊文案「激活码无效或已过期」/
+  「迁移码无效或已过期」透传，防枚举；付费证换证冲突以 `*ActivationConflictError`
+  （ACTIVATION_CONFLICT + 对比载荷）透出，平台不消费码，确认后 `ConfirmReplace=true` 重发。
 
 ## 多机席位约定（开发/预发许可证）
 

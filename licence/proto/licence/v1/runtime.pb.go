@@ -252,8 +252,19 @@ type ProvisionRequest struct {
 	ClientTime int64 `protobuf:"varint,6,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
 	// migration_code - 一次性迁移码（可选；携带时平台返回既有许可证、不消耗 sdk_auto 配额）
 	MigrationCode string `protobuf:"bytes,9,opt,name=migration_code,json=migrationCode,proto3" json:"migration_code,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// activation_code - 一次性激活码（可选；携带时入座客户既有许可证的一个席位，不签发新证、
+	// 不消耗 sdk_auto 配额；与 migration_code 互斥，同时携带判无效请求）
+	ActivationCode string `protobuf:"bytes,10,opt,name=activation_code,json=activationCode,proto3" json:"activation_code,omitempty"`
+	// current_license_no - 当前许可证编号（可选；已激活实例换证入座时上送，携带时请求必须
+	// 带 activation-sign-v1 实例签名，平台据此做冲突评估与旧席位释放）
+	CurrentLicenseNo string `protobuf:"bytes,11,opt,name=current_license_no,json=currentLicenseNo,proto3" json:"current_license_no,omitempty"`
+	// release_old_seat - 换证入座成功后是否同事务释放当前许可证上的旧席位（仅随 current_license_no 生效）
+	ReleaseOldSeat bool `protobuf:"varint,12,opt,name=release_old_seat,json=releaseOldSeat,proto3" json:"release_old_seat,omitempty"`
+	// confirm_replace - 冲突确认（仅随 current_license_no 生效）：当前证已持付费套餐时，
+	// 缺省返回 ACTIVATION_CONFLICT 对比载荷且不消费激活码；显式 true 才执行换证
+	ConfirmReplace bool `protobuf:"varint,13,opt,name=confirm_replace,json=confirmReplace,proto3" json:"confirm_replace,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ProvisionRequest) Reset() {
@@ -335,6 +346,34 @@ func (x *ProvisionRequest) GetMigrationCode() string {
 	return ""
 }
 
+func (x *ProvisionRequest) GetActivationCode() string {
+	if x != nil {
+		return x.ActivationCode
+	}
+	return ""
+}
+
+func (x *ProvisionRequest) GetCurrentLicenseNo() string {
+	if x != nil {
+		return x.CurrentLicenseNo
+	}
+	return ""
+}
+
+func (x *ProvisionRequest) GetReleaseOldSeat() bool {
+	if x != nil {
+		return x.ReleaseOldSeat
+	}
+	return false
+}
+
+func (x *ProvisionRequest) GetConfirmReplace() bool {
+	if x != nil {
+		return x.ConfirmReplace
+	}
+	return false
+}
+
 // ProvisionResponse - 装机自动申领统一响应。
 type ProvisionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -350,7 +389,9 @@ type ProvisionResponse struct {
 	// keyset_json - bootstrap 根签名的项目工作公钥集合原文。
 	KeysetJson []byte `protobuf:"bytes,10,opt,name=keyset_json,json=keysetJson,proto3" json:"keyset_json,omitempty"`
 	// customer - 客户账号视图（仅许可证已绑定客户账号时下发，未绑定为 null）
-	Customer      *ProvisionCustomerView `protobuf:"bytes,11,opt,name=customer,proto3" json:"customer,omitempty"`
+	Customer *ProvisionCustomerView `protobuf:"bytes,11,opt,name=customer,proto3" json:"customer,omitempty"`
+	// conflict - 激活码换证冲突对比载荷（仅 status=ACTIVATION_CONFLICT 时下发，此时不消费激活码）
+	Conflict      *ProvisionConflictView `protobuf:"bytes,12,opt,name=conflict,proto3" json:"conflict,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -462,6 +503,13 @@ func (x *ProvisionResponse) GetCustomer() *ProvisionCustomerView {
 	return nil
 }
 
+func (x *ProvisionResponse) GetConflict() *ProvisionConflictView {
+	if x != nil {
+		return x.Conflict
+	}
+	return nil
+}
+
 // ProvisionCustomerView - 许可证已绑定的客户账号视图（仅展示脱敏信息）。
 type ProvisionCustomerView struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -517,29 +565,33 @@ func (x *ProvisionCustomerView) GetBoundAt() int64 {
 	return 0
 }
 
-// CustomerBindRequest - 客户账号绑定请求。
-type CustomerBindRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// code - 一次性绑定码
-	Code          string `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+// ProvisionConflictPlan - 换证冲突对比中的单证套餐视图。
+type ProvisionConflictPlan struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LicenseNo     string                 `protobuf:"bytes,1,opt,name=license_no,json=licenseNo,proto3" json:"license_no,omitempty"`    // 许可证编号
+	PlanCode      string                 `protobuf:"bytes,2,opt,name=plan_code,json=planCode,proto3" json:"plan_code,omitempty"`       // 套餐编码
+	PlanName      string                 `protobuf:"bytes,3,opt,name=plan_name,json=planName,proto3" json:"plan_name,omitempty"`       // 套餐名称
+	Billing       string                 `protobuf:"bytes,4,opt,name=billing,proto3" json:"billing,omitempty"`                         // 计费周期（monthly/yearly/buyout，免费证为空）
+	ValidUntil    string                 `protobuf:"bytes,5,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"` // 到期时间（RFC3339，免费证为空）
+	Paid          bool                   `protobuf:"varint,6,opt,name=paid,proto3" json:"paid,omitempty"`                              // 是否付费套餐
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CustomerBindRequest) Reset() {
-	*x = CustomerBindRequest{}
+func (x *ProvisionConflictPlan) Reset() {
+	*x = ProvisionConflictPlan{}
 	mi := &file_licence_v1_runtime_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CustomerBindRequest) String() string {
+func (x *ProvisionConflictPlan) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CustomerBindRequest) ProtoMessage() {}
+func (*ProvisionConflictPlan) ProtoMessage() {}
 
-func (x *CustomerBindRequest) ProtoReflect() protoreflect.Message {
+func (x *ProvisionConflictPlan) ProtoReflect() protoreflect.Message {
 	mi := &file_licence_v1_runtime_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -551,43 +603,78 @@ func (x *CustomerBindRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CustomerBindRequest.ProtoReflect.Descriptor instead.
-func (*CustomerBindRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ProvisionConflictPlan.ProtoReflect.Descriptor instead.
+func (*ProvisionConflictPlan) Descriptor() ([]byte, []int) {
 	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *CustomerBindRequest) GetCode() string {
+func (x *ProvisionConflictPlan) GetLicenseNo() string {
 	if x != nil {
-		return x.Code
+		return x.LicenseNo
 	}
 	return ""
 }
 
-// CustomerBindResponse - 客户账号绑定响应。
-type CustomerBindResponse struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Status  string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// customer - 绑定成功后的客户账号视图
-	Customer      *ProvisionCustomerView `protobuf:"bytes,3,opt,name=customer,proto3" json:"customer,omitempty"`
+func (x *ProvisionConflictPlan) GetPlanCode() string {
+	if x != nil {
+		return x.PlanCode
+	}
+	return ""
+}
+
+func (x *ProvisionConflictPlan) GetPlanName() string {
+	if x != nil {
+		return x.PlanName
+	}
+	return ""
+}
+
+func (x *ProvisionConflictPlan) GetBilling() string {
+	if x != nil {
+		return x.Billing
+	}
+	return ""
+}
+
+func (x *ProvisionConflictPlan) GetValidUntil() string {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return ""
+}
+
+func (x *ProvisionConflictPlan) GetPaid() bool {
+	if x != nil {
+		return x.Paid
+	}
+	return false
+}
+
+// ProvisionConflictView - 激活码换证冲突对比载荷（status=ACTIVATION_CONFLICT 时随响应下发）。
+type ProvisionConflictView struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CurrentPlan   *ProvisionConflictPlan `protobuf:"bytes,1,opt,name=current_plan,json=currentPlan,proto3" json:"current_plan,omitempty"` // 当前许可证套餐
+	TargetPlan    *ProvisionConflictPlan `protobuf:"bytes,2,opt,name=target_plan,json=targetPlan,proto3" json:"target_plan,omitempty"`    // 激活码目标许可证套餐
+	SeatUsed      int32                  `protobuf:"varint,3,opt,name=seat_used,json=seatUsed,proto3" json:"seat_used,omitempty"`         // 目标证已用席位数
+	SeatLimit     int32                  `protobuf:"varint,4,opt,name=seat_limit,json=seatLimit,proto3" json:"seat_limit,omitempty"`      // 目标证席位上限
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CustomerBindResponse) Reset() {
-	*x = CustomerBindResponse{}
+func (x *ProvisionConflictView) Reset() {
+	*x = ProvisionConflictView{}
 	mi := &file_licence_v1_runtime_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CustomerBindResponse) String() string {
+func (x *ProvisionConflictView) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CustomerBindResponse) ProtoMessage() {}
+func (*ProvisionConflictView) ProtoMessage() {}
 
-func (x *CustomerBindResponse) ProtoReflect() protoreflect.Message {
+func (x *ProvisionConflictView) ProtoReflect() protoreflect.Message {
 	mi := &file_licence_v1_runtime_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -599,30 +686,37 @@ func (x *CustomerBindResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CustomerBindResponse.ProtoReflect.Descriptor instead.
-func (*CustomerBindResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ProvisionConflictView.ProtoReflect.Descriptor instead.
+func (*ProvisionConflictView) Descriptor() ([]byte, []int) {
 	return file_licence_v1_runtime_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *CustomerBindResponse) GetStatus() string {
+func (x *ProvisionConflictView) GetCurrentPlan() *ProvisionConflictPlan {
 	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *CustomerBindResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *CustomerBindResponse) GetCustomer() *ProvisionCustomerView {
-	if x != nil {
-		return x.Customer
+		return x.CurrentPlan
 	}
 	return nil
+}
+
+func (x *ProvisionConflictView) GetTargetPlan() *ProvisionConflictPlan {
+	if x != nil {
+		return x.TargetPlan
+	}
+	return nil
+}
+
+func (x *ProvisionConflictView) GetSeatUsed() int32 {
+	if x != nil {
+		return x.SeatUsed
+	}
+	return 0
+}
+
+func (x *ProvisionConflictView) GetSeatLimit() int32 {
+	if x != nil {
+		return x.SeatLimit
+	}
+	return 0
 }
 
 // RuntimeResponse - 许可证运行面统一响应。
@@ -3983,7 +4077,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"6\n" +
 	"\x15CurrentLicenseRequest\x12\x1d\n" +
 	"\n" +
-	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\xad\x02\n" +
+	"license_no\x18\x01 \x01(\tR\tlicenseNo\"\xd7\x03\n" +
 	"\x10ProvisionRequest\x12\x1d\n" +
 	"\n" +
 	"project_no\x18\a \x01(\tR\tprojectNo\x12\x1b\n" +
@@ -3995,7 +4089,12 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"deviceName\x12\x1f\n" +
 	"\vclient_time\x18\x06 \x01(\x03R\n" +
 	"clientTime\x12%\n" +
-	"\x0emigration_code\x18\t \x01(\tR\rmigrationCodeJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\rtemplate_codeR\x0fprovision_token\"\x83\x03\n" +
+	"\x0emigration_code\x18\t \x01(\tR\rmigrationCode\x12'\n" +
+	"\x0factivation_code\x18\n" +
+	" \x01(\tR\x0eactivationCode\x12,\n" +
+	"\x12current_license_no\x18\v \x01(\tR\x10currentLicenseNo\x12(\n" +
+	"\x10release_old_seat\x18\f \x01(\bR\x0ereleaseOldSeat\x12'\n" +
+	"\x0fconfirm_replace\x18\r \x01(\bR\x0econfirmReplaceJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\rtemplate_codeR\x0fprovision_token\"\xcb\x03\n" +
 	"\x11ProvisionResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -4013,16 +4112,27 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\vkeyset_json\x18\n" +
 	" \x01(\fR\n" +
 	"keysetJson\x12F\n" +
-	"\bcustomer\x18\v \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\"U\n" +
+	"\bcustomer\x18\v \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\x12F\n" +
+	"\bconflict\x18\f \x01(\v2*.licenhub.licence.v1.ProvisionConflictViewR\bconflict\"U\n" +
 	"\x15ProvisionCustomerView\x12!\n" +
 	"\fmask_account\x18\x01 \x01(\tR\vmaskAccount\x12\x19\n" +
-	"\bbound_at\x18\x02 \x01(\x03R\aboundAt\")\n" +
-	"\x13CustomerBindRequest\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\tR\x04code\"\x90\x01\n" +
-	"\x14CustomerBindResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12F\n" +
-	"\bcustomer\x18\x03 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\"\xb2\x02\n" +
+	"\bbound_at\x18\x02 \x01(\x03R\aboundAt\"\xbf\x01\n" +
+	"\x15ProvisionConflictPlan\x12\x1d\n" +
+	"\n" +
+	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12\x1b\n" +
+	"\tplan_code\x18\x02 \x01(\tR\bplanCode\x12\x1b\n" +
+	"\tplan_name\x18\x03 \x01(\tR\bplanName\x12\x18\n" +
+	"\abilling\x18\x04 \x01(\tR\abilling\x12\x1f\n" +
+	"\vvalid_until\x18\x05 \x01(\tR\n" +
+	"validUntil\x12\x12\n" +
+	"\x04paid\x18\x06 \x01(\bR\x04paid\"\xef\x01\n" +
+	"\x15ProvisionConflictView\x12M\n" +
+	"\fcurrent_plan\x18\x01 \x01(\v2*.licenhub.licence.v1.ProvisionConflictPlanR\vcurrentPlan\x12K\n" +
+	"\vtarget_plan\x18\x02 \x01(\v2*.licenhub.licence.v1.ProvisionConflictPlanR\n" +
+	"targetPlan\x12\x1b\n" +
+	"\tseat_used\x18\x03 \x01(\x05R\bseatUsed\x12\x1d\n" +
+	"\n" +
+	"seat_limit\x18\x04 \x01(\x05R\tseatLimit\"\xb2\x02\n" +
 	"\x0fRuntimeResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -4317,13 +4427,12 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
 	"serverTime\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage2\xeb\x03\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage2\x86\x03\n" +
 	"\x15LicenseRuntimeService\x12V\n" +
 	"\bActivate\x12$.licenhub.licence.v1.ActivateRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12V\n" +
 	"\bValidate\x12$.licenhub.licence.v1.ValidateRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12[\n" +
 	"\aCurrent\x12*.licenhub.licence.v1.CurrentLicenseRequest\x1a$.licenhub.licence.v1.RuntimeResponse\x12`\n" +
-	"\x0fProvisionByPlan\x12%.licenhub.licence.v1.ProvisionRequest\x1a&.licenhub.licence.v1.ProvisionResponse\x12c\n" +
-	"\fCustomerBind\x12(.licenhub.licence.v1.CustomerBindRequest\x1a).licenhub.licence.v1.CustomerBindResponse2\xb2\x02\n" +
+	"\x0fProvisionByPlan\x12%.licenhub.licence.v1.ProvisionRequest\x1a&.licenhub.licence.v1.ProvisionResponse2\xb2\x02\n" +
 	"\x14UpdateRuntimeService\x12Z\n" +
 	"\x05Check\x12'.licenhub.licence.v1.UpdateCheckRequest\x1a(.licenhub.licence.v1.UpdateCheckResponse\x12]\n" +
 	"\x06Report\x12(.licenhub.licence.v1.UpdateReportRequest\x1a).licenhub.licence.v1.UpdateReportResponse\x12_\n" +
@@ -4372,8 +4481,8 @@ var file_licence_v1_runtime_proto_goTypes = []any{
 	(*ProvisionRequest)(nil),                  // 3: licenhub.licence.v1.ProvisionRequest
 	(*ProvisionResponse)(nil),                 // 4: licenhub.licence.v1.ProvisionResponse
 	(*ProvisionCustomerView)(nil),             // 5: licenhub.licence.v1.ProvisionCustomerView
-	(*CustomerBindRequest)(nil),               // 6: licenhub.licence.v1.CustomerBindRequest
-	(*CustomerBindResponse)(nil),              // 7: licenhub.licence.v1.CustomerBindResponse
+	(*ProvisionConflictPlan)(nil),             // 6: licenhub.licence.v1.ProvisionConflictPlan
+	(*ProvisionConflictView)(nil),             // 7: licenhub.licence.v1.ProvisionConflictView
 	(*RuntimeResponse)(nil),                   // 8: licenhub.licence.v1.RuntimeResponse
 	(*UpdateCheckRequest)(nil),                // 9: licenhub.licence.v1.UpdateCheckRequest
 	(*UpdateCheckResponse)(nil),               // 10: licenhub.licence.v1.UpdateCheckResponse
@@ -4431,53 +4540,53 @@ var file_licence_v1_runtime_proto_goTypes = []any{
 var file_licence_v1_runtime_proto_depIdxs = []int32{
 	58, // 0: licenhub.licence.v1.ValidateRequest.usage:type_name -> licenhub.licence.v1.ValidateRequest.UsageEntry
 	5,  // 1: licenhub.licence.v1.ProvisionResponse.customer:type_name -> licenhub.licence.v1.ProvisionCustomerView
-	5,  // 2: licenhub.licence.v1.CustomerBindResponse.customer:type_name -> licenhub.licence.v1.ProvisionCustomerView
-	16, // 3: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
-	15, // 4: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
-	15, // 5: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
-	19, // 6: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
-	59, // 7: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
-	28, // 8: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
-	60, // 9: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
-	35, // 10: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
-	36, // 11: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
-	38, // 12: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	38, // 13: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	41, // 14: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
-	42, // 15: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
-	43, // 16: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
-	49, // 17: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
-	49, // 18: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
-	54, // 19: licenhub.licence.v1.CommandPullResponse.commands:type_name -> licenhub.licence.v1.CommandTask
-	0,  // 20: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
-	1,  // 21: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
-	2,  // 22: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
-	3,  // 23: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:input_type -> licenhub.licence.v1.ProvisionRequest
-	6,  // 24: licenhub.licence.v1.LicenseRuntimeService.CustomerBind:input_type -> licenhub.licence.v1.CustomerBindRequest
-	9,  // 25: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
-	11, // 26: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
-	12, // 27: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
-	14, // 28: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
-	18, // 29: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
-	21, // 30: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
-	22, // 31: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
-	26, // 32: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
-	29, // 33: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
-	31, // 34: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
-	33, // 35: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
-	37, // 36: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
-	40, // 37: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
-	45, // 38: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
-	47, // 39: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
-	48, // 40: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
-	51, // 41: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
-	53, // 42: licenhub.licence.v1.CommandRuntimeService.Pull:input_type -> licenhub.licence.v1.CommandPullRequest
-	56, // 43: licenhub.licence.v1.CommandRuntimeService.Report:input_type -> licenhub.licence.v1.CommandReportRequest
-	8,  // 44: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
-	8,  // 45: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
-	8,  // 46: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
-	4,  // 47: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:output_type -> licenhub.licence.v1.ProvisionResponse
-	7,  // 48: licenhub.licence.v1.LicenseRuntimeService.CustomerBind:output_type -> licenhub.licence.v1.CustomerBindResponse
+	7,  // 2: licenhub.licence.v1.ProvisionResponse.conflict:type_name -> licenhub.licence.v1.ProvisionConflictView
+	6,  // 3: licenhub.licence.v1.ProvisionConflictView.current_plan:type_name -> licenhub.licence.v1.ProvisionConflictPlan
+	6,  // 4: licenhub.licence.v1.ProvisionConflictView.target_plan:type_name -> licenhub.licence.v1.ProvisionConflictPlan
+	16, // 5: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
+	15, // 6: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	15, // 7: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	19, // 8: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
+	59, // 9: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	28, // 10: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
+	60, // 11: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
+	35, // 12: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
+	36, // 13: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
+	38, // 14: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
+	38, // 15: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
+	41, // 16: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
+	42, // 17: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
+	43, // 18: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
+	49, // 19: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
+	49, // 20: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
+	54, // 21: licenhub.licence.v1.CommandPullResponse.commands:type_name -> licenhub.licence.v1.CommandTask
+	0,  // 22: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
+	1,  // 23: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
+	2,  // 24: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
+	3,  // 25: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:input_type -> licenhub.licence.v1.ProvisionRequest
+	9,  // 26: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
+	11, // 27: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
+	12, // 28: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
+	14, // 29: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
+	18, // 30: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
+	21, // 31: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
+	22, // 32: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
+	26, // 33: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
+	29, // 34: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
+	31, // 35: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
+	33, // 36: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
+	37, // 37: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
+	40, // 38: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
+	45, // 39: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
+	47, // 40: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
+	48, // 41: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
+	51, // 42: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
+	53, // 43: licenhub.licence.v1.CommandRuntimeService.Pull:input_type -> licenhub.licence.v1.CommandPullRequest
+	56, // 44: licenhub.licence.v1.CommandRuntimeService.Report:input_type -> licenhub.licence.v1.CommandReportRequest
+	8,  // 45: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
+	8,  // 46: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
+	8,  // 47: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
+	4,  // 48: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:output_type -> licenhub.licence.v1.ProvisionResponse
 	10, // 49: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
 	13, // 50: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
 	13, // 51: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
@@ -4497,11 +4606,11 @@ var file_licence_v1_runtime_proto_depIdxs = []int32{
 	52, // 65: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:output_type -> licenhub.licence.v1.PlanOrderRowsResponse
 	55, // 66: licenhub.licence.v1.CommandRuntimeService.Pull:output_type -> licenhub.licence.v1.CommandPullResponse
 	57, // 67: licenhub.licence.v1.CommandRuntimeService.Report:output_type -> licenhub.licence.v1.CommandReportResponse
-	44, // [44:68] is the sub-list for method output_type
-	20, // [20:44] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	45, // [45:68] is the sub-list for method output_type
+	22, // [22:45] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_licence_v1_runtime_proto_init() }

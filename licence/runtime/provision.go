@@ -24,6 +24,17 @@ type ProvisionOptions struct {
 	TenantId int64
 	// MigrationCode - 一次性迁移码（可选；仅新服务器迁移场景使用，为空保持常规 sdk_auto 申领）
 	MigrationCode string
+	// ActivationCode - 一次性激活码（可选；入座客户既有许可证的一个席位，不签发新证；
+	// 与 MigrationCode 互斥，同时携带平台判无效请求）
+	ActivationCode string
+	// CurrentLicenseNo - 当前许可证编号（可选；已激活实例换证入座时由 Client.ActivateByCode 注入，
+	// 携带时请求带 activation-sign-v1 实例签名，平台据此做冲突评估与旧席位释放）
+	CurrentLicenseNo string
+	// ReleaseOldSeat - 换证入座成功后同事务释放当前许可证上的旧席位（仅随 CurrentLicenseNo 生效）
+	ReleaseOldSeat bool
+	// ConfirmReplace - 冲突确认（仅随 CurrentLicenseNo 生效）：当前证已持付费套餐时缺省返回
+	// ACTIVATION_CONFLICT 对比载荷且不消费激活码，显式 true 才执行换证
+	ConfirmReplace bool
 	// StorageDir - install.sn 持久化目录（默认 ./runtime/licence）
 	StorageDir string
 	// InstallSN - 安装唯一标识（可选；为空时懒生成 UUID v4 并持久化到 StorageDir/install.sn）
@@ -73,8 +84,8 @@ type CustomerView struct {
 // ProvisionError - 申领业务拒绝（errors.As 断言后按 Status 降级处理）。
 type ProvisionError struct {
 	// Status - 业务状态码（PROVISION_DISABLED / TEMPLATE_DEPRECATED / PLAN_INVALID /
-	// QUOTA_EXCEEDED / RATE_LIMITED / ...，契约 §6.3）。SDK 不维护白名单：服务端新增或
-	// 未知的业务码一律原样透传（含旧版客户端申领被拒的 TEMPLATE_DEPRECATED），交调用方按需降级。
+	// QUOTA_EXCEEDED / RATE_LIMITED / ACTIVATION_INVALID / ...，契约 §6.3）。SDK 不维护白名单：
+	// 服务端新增或未知的业务码一律原样透传（含旧版客户端申领被拒的 TEMPLATE_DEPRECATED），交调用方按需降级。
 	Status string
 	// Message - 平台提示
 	Message string
@@ -86,6 +97,69 @@ func (this *ProvisionError) Error() string {
 		return "授权申领被拒绝（" + this.Status + "）：" + this.Message
 	}
 	return "授权申领被拒绝：" + this.Status
+}
+
+// ActivationConflictPlan - 换证冲突对比中的单证套餐视图。
+type ActivationConflictPlan struct {
+	// LicenseNo - 许可证编号
+	LicenseNo string
+	// PlanCode - 套餐编码
+	PlanCode string
+	// PlanName - 套餐名称
+	PlanName string
+	// Billing - 计费周期（monthly/yearly/buyout，免费证为空）
+	Billing string
+	// ValidUntil - 到期时间（RFC3339，免费证为空）
+	ValidUntil string
+	// Paid - 是否付费套餐
+	Paid bool
+}
+
+// ActivationConflictError - 激活码换证冲突（status=ACTIVATION_CONFLICT）：
+// 当前许可证已持付费套餐且与激活码目标证不同，平台未消费激活码；
+// 调用方展示对比载荷由用户确认后以 ConfirmReplace=true 重发。
+type ActivationConflictError struct {
+	// Message - 平台提示
+	Message string
+	// CurrentPlan - 当前许可证套餐
+	CurrentPlan ActivationConflictPlan
+	// TargetPlan - 激活码目标许可证套餐
+	TargetPlan ActivationConflictPlan
+	// SeatUsed - 目标证已用席位数
+	SeatUsed int
+	// SeatLimit - 目标证席位上限
+	SeatLimit int
+}
+
+// Error - 错误文本。
+func (this *ActivationConflictError) Error() string {
+	if this.Message != "" {
+		return "激活码换证冲突（ACTIVATION_CONFLICT）：" + this.Message
+	}
+	return "激活码换证冲突：当前许可证已持付费套餐"
+}
+
+// conflictView - 冲突线格式 → 对比载荷。
+func (this *conflictViewJSON) conflictView() (ActivationConflictPlan, ActivationConflictPlan) {
+	var current, target ActivationConflictPlan
+	if this == nil {
+		return current, target
+	}
+	if this.CurrentPlan != nil {
+		current = ActivationConflictPlan{
+			LicenseNo: this.CurrentPlan.LicenseNo, PlanCode: this.CurrentPlan.PlanCode,
+			PlanName: this.CurrentPlan.PlanName, Billing: this.CurrentPlan.Billing,
+			ValidUntil: this.CurrentPlan.ValidUntil, Paid: this.CurrentPlan.Paid,
+		}
+	}
+	if this.TargetPlan != nil {
+		target = ActivationConflictPlan{
+			LicenseNo: this.TargetPlan.LicenseNo, PlanCode: this.TargetPlan.PlanCode,
+			PlanName: this.TargetPlan.PlanName, Billing: this.TargetPlan.Billing,
+			ValidUntil: this.TargetPlan.ValidUntil, Paid: this.TargetPlan.Paid,
+		}
+	}
+	return current, target
 }
 
 // ProvisionByPlan - 装机自动申领（sdk_auto 匿名 Public，projectNo + installSN 定位）。
@@ -110,7 +184,9 @@ func ProvisionByPlan(ctx context.Context, opts ProvisionOptions) (ProvisionResul
 	body := provisionBody{
 		ProjectNo: opts.ProjectNo, TenantId: opts.TenantId,
 		InstallSN: installSN, DeviceName: opts.DeviceName,
-		MigrationCode: opts.MigrationCode,
+		MigrationCode: opts.MigrationCode, ActivationCode: opts.ActivationCode,
+		CurrentLicenseNo: opts.CurrentLicenseNo, ReleaseOldSeat: opts.ReleaseOldSeat,
+		ConfirmReplace: opts.ConfirmReplace,
 	}
 	response, err := provisionRequest(ctx, opts, body)
 	if err != nil {
@@ -187,8 +263,17 @@ func provisionRoundTrip(ctx context.Context, opts ProvisionOptions, uri string, 
 	return response, nil
 }
 
-// finishProvision - 统一响应 → 结果或业务拒绝（*ProvisionError）。
+// finishProvision - 统一响应 → 结果或业务拒绝（*ProvisionError / *ActivationConflictError）。
 func finishProvision(response provisionResponse) (ProvisionResult, error) {
+	if response.Status == "ACTIVATION_CONFLICT" {
+		current, target := response.Conflict.conflictView()
+		conflict := &ActivationConflictError{Message: response.Message, CurrentPlan: current, TargetPlan: target}
+		if response.Conflict != nil {
+			conflict.SeatUsed = response.Conflict.SeatUsed
+			conflict.SeatLimit = response.Conflict.SeatLimit
+		}
+		return ProvisionResult{}, conflict
+	}
 	if response.Status != "OK" {
 		return ProvisionResult{}, &ProvisionError{Status: response.Status, Message: response.Message}
 	}
