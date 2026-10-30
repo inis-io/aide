@@ -166,6 +166,8 @@ result, err := licence.AutoStartWithOptions(ctx, licence.AutoOptions{
 
 重复调用 `CustomerBindPrepare` 时，若许可证已归属，平台返回 `CUSTOMER_BOUND` 而非 `BIND_INVALID`，不创建授权请求。SDK 通过 `CustomerBindPrepareResult.Customer` 返回脱敏账号与绑定时间，`RequestNo` 为空；接入方应直接同步归属，不再打开授权页。响应缺少客户视图时 SDK 明确报错，HTTP/gRPC 语义一致。
 
+**解绑与权益回收**：`Client.CustomerUnbind(ctx, twoFACode)` 使用 activation-sign-v1 与授权账号 TOTP，未配置 2FA 或验证码错误时拒绝。平台释放该证全部 active 席位并回退项目 sdk_auto 免费基础套餐、清空当前订单锚点，历史订单仅作凭证。调用方随后应 `Reactivate` 重新激活免费席位；没有有效免费基础套餐时解绑失败，不得误发付费权益。
+
 ```go
 bound, err := client.CustomerBind(ctx, ticket)
 if err != nil {

@@ -18,6 +18,8 @@ service LicenseRuntimeService {
   // CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
   // 绑定成功后许可证归属客户账号，不改变席位或套餐。
   rpc CustomerBind(CustomerBindRequest) returns (CustomerBindResponse);
+  // CustomerUnbind - 解绑授权账号（TOTP 验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放）。
+  rpc CustomerUnbind(CustomerUnbindRequest) returns (CustomerUnbindResponse);
   // CustomerBindPrepare - 已激活实例预注册一次性授权请求（固定许可证、回跳地址与 state）。
   rpc CustomerBindPrepare(CustomerBindPrepareRequest) returns (CustomerBindPrepareResponse);
 }
@@ -179,6 +181,18 @@ message CustomerBindResponse {
   string message = 2;
   // customer - 绑定成功后的客户账号视图
   ProvisionCustomerView customer = 3;
+}
+
+// CustomerUnbindRequest - 解绑授权账号请求（两步验证码只在请求体与内存中使用）。
+message CustomerUnbindRequest {
+  string two_fa_code = 1;
+}
+
+// CustomerUnbindResponse - 解绑授权账号响应。
+message CustomerUnbindResponse {
+  string status = 1;
+  string message = 2;
+  int64 server_time = 3;
 }
 
 // CustomerBindPrepareRequest - 一次性授权预注册上下文。

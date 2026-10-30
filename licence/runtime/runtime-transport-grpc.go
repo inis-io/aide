@@ -230,6 +230,13 @@ func customerBindMap(response *licencev1.CustomerBindResponse) map[string]any {
 	return result
 }
 
+// customerUnbindMap - 客户账号解绑响应 → 与 HTTP 同形的 JSON。
+func customerUnbindMap(response *licencev1.CustomerUnbindResponse) map[string]any {
+	return map[string]any{
+		"status": response.GetStatus(), "serverTime": response.GetServerTime(), "message": response.GetMessage(),
+	}
+}
+
 // customerBindPrepareMap - 授权预注册响应 → 与 HTTP 同形的 JSON。
 func customerBindPrepareMap(response *licencev1.CustomerBindPrepareResponse) map[string]any {
 	result := map[string]any{
@@ -537,6 +544,24 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 			return code, nil, mapped
 		}
 		return marshalMap(provisionMap(response))
+
+	case http.MethodPost + " /api/v1/licenses/customer-unbind":
+		var input customerUnbindBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.CustomerUnbindRequest{TwoFaCode: input.TwoFACode}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_CustomerUnbind_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.license.CustomerUnbind(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		return marshalMap(customerUnbindMap(response))
 
 	case http.MethodPost + " /api/v1/licenses/customer-bind-prepare":
 		var input customerBindPrepareBody
