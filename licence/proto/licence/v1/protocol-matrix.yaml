@@ -24,8 +24,9 @@ runtime:
   # 激活码换证入座（已激活实例专用；与 ProvisionByPlan 同端点，activationCode+currentLicenseNo 分支，
   # 必须 activation-sign-v1 签名）；冲突返回 ACTIVATION_CONFLICT 不消费码，confirmReplace=true 重发才换证。
   - [Client.ActivateByCode, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, activation-sign-v1, "", license, write, critical, false, "keyset,customer,conflict"]
-  # 授权预注册：固定许可证、回跳地址和 state，门户只按 requestNo 确认，禁止开放重定向。
-  - [Client.CustomerBindPrepare, POST, /api/v1/licenses/customer-bind-prepare, LicenseRuntimeService/CustomerBindPrepare, activation-sign-v1, "", license, write, critical, false, "requestNo,expiresAt"]
+  # 授权预注册：固定许可证、回跳地址和 state，门户只按 requestNo 确认，禁止开放重定向；
+  # 已绑定返回 CUSTOMER_BOUND + customer，不创建请求，供接入方自动同步脱敏归属。
+  - [Client.CustomerBindPrepare, POST, /api/v1/licenses/customer-bind-prepare, LicenseRuntimeService/CustomerBindPrepare, activation-sign-v1, "", license, write, critical, false, "requestNo,expiresAt,customer"]
   # 客户账号绑定：门户授权确认页签发一次性票据，仅关联客户归属，不改变席位或套餐。
   - [Client.CustomerBind, POST, /api/v1/licenses/customer-bind, LicenseRuntimeService/CustomerBind, activation-sign-v1, "", license, write, critical, false, customer]
   - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, keyset]

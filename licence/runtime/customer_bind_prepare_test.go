@@ -21,9 +21,13 @@ func (this *fakePlatform) handleCustomerBindPrepare(writer http.ResponseWriter, 
 		"nonce":     request.Header.Get("X-License-Nonce"), "signature": request.Header.Get("X-License-Sign"),
 	})
 	if this.customerBindStatus != "" && this.customerBindStatus != "OK" {
-		writeJson(writer, map[string]any{
+		out := map[string]any{
 			"status": this.customerBindStatus, "serverTime": time.Now().UnixMilli(), "message": this.customerBindMessage,
-		})
+		}
+		if this.customerBindPrepareCustomer != nil {
+			out["customer"] = this.customerBindPrepareCustomer
+		}
+		writeJson(writer, out)
 		return
 	}
 	writeJson(writer, map[string]any{
@@ -96,5 +100,43 @@ func TestClientCustomerBindPrepareNotActivated(t *testing.T) {
 	platform.mu.Unlock()
 	if calls != 0 {
 		t.Fatalf("未激活不得触网，实际 %d 次", calls)
+	}
+}
+
+func TestClientCustomerBindPrepareAlreadyBoundHTTP(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.customerBindStatus = "CUSTOMER_BOUND"
+	platform.customerBindPrepareCustomer = &CustomerView{MaskAccount: "r***@x.com", BoundAt: 123}
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Stop()
+	result, err := client.CustomerBindPrepare(t.Context(), "https://im.example.com/callback", "state")
+	if err != nil {
+		t.Fatalf("已绑定预注册应返回归属: %v", err)
+	}
+	if result.RequestNo != "" || result.Customer == nil || result.Customer.MaskAccount != "r***@x.com" || result.Customer.BoundAt != 123 {
+		t.Fatalf("已绑定响应映射不符: %+v", result)
+	}
+}
+
+func TestClientCustomerBindPrepareAlreadyBoundRequiresCustomer(t *testing.T) {
+	platform := newFakePlatform(t)
+	platform.customerBindStatus = "CUSTOMER_BOUND"
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Stop()
+	_, err = client.CustomerBindPrepare(t.Context(), "https://im.example.com/callback", "state")
+	if err == nil || err.Error() != "已绑定响应缺少客户信息" {
+		t.Fatalf("已绑定响应缺客户视图必须明确报错: %v", err)
 	}
 }

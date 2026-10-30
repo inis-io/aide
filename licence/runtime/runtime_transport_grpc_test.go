@@ -667,8 +667,12 @@ func (this *runtimeCustomerBindServer) CustomerBindPrepare(ctx context.Context, 
 		code = "OK"
 	}
 	response := &licencev1.CustomerBindPrepareResponse{Status: code, ServerTime: time.Now().UnixMilli()}
-	if code != "OK" {
+	if code != "OK" && code != "CUSTOMER_BOUND" {
 		response.Message = this.message
+		return response, nil
+	}
+	if code == "CUSTOMER_BOUND" {
+		response.Customer = &licencev1.ProvisionCustomerView{MaskAccount: "r***@x.com", BoundAt: 123}
 		return response, nil
 	}
 	response.RequestNo = "REQ-GRPC-0001"
@@ -731,6 +735,19 @@ func TestGRPCCustomerBindPrepare(t *testing.T) {
 	}
 	if result.RequestNo != "REQ-GRPC-0001" || result.ExpiresAt != 1735689600000 {
 		t.Fatalf("预注册响应映射不符: %+v", result)
+	}
+}
+
+// TestGRPCCustomerBindPrepareAlreadyBound - 已绑定响应透传脱敏归属，不生成授权请求号。
+func TestGRPCCustomerBindPrepareAlreadyBound(t *testing.T) {
+	server := &runtimeCustomerBindServer{status: "CUSTOMER_BOUND"}
+	client := newCustomerBindGRPCClient(t, server)
+	result, err := client.CustomerBindPrepare(context.Background(), "https://im.example.com/callback", "state")
+	if err != nil {
+		t.Fatalf("gRPC 已绑定预注册失败: %v", err)
+	}
+	if result.RequestNo != "" || result.Customer == nil || result.Customer.MaskAccount != "r***@x.com" || result.Customer.BoundAt != 123 {
+		t.Fatalf("gRPC 已绑定响应映射不符: %+v", result)
 	}
 }
 

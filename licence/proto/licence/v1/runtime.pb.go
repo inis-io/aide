@@ -890,6 +890,7 @@ type CustomerBindPrepareResponse struct {
 	RequestNo     string                 `protobuf:"bytes,3,opt,name=request_no,json=requestNo,proto3" json:"request_no,omitempty"`
 	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	ServerTime    int64                  `protobuf:"varint,5,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	Customer      *ProvisionCustomerView `protobuf:"bytes,6,opt,name=customer,proto3" json:"customer,omitempty"` // 已绑定证的脱敏归属（status=CUSTOMER_BOUND 时返回）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -957,6 +958,13 @@ func (x *CustomerBindPrepareResponse) GetServerTime() int64 {
 		return x.ServerTime
 	}
 	return 0
+}
+
+func (x *CustomerBindPrepareResponse) GetCustomer() *ProvisionCustomerView {
+	if x != nil {
+		return x.Customer
+	}
+	return nil
 }
 
 // RuntimeResponse - 许可证运行面统一响应。
@@ -4381,7 +4389,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\bcustomer\x18\x03 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\"U\n" +
 	"\x1aCustomerBindPrepareRequest\x12!\n" +
 	"\fredirect_uri\x18\x01 \x01(\tR\vredirectUri\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\tR\x05state\"\xae\x01\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\"\xf6\x01\n" +
 	"\x1bCustomerBindPrepareResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -4390,7 +4398,8 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12\x1f\n" +
 	"\vserver_time\x18\x05 \x01(\x03R\n" +
-	"serverTime\"\xb2\x02\n" +
+	"serverTime\x12F\n" +
+	"\bcustomer\x18\x06 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\"\xb2\x02\n" +
 	"\x0fRuntimeResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -4808,78 +4817,79 @@ var file_licence_v1_runtime_proto_depIdxs = []int32{
 	6,  // 3: licenhub.licence.v1.ProvisionConflictView.current_plan:type_name -> licenhub.licence.v1.ProvisionConflictPlan
 	6,  // 4: licenhub.licence.v1.ProvisionConflictView.target_plan:type_name -> licenhub.licence.v1.ProvisionConflictPlan
 	5,  // 5: licenhub.licence.v1.CustomerBindResponse.customer:type_name -> licenhub.licence.v1.ProvisionCustomerView
-	20, // 6: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
-	19, // 7: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
-	19, // 8: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
-	23, // 9: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
-	63, // 10: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
-	32, // 11: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
-	64, // 12: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
-	39, // 13: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
-	40, // 14: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
-	42, // 15: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	42, // 16: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
-	45, // 17: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
-	46, // 18: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
-	47, // 19: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
-	53, // 20: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
-	53, // 21: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
-	58, // 22: licenhub.licence.v1.CommandPullResponse.commands:type_name -> licenhub.licence.v1.CommandTask
-	0,  // 23: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
-	1,  // 24: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
-	2,  // 25: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
-	3,  // 26: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:input_type -> licenhub.licence.v1.ProvisionRequest
-	8,  // 27: licenhub.licence.v1.LicenseRuntimeService.CustomerBind:input_type -> licenhub.licence.v1.CustomerBindRequest
-	10, // 28: licenhub.licence.v1.LicenseRuntimeService.CustomerBindPrepare:input_type -> licenhub.licence.v1.CustomerBindPrepareRequest
-	13, // 29: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
-	15, // 30: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
-	16, // 31: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
-	18, // 32: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
-	22, // 33: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
-	25, // 34: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
-	26, // 35: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
-	30, // 36: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
-	33, // 37: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
-	35, // 38: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
-	37, // 39: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
-	41, // 40: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
-	44, // 41: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
-	49, // 42: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
-	51, // 43: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
-	52, // 44: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
-	55, // 45: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
-	57, // 46: licenhub.licence.v1.CommandRuntimeService.Pull:input_type -> licenhub.licence.v1.CommandPullRequest
-	60, // 47: licenhub.licence.v1.CommandRuntimeService.Report:input_type -> licenhub.licence.v1.CommandReportRequest
-	12, // 48: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
-	12, // 49: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
-	12, // 50: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
-	4,  // 51: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:output_type -> licenhub.licence.v1.ProvisionResponse
-	9,  // 52: licenhub.licence.v1.LicenseRuntimeService.CustomerBind:output_type -> licenhub.licence.v1.CustomerBindResponse
-	11, // 53: licenhub.licence.v1.LicenseRuntimeService.CustomerBindPrepare:output_type -> licenhub.licence.v1.CustomerBindPrepareResponse
-	14, // 54: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
-	17, // 55: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
-	17, // 56: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
-	21, // 57: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
-	24, // 58: licenhub.licence.v1.SaasRuntimeService.Search:output_type -> licenhub.licence.v1.TenantSearchResponse
-	27, // 59: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
-	27, // 60: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
-	31, // 61: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
-	34, // 62: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:output_type -> licenhub.licence.v1.ConfigConsumptionReportResponse
-	36, // 63: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
-	38, // 64: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:output_type -> licenhub.licence.v1.ConfigPushbackPushResponse
-	43, // 65: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:output_type -> licenhub.licence.v1.ConfigPushbackDefinitionsResponse
-	48, // 66: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:output_type -> licenhub.licence.v1.PlanCatalogResponse
-	50, // 67: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:output_type -> licenhub.licence.v1.PlanOrderCreateResponse
-	54, // 68: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:output_type -> licenhub.licence.v1.PlanOrderResponse
-	54, // 69: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:output_type -> licenhub.licence.v1.PlanOrderResponse
-	56, // 70: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:output_type -> licenhub.licence.v1.PlanOrderRowsResponse
-	59, // 71: licenhub.licence.v1.CommandRuntimeService.Pull:output_type -> licenhub.licence.v1.CommandPullResponse
-	61, // 72: licenhub.licence.v1.CommandRuntimeService.Report:output_type -> licenhub.licence.v1.CommandReportResponse
-	48, // [48:73] is the sub-list for method output_type
-	23, // [23:48] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	5,  // 6: licenhub.licence.v1.CustomerBindPrepareResponse.customer:type_name -> licenhub.licence.v1.ProvisionCustomerView
+	20, // 7: licenhub.licence.v1.TenantSyncResponse.tenants:type_name -> licenhub.licence.v1.TenantSyncItem
+	19, // 8: licenhub.licence.v1.TenantSyncResponse.platform_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	19, // 9: licenhub.licence.v1.TenantSyncResponse.tenant_manifest:type_name -> licenhub.licence.v1.TenantManifest
+	23, // 10: licenhub.licence.v1.TenantSearchResponse.tenants:type_name -> licenhub.licence.v1.TenantSearchItem
+	63, // 11: licenhub.licence.v1.TenantValidateRequest.usage:type_name -> licenhub.licence.v1.TenantValidateRequest.UsageEntry
+	32, // 12: licenhub.licence.v1.ConfigConsumptionReportRequest.items:type_name -> licenhub.licence.v1.ConfigConsumptionItem
+	64, // 13: licenhub.licence.v1.ConfigPushbackPushRequest.items:type_name -> licenhub.licence.v1.ConfigPushbackPushRequest.ItemsEntry
+	39, // 14: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.groups:type_name -> licenhub.licence.v1.ConfigDefinitionGroup
+	40, // 15: licenhub.licence.v1.ConfigPushbackDefinitionsRequest.configs:type_name -> licenhub.licence.v1.ConfigDefinitionItem
+	42, // 16: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.groups:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
+	42, // 17: licenhub.licence.v1.ConfigPushbackDefinitionsResponse.configs:type_name -> licenhub.licence.v1.ConfigPushbackDiffStats
+	45, // 18: licenhub.licence.v1.PlanCatalogItem.options:type_name -> licenhub.licence.v1.PlanCatalogOption
+	46, // 19: licenhub.licence.v1.PlanCatalogResponse.plans:type_name -> licenhub.licence.v1.PlanCatalogItem
+	47, // 20: licenhub.licence.v1.PlanCatalogResponse.current_plan:type_name -> licenhub.licence.v1.PlanCurrentSnapshot
+	53, // 21: licenhub.licence.v1.PlanOrderResponse.order:type_name -> licenhub.licence.v1.PlanOrderItem
+	53, // 22: licenhub.licence.v1.PlanOrderRowsResponse.records:type_name -> licenhub.licence.v1.PlanOrderItem
+	58, // 23: licenhub.licence.v1.CommandPullResponse.commands:type_name -> licenhub.licence.v1.CommandTask
+	0,  // 24: licenhub.licence.v1.LicenseRuntimeService.Activate:input_type -> licenhub.licence.v1.ActivateRequest
+	1,  // 25: licenhub.licence.v1.LicenseRuntimeService.Validate:input_type -> licenhub.licence.v1.ValidateRequest
+	2,  // 26: licenhub.licence.v1.LicenseRuntimeService.Current:input_type -> licenhub.licence.v1.CurrentLicenseRequest
+	3,  // 27: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:input_type -> licenhub.licence.v1.ProvisionRequest
+	8,  // 28: licenhub.licence.v1.LicenseRuntimeService.CustomerBind:input_type -> licenhub.licence.v1.CustomerBindRequest
+	10, // 29: licenhub.licence.v1.LicenseRuntimeService.CustomerBindPrepare:input_type -> licenhub.licence.v1.CustomerBindPrepareRequest
+	13, // 30: licenhub.licence.v1.UpdateRuntimeService.Check:input_type -> licenhub.licence.v1.UpdateCheckRequest
+	15, // 31: licenhub.licence.v1.UpdateRuntimeService.Report:input_type -> licenhub.licence.v1.UpdateReportRequest
+	16, // 32: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:input_type -> licenhub.licence.v1.UpdateLogsRequest
+	18, // 33: licenhub.licence.v1.SaasRuntimeService.Sync:input_type -> licenhub.licence.v1.TenantSyncRequest
+	22, // 34: licenhub.licence.v1.SaasRuntimeService.Search:input_type -> licenhub.licence.v1.TenantSearchRequest
+	25, // 35: licenhub.licence.v1.SaasRuntimeService.Validate:input_type -> licenhub.licence.v1.TenantValidateRequest
+	26, // 36: licenhub.licence.v1.SaasRuntimeService.Current:input_type -> licenhub.licence.v1.TenantCurrentRequest
+	30, // 37: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:input_type -> licenhub.licence.v1.PlatformConfigSyncRequest
+	33, // 38: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:input_type -> licenhub.licence.v1.ConfigConsumptionReportRequest
+	35, // 39: licenhub.licence.v1.EventRuntimeService.Subscribe:input_type -> licenhub.licence.v1.EventSubscribeRequest
+	37, // 40: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:input_type -> licenhub.licence.v1.ConfigPushbackPushRequest
+	41, // 41: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:input_type -> licenhub.licence.v1.ConfigPushbackDefinitionsRequest
+	44, // 42: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:input_type -> licenhub.licence.v1.PlanCatalogRequest
+	49, // 43: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:input_type -> licenhub.licence.v1.PlanOrderCreateRequest
+	51, // 44: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:input_type -> licenhub.licence.v1.PlanOrderQueryRequest
+	52, // 45: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:input_type -> licenhub.licence.v1.PlanOrderCancelRequest
+	55, // 46: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:input_type -> licenhub.licence.v1.PlanOrderRowsRequest
+	57, // 47: licenhub.licence.v1.CommandRuntimeService.Pull:input_type -> licenhub.licence.v1.CommandPullRequest
+	60, // 48: licenhub.licence.v1.CommandRuntimeService.Report:input_type -> licenhub.licence.v1.CommandReportRequest
+	12, // 49: licenhub.licence.v1.LicenseRuntimeService.Activate:output_type -> licenhub.licence.v1.RuntimeResponse
+	12, // 50: licenhub.licence.v1.LicenseRuntimeService.Validate:output_type -> licenhub.licence.v1.RuntimeResponse
+	12, // 51: licenhub.licence.v1.LicenseRuntimeService.Current:output_type -> licenhub.licence.v1.RuntimeResponse
+	4,  // 52: licenhub.licence.v1.LicenseRuntimeService.ProvisionByPlan:output_type -> licenhub.licence.v1.ProvisionResponse
+	9,  // 53: licenhub.licence.v1.LicenseRuntimeService.CustomerBind:output_type -> licenhub.licence.v1.CustomerBindResponse
+	11, // 54: licenhub.licence.v1.LicenseRuntimeService.CustomerBindPrepare:output_type -> licenhub.licence.v1.CustomerBindPrepareResponse
+	14, // 55: licenhub.licence.v1.UpdateRuntimeService.Check:output_type -> licenhub.licence.v1.UpdateCheckResponse
+	17, // 56: licenhub.licence.v1.UpdateRuntimeService.Report:output_type -> licenhub.licence.v1.UpdateReportResponse
+	17, // 57: licenhub.licence.v1.UpdateRuntimeService.AppendLogs:output_type -> licenhub.licence.v1.UpdateReportResponse
+	21, // 58: licenhub.licence.v1.SaasRuntimeService.Sync:output_type -> licenhub.licence.v1.TenantSyncResponse
+	24, // 59: licenhub.licence.v1.SaasRuntimeService.Search:output_type -> licenhub.licence.v1.TenantSearchResponse
+	27, // 60: licenhub.licence.v1.SaasRuntimeService.Validate:output_type -> licenhub.licence.v1.TenantResponse
+	27, // 61: licenhub.licence.v1.SaasRuntimeService.Current:output_type -> licenhub.licence.v1.TenantResponse
+	31, // 62: licenhub.licence.v1.PlatformConfigRuntimeService.Sync:output_type -> licenhub.licence.v1.PlatformConfigSyncResponse
+	34, // 63: licenhub.licence.v1.PlatformConfigRuntimeService.ReportConfigConsumption:output_type -> licenhub.licence.v1.ConfigConsumptionReportResponse
+	36, // 64: licenhub.licence.v1.EventRuntimeService.Subscribe:output_type -> licenhub.licence.v1.EventMessage
+	38, // 65: licenhub.licence.v1.ConfigPushbackRuntimeService.Push:output_type -> licenhub.licence.v1.ConfigPushbackPushResponse
+	43, // 66: licenhub.licence.v1.ConfigPushbackRuntimeService.PushDefinitions:output_type -> licenhub.licence.v1.ConfigPushbackDefinitionsResponse
+	48, // 67: licenhub.licence.v1.PlanRuntimeService.PlanCatalog:output_type -> licenhub.licence.v1.PlanCatalogResponse
+	50, // 68: licenhub.licence.v1.PlanRuntimeService.PlanOrderCreate:output_type -> licenhub.licence.v1.PlanOrderCreateResponse
+	54, // 69: licenhub.licence.v1.PlanRuntimeService.PlanOrderQuery:output_type -> licenhub.licence.v1.PlanOrderResponse
+	54, // 70: licenhub.licence.v1.PlanRuntimeService.PlanOrderCancel:output_type -> licenhub.licence.v1.PlanOrderResponse
+	56, // 71: licenhub.licence.v1.PlanRuntimeService.PlanOrderRows:output_type -> licenhub.licence.v1.PlanOrderRowsResponse
+	59, // 72: licenhub.licence.v1.CommandRuntimeService.Pull:output_type -> licenhub.licence.v1.CommandPullResponse
+	61, // 73: licenhub.licence.v1.CommandRuntimeService.Report:output_type -> licenhub.licence.v1.CommandReportResponse
+	49, // [49:74] is the sub-list for method output_type
+	24, // [24:49] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_licence_v1_runtime_proto_init() }

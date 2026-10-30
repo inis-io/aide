@@ -232,10 +232,17 @@ func customerBindMap(response *licencev1.CustomerBindResponse) map[string]any {
 
 // customerBindPrepareMap - 授权预注册响应 → 与 HTTP 同形的 JSON。
 func customerBindPrepareMap(response *licencev1.CustomerBindPrepareResponse) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"status": response.GetStatus(), "serverTime": response.GetServerTime(),
 		"requestNo": response.GetRequestNo(), "expiresAt": response.GetExpiresAt(), "message": response.GetMessage(),
 	}
+	if customer := response.GetCustomer(); customer != nil {
+		result["customer"] = map[string]any{
+			"maskAccount": customer.GetMaskAccount(),
+			"boundAt":     customer.GetBoundAt(),
+		}
+	}
+	return result
 }
 
 // conflictPlanMap - 换证冲突单证套餐视图 → 与 HTTP 同形的 JSON。

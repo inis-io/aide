@@ -444,10 +444,12 @@ type CustomerBindResult struct {
 
 // CustomerBindPrepareResult - 预注册授权请求回执。
 type CustomerBindPrepareResult struct {
-	// RequestNo - 一次性授权请求号（门户只允许按此确认，不能改选回跳上下文）
+	// RequestNo - 一次性授权请求号（门户只允许按此确认，不能改选回跳上下文；已绑定时为空）
 	RequestNo string
 	// ExpiresAt - 请求有效期（毫秒）
 	ExpiresAt int64
+	// Customer - 已绑定许可证的脱敏归属（CUSTOMER_BOUND 时返回）
+	Customer *CustomerView
 }
 
 type customerBindPrepareBody struct {
@@ -456,11 +458,12 @@ type customerBindPrepareBody struct {
 }
 
 type customerBindPrepareResponse struct {
-	Status     string `json:"status"`
-	ServerTime int64  `json:"serverTime"`
-	RequestNo  string `json:"requestNo"`
-	ExpiresAt  int64  `json:"expiresAt"`
-	Message    string `json:"message"`
+	Status     string        `json:"status"`
+	ServerTime int64         `json:"serverTime"`
+	RequestNo  string        `json:"requestNo"`
+	ExpiresAt  int64         `json:"expiresAt"`
+	Customer   *CustomerView `json:"customer"`
+	Message    string        `json:"message"`
 }
 
 // CustomerBindPrepare - 预注册一次性账号授权请求，防止开放回跳和票据上下文错配。
@@ -493,6 +496,12 @@ func (this *Client) CustomerBindPrepare(ctx context.Context, redirectURI, state 
 		return CustomerBindPrepareResult{}, err
 	}
 	this.updateClockOffset(response.ServerTime)
+	if response.Status == "CUSTOMER_BOUND" {
+		if response.Customer == nil || strings.TrimSpace(response.Customer.MaskAccount) == "" {
+			return CustomerBindPrepareResult{}, errors.New("已绑定响应缺少客户信息")
+		}
+		return CustomerBindPrepareResult{Customer: response.Customer}, nil
+	}
 	if response.Status != "OK" {
 		status := response.Status
 		if status == "" {

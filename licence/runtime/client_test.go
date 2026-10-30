@@ -96,6 +96,8 @@ type fakePlatform struct {
 	// customerBindStatus / customerBindMessage - 绑定业务拒绝注入
 	customerBindStatus  string
 	customerBindMessage string
+	// customerBindPrepareCustomer - 预注册已绑定响应携带的脱敏客户视图
+	customerBindPrepareCustomer *CustomerView
 	// customerBindCode - 非 0 时绑定接口直接返回该 HTTP 状态码 + 空 body
 	customerBindCode int
 	// events - 项目事件订阅队列（callback_events 简化镜像，eventId 单调递增）

@@ -194,6 +194,7 @@ message CustomerBindPrepareResponse {
   string request_no = 3;
   int64 expires_at = 4;
   int64 server_time = 5;
+  ProvisionCustomerView customer = 6;  // 已绑定证的脱敏归属（status=CUSTOMER_BOUND 时返回）
 }
 
 // RuntimeResponse - 许可证运行面统一响应。
