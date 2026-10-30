@@ -18,7 +18,11 @@ service LicenseRuntimeService {
   // CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
   // 绑定成功后许可证归属客户账号，不改变席位或套餐。
   rpc CustomerBind(CustomerBindRequest) returns (CustomerBindResponse);
-  // CustomerUnbind - 解绑授权账号（TOTP 验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放）。
+  // CustomerUnbindOptions - 查询当前授权账号支持的解绑验证方式（2FA → 邮箱 → 短信 → 密码）。
+  rpc CustomerUnbindOptions(CustomerUnbindOptionsRequest) returns (CustomerUnbindOptionsResponse);
+  // CustomerUnbindChallenge - 向授权账号登记的邮箱或手机号发送一次性解绑验证码。
+  rpc CustomerUnbindChallenge(CustomerUnbindChallengeRequest) returns (CustomerUnbindChallengeResponse);
+  // CustomerUnbind - 分级验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放。
   rpc CustomerUnbind(CustomerUnbindRequest) returns (CustomerUnbindResponse);
   // CustomerBindPrepare - 已激活实例预注册一次性授权请求（固定许可证、回跳地址与 state）。
   rpc CustomerBindPrepare(CustomerBindPrepareRequest) returns (CustomerBindPrepareResponse);
@@ -183,9 +187,43 @@ message CustomerBindResponse {
   ProvisionCustomerView customer = 3;
 }
 
-// CustomerUnbindRequest - 解绑授权账号请求（两步验证码只在请求体与内存中使用）。
+message CustomerUnbindOptionsRequest {}
+
+message CustomerUnbindDestination {
+  string email = 1;
+  string phone = 2;
+}
+
+message CustomerUnbindOptionsResponse {
+  string preferred = 1;
+  repeated string methods = 2;
+  CustomerUnbindDestination destination = 3;
+  string status = 4;
+  int64 server_time = 5;
+  string message = 6;
+}
+
+message CustomerUnbindChallengeRequest {
+  string channel = 1;
+}
+
+message CustomerUnbindChallengeResponse {
+  string status = 1;
+  string challenge_no = 2;
+  int64 expires_at = 3;
+  string destination = 4;
+  int64 server_time = 5;
+  string message = 6;
+}
+
+// CustomerUnbindRequest - 解绑凭据只在请求体与内存中使用，禁止落盘或写日志。
 message CustomerUnbindRequest {
+  // two_fa_code - 旧客户端 TOTP 兼容别名；新请求使用 method/code。
   string two_fa_code = 1;
+  string method = 2;
+  string code = 3;
+  string challenge_no = 4;
+  string password = 5;
 }
 
 // CustomerUnbindResponse - 解绑授权账号响应。

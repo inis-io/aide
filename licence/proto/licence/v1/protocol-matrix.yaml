@@ -29,7 +29,11 @@ runtime:
   - [Client.CustomerBindPrepare, POST, /api/v1/licenses/customer-bind-prepare, LicenseRuntimeService/CustomerBindPrepare, activation-sign-v1, "", license, write, critical, false, "requestNo,expiresAt,customer"]
   # 客户账号绑定：门户授权确认页签发一次性票据，仅关联客户归属，不改变席位或套餐。
   - [Client.CustomerBind, POST, /api/v1/licenses/customer-bind, LicenseRuntimeService/CustomerBind, activation-sign-v1, "", license, write, critical, false, customer]
-  # 解绑授权账号：TOTP 验证后释放席位并回退基础免费套餐，历史订单仅作凭证。
+  # 解绑验证选项：按 2FA → 邮箱 → 短信 → 密码返回实际可用方式，联系方式只返回脱敏视图。
+  - [Client.CustomerUnbindOptions, GET, /api/v1/licenses/customer-unbind/options, LicenseRuntimeService/CustomerUnbindOptions, activation-sign-v1, "", license, read, normal, true, "preferred,methods,destination"]
+  # 解绑验证码：仅 email/sms，10 分钟一次性挑战，发送失败不留下有效挑战。
+  - [Client.CustomerUnbindChallenge, POST, /api/v1/licenses/customer-unbind/challenge, LicenseRuntimeService/CustomerUnbindChallenge, activation-sign-v1, "", license, write, high, false, "challengeNo,expiresAt,destination"]
+  # 解绑授权账号：分级验证后释放席位并回退基础免费套餐，历史订单仅作凭证。
   - [Client.CustomerUnbind, POST, /api/v1/licenses/customer-unbind, LicenseRuntimeService/CustomerUnbind, activation-sign-v1, "", license, write, critical, false, ""]
   - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, keyset]
   - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true, keyset]

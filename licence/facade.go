@@ -59,13 +59,17 @@ const (
 )
 
 type (
-	Client              = LicenceRuntime.Client
-	FingerprintProvider = LicenceRuntime.FingerprintProvider
-	GRPCOptions         = LicenceRuntime.GRPCOptions
-	Options             = LicenceRuntime.Options
-	Store               = LicenceRuntime.Store
-	SubscribedEvent     = LicenceRuntime.SubscribedEvent
-	Transport           = LicenceRuntime.Transport
+	Client                    = LicenceRuntime.Client
+	CustomerUnbindInput       = LicenceRuntime.CustomerUnbindInput
+	CustomerUnbindOptions     = LicenceRuntime.CustomerUnbindOptions
+	CustomerUnbindDestination = LicenceRuntime.CustomerUnbindDestination
+	CustomerUnbindChallenge   = LicenceRuntime.CustomerUnbindChallenge
+	FingerprintProvider       = LicenceRuntime.FingerprintProvider
+	GRPCOptions               = LicenceRuntime.GRPCOptions
+	Options                   = LicenceRuntime.Options
+	Store                     = LicenceRuntime.Store
+	SubscribedEvent           = LicenceRuntime.SubscribedEvent
+	Transport                 = LicenceRuntime.Transport
 )
 
 var FingerprintHash = LicenceRuntime.FingerprintHash

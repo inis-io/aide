@@ -29,6 +29,27 @@ func (this *fakePlatform) handleCustomerUnbind(writer http.ResponseWriter, reque
 	})
 }
 
+func (this *fakePlatform) handleCustomerUnbindOptions(writer http.ResponseWriter, request *http.Request, body []byte) {
+	if !this.credential(writer, request, body) {
+		return
+	}
+	writeJson(writer, map[string]any{
+		"status": "OK", "preferred": "email", "methods": []string{"email", "sms", "password"},
+		"destination": map[string]string{"email": "t***@example.com", "phone": "138****8000"},
+		"serverTime":  time.Now().UnixMilli(),
+	})
+}
+
+func (this *fakePlatform) handleCustomerUnbindChallenge(writer http.ResponseWriter, request *http.Request, body []byte) {
+	if !this.credential(writer, request, body) {
+		return
+	}
+	writeJson(writer, map[string]any{
+		"status": "OK", "challengeNo": "challenge-email", "expiresAt": time.Now().Add(10 * time.Minute).UnixMilli(),
+		"destination": "t***@example.com", "serverTime": time.Now().UnixMilli(),
+	})
+}
+
 func TestClientCustomerUnbindHTTP(t *testing.T) {
 	platform := newFakePlatform(t)
 	client, err := New(testOptions(platform, t.TempDir()))
@@ -39,7 +60,7 @@ func TestClientCustomerUnbindHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Stop()
-	if err = client.CustomerUnbind(t.Context(), "123456"); err != nil {
+	if err = client.CustomerUnbind(t.Context(), CustomerUnbindInput{Code: "123456"}); err != nil {
 		t.Fatalf("解绑请求失败: %v", err)
 	}
 	platform.mu.Lock()
@@ -52,13 +73,57 @@ func TestClientCustomerUnbindHTTP(t *testing.T) {
 	if err = json.Unmarshal([]byte(requests[0]["body"]), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["twoFACode"] != "123456" {
-		t.Fatal("解绑请求未携带 twoFACode")
+	if body["twoFACode"] != "123456" || body["code"] != "123456" || body["method"] != "totp" {
+		t.Fatal("默认 TOTP 解绑请求未携带兼容字段")
 	}
 	for _, key := range []string{"token", "timestamp", "nonce", "signature"} {
 		if requests[0][key] == "" {
 			t.Fatalf("缺少签名头 %s", key)
 		}
+	}
+}
+
+func TestClientCustomerUnbindHTTPVerification(t *testing.T) {
+	platform := newFakePlatform(t)
+	client, err := New(testOptions(platform, t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Stop()
+	options, err := client.CustomerUnbindOptions(t.Context())
+	if err != nil || options.Preferred != "email" || len(options.Methods) != 3 || options.Destination.Phone != "138****8000" {
+		t.Fatalf("解绑选项映射不符: %+v err=%v", options, err)
+	}
+	challenge, err := client.CustomerUnbindChallenge(t.Context(), "email")
+	if err != nil || challenge.ChallengeNo != "challenge-email" || challenge.Destination != "t***@example.com" || challenge.ExpiresAt == 0 {
+		t.Fatalf("邮箱挑战映射不符: %+v err=%v", challenge, err)
+	}
+	if err = client.CustomerUnbind(t.Context(), CustomerUnbindInput{
+		Method: "email", ChallengeNo: challenge.ChallengeNo, Code: "123456",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = client.CustomerUnbind(t.Context(), CustomerUnbindInput{Method: "password", Password: "secret-password"}); err != nil {
+		t.Fatal(err)
+	}
+	platform.mu.Lock()
+	requests := append([]map[string]string(nil), platform.customerBindRequests...)
+	platform.mu.Unlock()
+	var emailBody, passwordBody map[string]any
+	if err = json.Unmarshal([]byte(requests[0]["body"]), &emailBody); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal([]byte(requests[1]["body"]), &passwordBody); err != nil {
+		t.Fatal(err)
+	}
+	if emailBody["method"] != "email" || emailBody["challengeNo"] != "challenge-email" || emailBody["code"] != "123456" {
+		t.Fatalf("邮箱解绑字段不符: %+v", emailBody)
+	}
+	if passwordBody["method"] != "password" || passwordBody["password"] != "secret-password" {
+		t.Fatalf("密码解绑字段不符: %+v", passwordBody)
 	}
 }
 
@@ -74,7 +139,7 @@ func TestClientCustomerUnbindHTTPRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Stop()
-	err = client.CustomerUnbind(t.Context(), "000000")
+	err = client.CustomerUnbind(t.Context(), CustomerUnbindInput{Code: "000000"})
 	var provisionErr *ProvisionError
 	if !errors.As(err, &provisionErr) || provisionErr.Status != "INVALID_ARGUMENT" || provisionErr.Message != "两步验证码错误或已过期" {
 		t.Fatalf("解绑业务拒绝透传不符: %T %v", err, err)
@@ -87,15 +152,26 @@ func TestClientCustomerUnbindValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.CustomerUnbind(t.Context(), "123456"); err == nil {
+	if err = client.CustomerUnbind(t.Context(), CustomerUnbindInput{Code: "123456"}); err == nil {
 		t.Fatal("未激活不得解绑")
+	}
+	if _, err = client.CustomerUnbindOptions(t.Context()); err == nil {
+		t.Fatal("未激活不得读取解绑选项")
+	}
+	if _, err = client.CustomerUnbindChallenge(t.Context(), "email"); err == nil {
+		t.Fatal("未激活不得发码")
 	}
 	if err = client.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	defer client.Stop()
-	if err = client.CustomerUnbind(t.Context(), " "); err == nil {
-		t.Fatal("空验证码不得解绑")
+	for _, input := range []CustomerUnbindInput{{Code: " "}, {Method: "password"}, {Method: "email", Code: "123456"}, {Method: "other", Code: "123456"}} {
+		if err = client.CustomerUnbind(t.Context(), input); err == nil {
+			t.Fatalf("无效凭据不得解绑: %+v", input)
+		}
+	}
+	if _, err = client.CustomerUnbindChallenge(t.Context(), "password"); err == nil {
+		t.Fatal("密码不得走发码端点")
 	}
 	platform.mu.Lock()
 	calls := platform.customerBindCalls

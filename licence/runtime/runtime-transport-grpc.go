@@ -237,6 +237,33 @@ func customerUnbindMap(response *licencev1.CustomerUnbindResponse) map[string]an
 	}
 }
 
+// customerUnbindOptionsMap - 解绑验证选项 → 与 HTTP 同形的 JSON。
+func customerUnbindOptionsMap(response *licencev1.CustomerUnbindOptionsResponse) map[string]any {
+	methods := response.GetMethods()
+	if methods == nil {
+		methods = []string{}
+	}
+	result := map[string]any{
+		"status": response.GetStatus(), "preferred": response.GetPreferred(), "methods": methods,
+		"serverTime": response.GetServerTime(), "message": response.GetMessage(),
+	}
+	if destination := response.GetDestination(); destination != nil {
+		result["destination"] = map[string]any{"email": destination.GetEmail(), "phone": destination.GetPhone()}
+	} else {
+		result["destination"] = map[string]any{"email": "", "phone": ""}
+	}
+	return result
+}
+
+// customerUnbindChallengeMap - 解绑验证码挑战 → 与 HTTP 同形的 JSON。
+func customerUnbindChallengeMap(response *licencev1.CustomerUnbindChallengeResponse) map[string]any {
+	return map[string]any{
+		"status": response.GetStatus(), "challengeNo": response.GetChallengeNo(),
+		"expiresAt": response.GetExpiresAt(), "destination": response.GetDestination(),
+		"serverTime": response.GetServerTime(), "message": response.GetMessage(),
+	}
+}
+
 // customerBindPrepareMap - 授权预注册响应 → 与 HTTP 同形的 JSON。
 func customerBindPrepareMap(response *licencev1.CustomerBindPrepareResponse) map[string]any {
 	result := map[string]any{
@@ -545,12 +572,47 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 		}
 		return marshalMap(provisionMap(response))
 
+	case http.MethodGet + " /api/v1/licenses/customer-unbind/options":
+		request := &licencev1.CustomerUnbindOptionsRequest{}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_CustomerUnbindOptions_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.license.CustomerUnbindOptions(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		return marshalMap(customerUnbindOptionsMap(response))
+
+	case http.MethodPost + " /api/v1/licenses/customer-unbind/challenge":
+		var input customerUnbindChallengeBody
+		if err := json.Unmarshal(body, &input); err != nil {
+			return 0, nil, err
+		}
+		request := &licencev1.CustomerUnbindChallengeRequest{Channel: input.Channel}
+		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_CustomerUnbindChallenge_FullMethodName, request, withSign)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer cancel()
+		response, err := this.license.CustomerUnbindChallenge(callCtx, request)
+		if err != nil {
+			code, mapped := grpcHTTPCode(err)
+			return code, nil, mapped
+		}
+		return marshalMap(customerUnbindChallengeMap(response))
+
 	case http.MethodPost + " /api/v1/licenses/customer-unbind":
 		var input customerUnbindBody
 		if err := json.Unmarshal(body, &input); err != nil {
 			return 0, nil, err
 		}
-		request := &licencev1.CustomerUnbindRequest{TwoFaCode: input.TwoFACode}
+		request := &licencev1.CustomerUnbindRequest{
+			TwoFaCode: input.TwoFACode, Method: input.Method, Code: input.Code,
+			ChallengeNo: input.ChallengeNo, Password: input.Password,
+		}
 		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_CustomerUnbind_FullMethodName, request, withSign)
 		if err != nil {
 			return 0, nil, err

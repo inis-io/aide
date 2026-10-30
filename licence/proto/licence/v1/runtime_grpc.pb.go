@@ -19,13 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LicenseRuntimeService_Activate_FullMethodName            = "/licenhub.licence.v1.LicenseRuntimeService/Activate"
-	LicenseRuntimeService_Validate_FullMethodName            = "/licenhub.licence.v1.LicenseRuntimeService/Validate"
-	LicenseRuntimeService_Current_FullMethodName             = "/licenhub.licence.v1.LicenseRuntimeService/Current"
-	LicenseRuntimeService_ProvisionByPlan_FullMethodName     = "/licenhub.licence.v1.LicenseRuntimeService/ProvisionByPlan"
-	LicenseRuntimeService_CustomerBind_FullMethodName        = "/licenhub.licence.v1.LicenseRuntimeService/CustomerBind"
-	LicenseRuntimeService_CustomerUnbind_FullMethodName      = "/licenhub.licence.v1.LicenseRuntimeService/CustomerUnbind"
-	LicenseRuntimeService_CustomerBindPrepare_FullMethodName = "/licenhub.licence.v1.LicenseRuntimeService/CustomerBindPrepare"
+	LicenseRuntimeService_Activate_FullMethodName                = "/licenhub.licence.v1.LicenseRuntimeService/Activate"
+	LicenseRuntimeService_Validate_FullMethodName                = "/licenhub.licence.v1.LicenseRuntimeService/Validate"
+	LicenseRuntimeService_Current_FullMethodName                 = "/licenhub.licence.v1.LicenseRuntimeService/Current"
+	LicenseRuntimeService_ProvisionByPlan_FullMethodName         = "/licenhub.licence.v1.LicenseRuntimeService/ProvisionByPlan"
+	LicenseRuntimeService_CustomerBind_FullMethodName            = "/licenhub.licence.v1.LicenseRuntimeService/CustomerBind"
+	LicenseRuntimeService_CustomerUnbindOptions_FullMethodName   = "/licenhub.licence.v1.LicenseRuntimeService/CustomerUnbindOptions"
+	LicenseRuntimeService_CustomerUnbindChallenge_FullMethodName = "/licenhub.licence.v1.LicenseRuntimeService/CustomerUnbindChallenge"
+	LicenseRuntimeService_CustomerUnbind_FullMethodName          = "/licenhub.licence.v1.LicenseRuntimeService/CustomerUnbind"
+	LicenseRuntimeService_CustomerBindPrepare_FullMethodName     = "/licenhub.licence.v1.LicenseRuntimeService/CustomerBindPrepare"
 )
 
 // LicenseRuntimeServiceClient is the client API for LicenseRuntimeService service.
@@ -46,7 +48,11 @@ type LicenseRuntimeServiceClient interface {
 	// CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
 	// 绑定成功后许可证归属客户账号，不改变席位或套餐。
 	CustomerBind(ctx context.Context, in *CustomerBindRequest, opts ...grpc.CallOption) (*CustomerBindResponse, error)
-	// CustomerUnbind - 解绑授权账号（TOTP 验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放）。
+	// CustomerUnbindOptions - 查询当前授权账号支持的解绑验证方式（2FA → 邮箱 → 短信 → 密码）。
+	CustomerUnbindOptions(ctx context.Context, in *CustomerUnbindOptionsRequest, opts ...grpc.CallOption) (*CustomerUnbindOptionsResponse, error)
+	// CustomerUnbindChallenge - 向授权账号登记的邮箱或手机号发送一次性解绑验证码。
+	CustomerUnbindChallenge(ctx context.Context, in *CustomerUnbindChallengeRequest, opts ...grpc.CallOption) (*CustomerUnbindChallengeResponse, error)
+	// CustomerUnbind - 分级验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放。
 	CustomerUnbind(ctx context.Context, in *CustomerUnbindRequest, opts ...grpc.CallOption) (*CustomerUnbindResponse, error)
 	// CustomerBindPrepare - 已激活实例预注册一次性授权请求（固定许可证、回跳地址与 state）。
 	CustomerBindPrepare(ctx context.Context, in *CustomerBindPrepareRequest, opts ...grpc.CallOption) (*CustomerBindPrepareResponse, error)
@@ -110,6 +116,26 @@ func (c *licenseRuntimeServiceClient) CustomerBind(ctx context.Context, in *Cust
 	return out, nil
 }
 
+func (c *licenseRuntimeServiceClient) CustomerUnbindOptions(ctx context.Context, in *CustomerUnbindOptionsRequest, opts ...grpc.CallOption) (*CustomerUnbindOptionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CustomerUnbindOptionsResponse)
+	err := c.cc.Invoke(ctx, LicenseRuntimeService_CustomerUnbindOptions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *licenseRuntimeServiceClient) CustomerUnbindChallenge(ctx context.Context, in *CustomerUnbindChallengeRequest, opts ...grpc.CallOption) (*CustomerUnbindChallengeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CustomerUnbindChallengeResponse)
+	err := c.cc.Invoke(ctx, LicenseRuntimeService_CustomerUnbindChallenge_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *licenseRuntimeServiceClient) CustomerUnbind(ctx context.Context, in *CustomerUnbindRequest, opts ...grpc.CallOption) (*CustomerUnbindResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CustomerUnbindResponse)
@@ -148,7 +174,11 @@ type LicenseRuntimeServiceServer interface {
 	// CustomerBind - 客户账号绑定（门户授权确认页签发的一次性票据；activation-sign-v1 实例签名防重放）。
 	// 绑定成功后许可证归属客户账号，不改变席位或套餐。
 	CustomerBind(context.Context, *CustomerBindRequest) (*CustomerBindResponse, error)
-	// CustomerUnbind - 解绑授权账号（TOTP 验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放）。
+	// CustomerUnbindOptions - 查询当前授权账号支持的解绑验证方式（2FA → 邮箱 → 短信 → 密码）。
+	CustomerUnbindOptions(context.Context, *CustomerUnbindOptionsRequest) (*CustomerUnbindOptionsResponse, error)
+	// CustomerUnbindChallenge - 向授权账号登记的邮箱或手机号发送一次性解绑验证码。
+	CustomerUnbindChallenge(context.Context, *CustomerUnbindChallengeRequest) (*CustomerUnbindChallengeResponse, error)
+	// CustomerUnbind - 分级验证后释放席位并回退基础免费套餐；activation-sign-v1 实例签名防重放。
 	CustomerUnbind(context.Context, *CustomerUnbindRequest) (*CustomerUnbindResponse, error)
 	// CustomerBindPrepare - 已激活实例预注册一次性授权请求（固定许可证、回跳地址与 state）。
 	CustomerBindPrepare(context.Context, *CustomerBindPrepareRequest) (*CustomerBindPrepareResponse, error)
@@ -176,6 +206,12 @@ func (UnimplementedLicenseRuntimeServiceServer) ProvisionByPlan(context.Context,
 }
 func (UnimplementedLicenseRuntimeServiceServer) CustomerBind(context.Context, *CustomerBindRequest) (*CustomerBindResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CustomerBind not implemented")
+}
+func (UnimplementedLicenseRuntimeServiceServer) CustomerUnbindOptions(context.Context, *CustomerUnbindOptionsRequest) (*CustomerUnbindOptionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CustomerUnbindOptions not implemented")
+}
+func (UnimplementedLicenseRuntimeServiceServer) CustomerUnbindChallenge(context.Context, *CustomerUnbindChallengeRequest) (*CustomerUnbindChallengeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CustomerUnbindChallenge not implemented")
 }
 func (UnimplementedLicenseRuntimeServiceServer) CustomerUnbind(context.Context, *CustomerUnbindRequest) (*CustomerUnbindResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CustomerUnbind not implemented")
@@ -294,6 +330,42 @@ func _LicenseRuntimeService_CustomerBind_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LicenseRuntimeService_CustomerUnbindOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CustomerUnbindOptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LicenseRuntimeServiceServer).CustomerUnbindOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LicenseRuntimeService_CustomerUnbindOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LicenseRuntimeServiceServer).CustomerUnbindOptions(ctx, req.(*CustomerUnbindOptionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LicenseRuntimeService_CustomerUnbindChallenge_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CustomerUnbindChallengeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LicenseRuntimeServiceServer).CustomerUnbindChallenge(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LicenseRuntimeService_CustomerUnbindChallenge_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LicenseRuntimeServiceServer).CustomerUnbindChallenge(ctx, req.(*CustomerUnbindChallengeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LicenseRuntimeService_CustomerUnbind_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CustomerUnbindRequest)
 	if err := dec(in); err != nil {
@@ -356,6 +428,14 @@ var LicenseRuntimeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CustomerBind",
 			Handler:    _LicenseRuntimeService_CustomerBind_Handler,
+		},
+		{
+			MethodName: "CustomerUnbindOptions",
+			Handler:    _LicenseRuntimeService_CustomerUnbindOptions_Handler,
+		},
+		{
+			MethodName: "CustomerUnbindChallenge",
+			Handler:    _LicenseRuntimeService_CustomerUnbindChallenge_Handler,
 		},
 		{
 			MethodName: "CustomerUnbind",

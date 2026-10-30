@@ -286,6 +286,10 @@ func (this *fakePlatform) handle(writer http.ResponseWriter, request *http.Reque
 		this.handleCustomerBindPrepare(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/licenses/customer-bind":
 		this.handleCustomerBind(writer, request, body)
+	case request.Method == http.MethodGet && request.URL.Path == "/api/v1/licenses/customer-unbind/options":
+		this.handleCustomerUnbindOptions(writer, request, body)
+	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/licenses/customer-unbind/challenge":
+		this.handleCustomerUnbindChallenge(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/licenses/customer-unbind":
 		this.handleCustomerUnbind(writer, request, body)
 	case request.Method == http.MethodPost && request.URL.Path == "/api/v1/updates/check":

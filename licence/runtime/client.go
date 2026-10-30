@@ -442,58 +442,6 @@ type CustomerBindResult struct {
 	BoundAt int64
 }
 
-type customerUnbindBody struct {
-	TwoFACode string `json:"twoFACode"`
-}
-
-type customerUnbindResponse struct {
-	Status     string `json:"status"`
-	ServerTime int64  `json:"serverTime"`
-	Message    string `json:"message"`
-}
-
-// CustomerUnbind - 解绑授权账号：TOTP 验证后平台释放席位并回退基础免费套餐。
-// 未激活或空验证码直接报错且不发请求；业务拒绝以 *ProvisionError 原样透传。
-func (this *Client) CustomerUnbind(ctx context.Context, twoFACode string) error {
-	this.mu.RLock()
-	token := this.state.ActivationToken
-	this.mu.RUnlock()
-	if token == "" {
-		return errors.New("客户端未激活，无法解绑授权账号")
-	}
-	twoFACode = strings.TrimSpace(twoFACode)
-	if twoFACode == "" {
-		return errors.New("两步验证码不能为空")
-	}
-	body, err := json.Marshal(customerUnbindBody{TwoFACode: twoFACode})
-	if err != nil {
-		return err
-	}
-	statusCode, raw, err := this.doRequest(ctx, http.MethodPost, "/api/v1/licenses/customer-unbind", body, true)
-	if err != nil {
-		return err
-	}
-	if statusCode != http.StatusOK {
-		if statusCode == http.StatusNotFound {
-			return errors.New("许可证或实例信息无效")
-		}
-		return fmt.Errorf("客户解绑请求失败（HTTP %d）", statusCode)
-	}
-	var response customerUnbindResponse
-	if err = json.Unmarshal(raw, &response); err != nil {
-		return err
-	}
-	this.updateClockOffset(response.ServerTime)
-	if response.Status != "OK" {
-		status := response.Status
-		if status == "" {
-			status = "ERROR"
-		}
-		return &ProvisionError{Status: status, Message: response.Message}
-	}
-	return nil
-}
-
 // CustomerBindPrepareResult - 预注册授权请求回执。
 type CustomerBindPrepareResult struct {
 	// RequestNo - 一次性授权请求号（门户只允许按此确认，不能改选回跳上下文；已绑定时为空）
