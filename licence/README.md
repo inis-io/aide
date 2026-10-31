@@ -199,36 +199,12 @@ if err != nil {
 - **换机/重装不再使用迁移码**：客户先在门户「客户授权 → 席位管理」解绑旧席位（原因必填，账号开启 2FA 时须验证），旧实例下一次 `validate`/`current` 收到 `SEAT_RELEASED`；名额释放后，新实例再使用下述激活码入座。
 - 旧迁移请求只返回 `MIGRATION_REMOVED`，不会建证或消费席位；SDK 不再提供 `MigrationCode` 入口。
 
-**激活码入座（激活码）**：客户在 licen-hub 门户对已购套餐的许可证生成一次性激活码（默认 15 分钟有效），任何实例凭码入座该证的一个席位，套餐信息随信封下发。全新实例用 `AutoStartWithOptions` 的 `ActivationCode`（首次申领即入座，不签发新证、不消耗 sdk_auto 配额）；已激活实例用 `Client.ActivateByCode` 换证（走 activation-sign-v1 请求签名，凭证族与 activate 同级）：
+**激活码入座（激活码）**：客户在 licen-hub 门户对已购套餐的许可证生成一次性激活码（默认 15 分钟有效），**仅未激活且未绑定授权账号的新实例**可凭码入座该证的一个席位，套餐信息随信封下发。使用 `AutoStartWithOptions` 的 `ActivationCode` 首次申领即入座，不签发新证、不消耗 sdk_auto 配额。
 
-```go
-result, err := client.ActivateByCode(ctx, activationCode, false)
-var conflict *licence.ActivationConflictError
-if errors.As(err, &conflict) {
-	// 当前许可证已持付费套餐：展示 conflict.CurrentPlan / conflict.TargetPlan 与席位占用，
-	// 用户确认后以 confirmReplace=true 重发（平台此前未消费激活码）
-	result, err = client.ActivateByCode(ctx, activationCode, true)
-}
-if err != nil {
-	var rejected *licence.ProvisionError
-	if errors.As(err, &rejected) && rejected.Status == "ACTIVATION_INVALID" {
-		// 激活码无效或已过期：提示重新生成，不要重试同一码
-		return err
-	}
-	panic(err) // 其余错误（网络、未激活等）按部署环境自行处置
-}
-// 换证返回已 Start 的新 Client；同证幂等时为当前 Client（按指针区分，避免误关运行中的客户端）
-if result.Client != client {
-	defer result.Client.Close()
-}
-```
-
-- **三种情形**：全新实例匿名入座（provision 激活码分支）；已激活且当前证≠目标证 → 换证（新 Client 激活占席，平台同事务释放旧证席位，`auto.json` 先落目标证再激活）；已激活且当前证=目标证 → 幂等刷新（不重复占席）。
-- **指纹挑战**：两条激活码路径首次缺指纹都会收到 `FINGERPRINT_REQUIRED + salt`，平台不消费激活码；SDK 用同一安装标识计算指纹并重试一次，确保消费记录与后续 activate 使用同一指纹。
-- **付费证冲突保护**：当前证已持付费套餐且未确认时，平台返回 `ACTIVATION_CONFLICT` + 双方套餐对比载荷，以 `*ActivationConflictError` 透出（含 `CurrentPlan/TargetPlan/SeatUsed/SeatLimit`），激活码不消费。
+- **已有任意套餐或已绑定账号均禁止使用**：免费证与付费证同等处理，不再支持换证、冲突确认或同证重复使用。旧 `Client.ActivateByCode` 仅保留协议兼容，当前平台对携带 `currentLicenseNo` 的请求在验签后统一返回 `ACTIVATION_INVALID`，不消费激活码。
+- **指纹挑战**：首次缺指纹会收到 `FINGERPRINT_REQUIRED + salt`，平台不消费激活码；SDK 用同一安装标识计算指纹并重试一次，确保消费记录与后续 activate 使用同一指纹。
 - 成功返回 `AutoResult`，`Customer`（`*CustomerView{MaskAccount, BoundAt}`）随响应落地——目标证生而归属客户，入座即完成归属，无需再绑定。
-- 未激活（无 activation token）直接报错且不发请求；连接层 404（模糊语义）归一为「许可证或实例信息无效」。
-- 激活码只过内存：禁止落盘、写日志或进错误文案。
+- 连接层 404（模糊语义）归一为「许可证或实例信息无效」；激活码只过内存，禁止落盘、写日志或进错误文案。
 
 > **旧契约已移除**：授权模板、旧激活码兑换体系、provision token 与迁移码均已下线。旧 `Provision` / `Redeem` 不再存在；sdk_auto 直接用 `ProjectNo`，不再保留令牌配置入口。商业授权走套餐在线购买（门户直购或实例侧 `PlansCatalog` / 套餐订单）；账号归属由门户授权绑定或激活码入座建立，换机/重装统一先解绑旧席位。
 
@@ -792,7 +768,7 @@ type Options struct {
 | `ReportUsage` | `func (this *Client) ReportUsage(usage map[string]int64)` | 用量上报：合并进待上报表，随下次 validate 携带，服务端确认后清空 |
 | `Reactivate` | `func (this *Client) Reactivate(ctx context.Context) error` | 重新激活（换机/令牌丢失/EXPIRED 引导路径）：生成新客户端密钥对重新绑定，旧公钥随旧激活记录失效 |
 | `Current` | `func (this *Client) Current(ctx context.Context) (Envelope, error)` | 按需拉取当前生效信封（不做滑动刷新；失败返回错误，不影响本地缓存） |
-| `ActivateByCode` | `func (this *Client) ActivateByCode(ctx context.Context, code string, confirmReplace bool) (AutoResult, error)` | 激活码换证入座（需已激活，走 activation-sign-v1 签名；provision 激活码分支）：当前证≠目标证时换证并释放旧席位，返回已 Start 的新 Client；付费证冲突返回 `*ActivationConflictError`（不消费码），确认后 confirmReplace=true 重发；同证幂等返回当前 Client，见 §3.2 |
+| `ActivateByCode`（旧换证协议） | `func (this *Client) ActivateByCode(ctx context.Context, code string, confirmReplace bool) (AutoResult, error)` | 仅为旧部署保留的换证协议入口；当前平台对 currentLicenseNo 一律返回 `ACTIVATION_INVALID` 且不消费码。新实例请使用 `AutoStartWithOptions` 的 `ActivationCode`，见 §3.2 |
 
 典型接入：
 
@@ -1847,7 +1823,7 @@ fileName, content, _ := adm.Apis.ExportMonitorBills(ctx, &admin.ApisBillQuery{Bi
 | `protocol/version-range.go` | 版本范围表达式判定 |
 | `runtime/fingerprint*.go` | 实例指纹采集与哈希（按平台 build tags 分文件） |
 | `runtime/store.go` | 安全存储接口与默认加密文件实现 |
-| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报、激活码换证入座（`ActivateByCode`） |
+| `runtime/client.go` | 运行面客户端：生命周期、动态公钥快照、后台刷新、权益闸门、事件拉取与消费上报、旧换证协议兼容（`ActivateByCode`） |
 | `runtime/transport.go` / `runtime-transport.go` / `runtime-transport-grpc.go` | 统一请求出口、请求签名、keyset 与信封原子提交、HTTP/gRPC 双传输 |
 | `runtime/update.go` | 在线更新查询：清单结构、检查、下载、升级上报（执行器在 `updater` 子包） |
 | `runtime/saas.go` / `saas-menu.go` | SaaS 租户：信封结构、同步、校验、本地判定、菜单过滤与同步执行 |

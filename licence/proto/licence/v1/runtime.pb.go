@@ -256,13 +256,11 @@ type ProvisionRequest struct {
 	MigrationCode string `protobuf:"bytes,9,opt,name=migration_code,json=migrationCode,proto3" json:"migration_code,omitempty"`
 	// activation_code - 一次性激活码（可选；携带时入座客户既有许可证的一个席位，不签发新证、不消耗 sdk_auto 配额）
 	ActivationCode string `protobuf:"bytes,10,opt,name=activation_code,json=activationCode,proto3" json:"activation_code,omitempty"`
-	// current_license_no - 当前许可证编号（可选；已激活实例换证入座时上送，携带时请求必须
-	// 带 activation-sign-v1 实例签名，平台据此做冲突评估与旧席位释放）
+	// current_license_no - 旧换证协议保留字段；当前平台验签后一律拒绝且不消费码，不再支持换证或同证重复使用。
 	CurrentLicenseNo string `protobuf:"bytes,11,opt,name=current_license_no,json=currentLicenseNo,proto3" json:"current_license_no,omitempty"`
-	// release_old_seat - 换证入座成功后是否同事务释放当前许可证上的旧席位（仅随 current_license_no 生效）
+	// release_old_seat - 旧换证协议保留字段，不再产生换证或席位释放效果。
 	ReleaseOldSeat bool `protobuf:"varint,12,opt,name=release_old_seat,json=releaseOldSeat,proto3" json:"release_old_seat,omitempty"`
-	// confirm_replace - 冲突确认（仅随 current_license_no 生效）：当前证已持付费套餐时，
-	// 缺省返回 ACTIVATION_CONFLICT 对比载荷且不消费激活码；显式 true 才执行换证
+	// confirm_replace - 旧冲突确认协议保留字段，当前平台不再接受换证，设置为 true 亦无效。
 	ConfirmReplace bool `protobuf:"varint,13,opt,name=confirm_replace,json=confirmReplace,proto3" json:"confirm_replace,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache

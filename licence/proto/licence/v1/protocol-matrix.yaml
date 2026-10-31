@@ -21,8 +21,8 @@ runtime:
   # 激活码换证（Client.ActivateByCode）携带 currentLicenseNo 时请求带 activation-sign-v1 签名，
   # 成功返回目标许可证与 customer 视图；付费证冲突返回 ACTIVATION_CONFLICT + conflict 对比载荷（不消费码）。
   - [Client.ProvisionByPlan, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, public, "", license, write, normal, false, "keyset,customer,conflict"]
-  # 激活码换证入座（已激活实例专用；与 ProvisionByPlan 同端点，activationCode+currentLicenseNo 分支，
-  # 必须 activation-sign-v1 签名）；冲突返回 ACTIVATION_CONFLICT 不消费码，confirmReplace=true 重发才换证。
+  # 旧换证协议兼容入口（与 ProvisionByPlan 同端点，activationCode+currentLicenseNo 分支，
+  # 必须 activation-sign-v1 签名）；当前平台一律 ACTIVATION_INVALID 且不消费码，不再支持换证或同证重复使用。
   - [Client.ActivateByCode, POST, /api/v1/licenses/provision, LicenseRuntimeService/ProvisionByPlan, activation-sign-v1, "", license, write, critical, false, "keyset,customer,conflict"]
   # 授权预注册：固定许可证、回跳地址和 state，门户只按 requestNo 确认，禁止开放重定向；
   # 已绑定返回 CUSTOMER_BOUND + customer，不创建请求，供接入方自动同步脱敏归属。

@@ -9,7 +9,7 @@
   根包 = 纯门面（`doc.go` + `facade.go`，全部导出符号以别名镜像，无任何实现）；
   `runtime/` = 运行面 `Client` + `AutoStart` / `AutoStartWithOptions`（`auto.go`/`defaults.go`）+
   传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`，支持一次性激活码
-  `ActivationCode` 入座客户既有许可证席位）/账号绑定（`Client.CustomerBindPrepare` 预注册固定许可证、回跳地址与 state，门户只按 requestNo 确认；已绑定预注册返回 `CUSTOMER_BOUND + Customer`，不创建请求，供接入方自愈归属；`Client.CustomerBind` 消费门户授权票据，均为 activation-sign-v1 实例签名；`Client.CustomerUnbindOptions` 读取分级验证选项、`Client.CustomerUnbindChallenge` 按 email/sms 发码、`Client.CustomerUnbind` 以 `{Method,Code,ChallengeNo,Password}` 经 2FA/邮箱/短信/密码验证撤回套餐并释放席位）/激活码换证（`Client.ActivateByCode`，签名换证 + ACTIVATION_CONFLICT 冲突确认；首次缺指纹先挑战且不消费码，SDK 计算指纹后重试一次）/
+  `ActivationCode` 入座客户既有许可证席位）/账号绑定（`Client.CustomerBindPrepare` 预注册固定许可证、回跳地址与 state，门户只按 requestNo 确认；已绑定预注册返回 `CUSTOMER_BOUND + Customer`，不创建请求，供接入方自愈归属；`Client.CustomerBind` 消费门户授权票据，均为 activation-sign-v1 实例签名；`Client.CustomerUnbindOptions` 读取分级验证选项、`Client.CustomerUnbindChallenge` 按 email/sms 发码、`Client.CustomerUnbind` 以 `{Method,Code,ChallengeNo,Password}` 经 2FA/邮箱/短信/密码验证撤回套餐并释放席位）/激活码（仅未激活、未绑定的新实例首次申领入座；旧 `Client.ActivateByCode` 仅保留协议兼容，当前平台对 currentLicenseNo 一律拒绝且不消费码；首次缺指纹先挑战且不消费码，SDK 计算指纹后重试一次）/
   配置回推/套餐/实例指令；
   `protocol/` = 平台契约镜像层（信封/keyset/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
@@ -75,8 +75,8 @@ licence/
   metadata `x-request-id`（`LicenceProtocol.MetadataRequestID`），**不进任何签名 canonical**；
 - `proto/licence/v1` 被各包引用，自身不 import 模块内任何包。
 - **截至 2026-10-28，运行面与管理面现有全资源均已实现 HTTP + gRPC**（运行面含许可证、
-  激活码换证入座（provision 激活码分支，`activation_code` 全新实例匿名入座 /
-  `Client.ActivateByCode` 已激活实例签名换证，与 activate 同级）、在线更新、
+  激活码入座（provision 激活码分支，`activation_code` 仅限未激活、未绑定的新实例匿名入座；
+  旧 `Client.ActivateByCode` 仅保留协议兼容，当前平台对 currentLicenseNo 一律拒绝）、在线更新、
   SaaS 租户、平台配置、事件订阅与配置回推 `ConfigPushbackRuntimeService/Push`、实例指令通道
   `CommandRuntimeService/Pull|Report`——实例长轮询领取 + 执行回执，动作白名单
   `runtime_info`/`license_refresh`/`config_refresh`/`update_check`，回执幂等 command_no 终态先入先赢；
@@ -170,8 +170,8 @@ licence/
 - **一次性码只过内存**：激活码（`ProvisionOptions/AutoOptions.ActivationCode`、`Client.ActivateByCode`）
   与账号绑定票据（`Client.CustomerBind`）短时效、单次使用，禁止落盘、写日志或进错误文案；
   激活失败按 `ACTIVATION_INVALID`、绑定失败按 `BIND_INVALID` 模糊文案透传；旧迁移请求只返回
-  `MIGRATION_REMOVED`，不会建证或落入普通申领。付费证换证冲突以 `*ActivationConflictError`
-  （ACTIVATION_CONFLICT + 对比载荷）透出，平台不消费码，确认后 `ConfirmReplace=true` 重发。
+  `MIGRATION_REMOVED`，不会建证或落入普通申领。旧 `Client.ActivateByCode` 仅保留协议兼容，
+  当前平台对 currentLicenseNo 一律拒绝且不消费码，不再产生 ACTIVATION_CONFLICT 或同证成功路径。
 - **解绑凭据边界**：`CustomerUnbindOptions` 只返回脱敏目的地；`CustomerUnbindChallenge` 的 email/sms 挑战仅存 SHA-256 哈希、10 分钟单次有效、错码 5 次失效；`CustomerUnbindInput` 的密码、验证码与挑战号只在内存和签名请求中传递，禁止落盘、写日志或进错误文案。HTTP/gRPC 均使用 activation-sign-v1，未激活或本地校验失败不得触网。
 
 ## 多机席位约定
