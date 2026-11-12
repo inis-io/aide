@@ -3,6 +3,7 @@ package cachex
 import (
 	"fmt"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/inis-io/aide/utils"
@@ -199,9 +200,29 @@ func (this *FileStore) Clear() (ok bool) {
 	return true
 }
 
-// dest - 缓存文件路径（存储目录/键名.后缀）
+// dest - 缓存文件路径（存储目录/键名.后缀）；键名含文件系统不安全字符时退化哈希文件名，
+// 保证各平台一致可用——标签列表键（前缀-TAG-大写标签名）允许含冒号，
+// 而 Windows 文件名禁止 \ / : * ? " < > | 与控制字符，裸键直接作文件名会导致写入静默失败
 func (this *FileStore) dest(key string) string {
-	return path.Join(this.Config.Root, key+"."+this.Config.Suffix)
+	return path.Join(this.Config.Root, safeFileName(key)+"."+this.Config.Suffix)
+}
+
+// safeFileName - 键名可安全作文件名时原样返回（保留可读性），否则返回确定性哈希形式
+func safeFileName(key string) (name string) {
+
+	if key != "" && !strings.ContainsAny(key, "\\/:*?\"<>|") {
+		safe := true
+		for _, r := range key {
+			if r < 0x20 {
+				safe = false
+				break
+			}
+		}
+		if safe {
+			return key
+		}
+	}
+	return fmt.Sprintf("HASH-%s", utils.Hash.Token(key, 16))
 }
 
 // get - 读取缓存值：文件不存在、解析失败或已过期返回 nil（过期文件顺带删除）

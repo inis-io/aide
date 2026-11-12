@@ -1521,3 +1521,43 @@ func TestLayeredReloadClosesOldStore(t *testing.T) {
 	inst.HasConfig = false
 	inst.useDefault()
 }
+
+// TestFileStoreUnsafeKeyFilename - 键名含文件系统不安全字符（冒号等）时必须可写可读可删：
+// 标签列表键（前缀-TAG-大写标签名）允许含冒号，而 Windows 文件名禁止 \ / : * ? " < > |，
+// 裸键作文件名会写入静默失败、DeleteByTag 删不到成员（真实事故回归）。
+// 必须用真实 OsFs + 临时目录——MemMapFs 不模拟 Windows 文件名规则，会掩盖该缺陷。
+func TestFileStoreUnsafeKeyFilename(t *testing.T) {
+
+	root := filepath.Join(t.TempDir(), "cache")
+	store := &FileStore{Fs: afero.NewOsFs(), Config: FileConfig{Root: root, Suffix: "json"}}
+
+	// 含冒号的键（标签列表键形态）：写、读、删全链路
+	unsafe := "AIDE-TAG-API:BANNER"
+	if !store.Set(unsafe, []string{"member-1"}, 0) {
+		t.Fatal("含冒号键写入应成功（退化为哈希文件名）")
+	}
+	if got := cast.ToStringSlice(store.Get(unsafe)); len(got) != 1 || got[0] != "member-1" {
+		t.Fatalf("含冒号键应可回读，实际: %v", got)
+	}
+	if !store.Delete(unsafe) || store.Has(unsafe) {
+		t.Fatal("含冒号键删除后应不存在")
+	}
+
+	// 安全键保留可读原名（可调试性），不安全键不落到非法文件名
+	if name := safeFileName("AIDE-abc123"); name != "AIDE-abc123" {
+		t.Fatalf("安全键应保留原名，实际: %s", name)
+	}
+	if name := safeFileName(unsafe); name == unsafe {
+		t.Fatal("含冒号键不应原样作文件名")
+	}
+
+	// Driver 级端到端：file 引擎打冒号标签 → DeleteByTag 整组删除
+	driver := NewDriver(store, "AIDE", time.Hour)
+	driver.Tag("api", "api:banner").Set("probe", "value")
+	if !driver.Has("probe") {
+		t.Fatal("打标写入后应存在")
+	}
+	if !driver.DeleteByTag("api:banner") || driver.Has("probe") {
+		t.Fatal("DeleteByTag(含冒号标签) 应删除成员键")
+	}
+}
