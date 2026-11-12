@@ -237,6 +237,37 @@ func (this Driver) Set(key string, value any) (ok bool) {
 	return true
 }
 
+// Remember - 读穿缓存：命中返回缓存值；未命中执行 fn，成功且值非 nil 时写缓存后返回
+// 注意：不内置防击穿（调用方按需组合 SetNX / singleflight）；fn 错误原样透传且不写缓存；
+// 缓存写入失败不视为错误（降级返回 fn 结果），保持「缓存故障不影响业务」语义
+/**
+ * @param key     string              - 缓存键
+ * @param expired any                 - 过期时间（支持 Duration、duration 字符串、数值按秒；<= 0 表示永不过期）
+ * @param fn      func() (any, error) - 回源函数（未命中时执行）
+ * @return value  any                 - 缓存值或回源结果（回源出错时为 nil）
+ * @return err    error               - 回源错误（原样透传）
+ * @example：
+ * 	value, err := cachex.Cache.Remember("user:1001", 5*time.Minute, func() (any, error) {
+ * 		return loadUser(1001)
+ * 	})
+ */
+func (this Driver) Remember(key string, expired any, fn func() (any, error)) (value any, err error) {
+	if this.Has(key) {
+		return this.Get(key), nil
+	}
+	value, err = fn()
+	if err != nil {
+		return nil, err
+	}
+	// 空值不写缓存：避免把「源数据不存在」固化成缓存，是否缓存空值由调用方决定
+	if value == nil {
+		return nil, nil
+	}
+	// 写入失败静默降级，缓存故障不影响业务
+	this.Expired(expired).Set(key, value)
+	return value, nil
+}
+
 // Delete - 删除缓存（链式累积的键、传入的键、各标签下的成员一并删除）
 func (this Driver) Delete(key ...string) (ok bool) {
 	if this.store == nil {
@@ -259,6 +290,20 @@ func (this Driver) Delete(key ...string) (ok bool) {
 		return true
 	}
 	return this.store.Delete(keys...)
+}
+
+// DeleteByTag - 按标签整组删除（Tag(tag...).Delete() 的直白别名，语义完全一致；空标签列表不做操作返回 true）
+/**
+ * @param tag    ...string - 标签名
+ * @return ok    bool      - 是否删除成功（空标签列表恒为 true）
+ * @example：
+ * 	cachex.Cache.DeleteByTag("user") // 等价于 cachex.Cache.Tag("user").Delete()
+ */
+func (this Driver) DeleteByTag(tag ...string) (ok bool) {
+	if len(tag) == 0 {
+		return true
+	}
+	return this.Tag(tag...).Delete()
 }
 
 // Clear - 清空缓存

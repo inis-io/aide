@@ -311,6 +311,68 @@ func TestDriverCrud(t *testing.T) {
 	}
 }
 
+// TestDriverRemember - 验证读穿缓存：命中不执行回源、未命中回源并写缓存、错误透传不写缓存、nil 值不写缓存
+func TestDriverRemember(t *testing.T) {
+
+	fake := registerFake("mock")
+	driver := NewDriver(fake, "AIDE", time.Minute)
+
+	// 预置命中键（默认过期时间 1 分钟）
+	driver.Set("hit", "cached")
+
+	failed := errors.New("回源失败")
+	cases := []struct {
+		name        string
+		key         string
+		expired     any
+		fn          func() (any, error)
+		want        any
+		wantErr     bool
+		wantCalled  bool
+		wantCached  bool
+		wantExpired time.Duration
+	}{
+		{"命中直接返回缓存值", "hit", 2 * time.Hour, func() (any, error) { return "fresh", nil }, "cached", false, false, true, time.Minute},
+		{"未命中回源并写缓存", "miss", 2 * time.Hour, func() (any, error) { return "fresh", nil }, "fresh", false, true, true, 2 * time.Hour},
+		{"回源错误透传且不写缓存", "fail", time.Minute, func() (any, error) { return "ignored", failed }, nil, true, true, false, 0},
+		{"回源 nil 不写缓存", "empty", time.Minute, func() (any, error) { return nil, nil }, nil, false, true, false, 0},
+	}
+	for _, item := range cases {
+		called := false
+		fn := item.fn
+		value, err := driver.Remember(item.key, item.expired, func() (any, error) {
+			called = true
+			return fn()
+		})
+		if (err != nil) != item.wantErr {
+			t.Errorf("%s: 错误预期不符，实际: %v", item.name, err)
+		}
+		if item.wantErr && !errors.Is(err, failed) {
+			t.Errorf("%s: 回源错误应原样透传，实际: %v", item.name, err)
+		}
+		if value != item.want {
+			t.Errorf("%s: 返回值预期 %v，实际 %v", item.name, item.want, value)
+		}
+		if called != item.wantCalled {
+			t.Errorf("%s: 回源调用预期 %v，实际 %v", item.name, item.wantCalled, called)
+		}
+		if driver.Has(item.key) != item.wantCached {
+			t.Errorf("%s: 缓存写入预期 %v，实际 %v", item.name, item.wantCached, driver.Has(item.key))
+		}
+		if item.wantCached {
+			if got := fake.items[driver.name(item.key)].expired; got != item.wantExpired {
+				t.Errorf("%s: 缓存过期预期 %v，实际 %v", item.name, item.wantExpired, got)
+			}
+		}
+	}
+
+	// 缓存写入失败不视为错误：降级返回回源结果（storeError 的 Set 恒失败）
+	broken := NewDriver(storeError{name: "broken", err: failed}, "AIDE", time.Minute)
+	if value, err := broken.Remember("k", time.Minute, func() (any, error) { return "v", nil }); err != nil || value != "v" {
+		t.Fatalf("缓存写入失败应降级返回回源结果，实际: %v, err=%v", value, err)
+	}
+}
+
 // TestDriverTags - 验证标签簿记：成员累积（旧版 Redis 标签会被覆盖的回归）、按标签整组删除
 func TestDriverTags(t *testing.T) {
 
@@ -339,6 +401,48 @@ func TestDriverTags(t *testing.T) {
 	}
 	if fake.Has("AIDE-TAG-USER") {
 		t.Fatal("按标签删除后标签列表应移除")
+	}
+}
+
+// TestDriverDeleteByTag - 验证标签整组删除别名：空标签列表不动作、单/多标签成员与标签列表一并删除
+func TestDriverDeleteByTag(t *testing.T) {
+
+	cases := []struct {
+		name string
+		tags []string
+		// 期望删除后仍存在的键（不存在的键恒为 false）
+		want map[string]bool
+	}{
+		{"空标签列表不动作", nil, map[string]bool{"k1": true, "k2": true, "g1": true}},
+		{"单标签整组删除", []string{"user"}, map[string]bool{"k1": false, "k2": false, "g1": true}},
+		{"多标签整组删除", []string{"user", "goods"}, map[string]bool{"k1": false, "k2": false, "g1": false}},
+	}
+	for _, item := range cases {
+		fake := registerFake("mock")
+		driver := NewDriver(fake, "AIDE", time.Minute)
+		driver.Tag("user").Set("k1", "v1")
+		driver.Tag("user").Set("k2", "v2")
+		driver.Tag("goods").Set("g1", "v1")
+
+		if !driver.DeleteByTag(item.tags...) {
+			t.Errorf("%s: DeleteByTag 应返回 true", item.name)
+		}
+		for key, want := range item.want {
+			if got := driver.Has(key); got != want {
+				t.Errorf("%s: 键[%s]存在性预期 %v，实际 %v", item.name, key, want, got)
+			}
+		}
+		for _, tag := range []string{"user", "goods"} {
+			deleted := false
+			for _, selected := range item.tags {
+				if tag == selected {
+					deleted = true
+				}
+			}
+			if exists := fake.Has(driver.tagName(tag)); exists == deleted {
+				t.Errorf("%s: 标签[%s]列表存在性与预期不符（期望已删除: %v）", item.name, tag, deleted)
+			}
+		}
 	}
 }
 

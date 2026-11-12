@@ -81,7 +81,7 @@ cachex.Cache.Tag("user").Delete()
 cachex.Cache.Key("goods:9:price").Tag("user").Delete()
 ```
 
-标签簿记带键控锁，进程内并发写入安全；标签列表本身永不过期。
+标签簿记带键控锁，进程内并发写入安全；标签列表本身永不过期。`DeleteByTag(tag ...string)` 是按标签整组删除的直白别名（`DeleteByTag("user")` 等价于 `Tag("user").Delete()`，空标签列表不做操作返回 `true`）。
 
 ## 5. 链式方法
 
@@ -93,7 +93,9 @@ cachex.Cache.Key("goods:9:price").Tag("user").Delete()
 | `Has(key)` | 判断缓存是否存在（过期视为不存在） |
 | `Get(key)` | 获取缓存（未命中或已过期返回 `nil`） |
 | `Set(key, value)` | 设置缓存（value 须可 JSON 序列化） |
+| `Remember(key, expired, fn)` | 读穿缓存：命中直接返回缓存值；未命中执行 `fn()`，成功且值非 `nil` 时按 `expired` 写缓存后返回（`fn` 错误原样透传、不写缓存；缓存写入失败降级返回 `fn` 结果；不内置防击穿，调用方按需组合 `SetNX` / singleflight） |
 | `Delete(key ...string)` | 删除缓存（实参键 + 链式累积键 + 各标签成员） |
+| `DeleteByTag(tag ...string)` | 按标签整组删除（`Tag(tag...).Delete()` 的直白别名，语义完全一致；空标签列表不做操作返回 `true`） |
 | `Clear()` | 清空缓存（redis 按前缀扫描删除，前缀为空回退 `FlushDB`） |
 | `Incr(key)` | 原子自增 1（固定窗口计数：仅首次自增写入链式 `Expired` 指定的过期时间；返回 `(count, err)`，不参与标签簿记） |
 | `IncrBy(key, n)` | 原子累加 `n`（键不存在或已过期时从 0 起算；仅当本次调用创建键时写入链式 `Expired`；`n` 为负等价于自减；返回 `(count, err)`，不参与标签簿记） |
