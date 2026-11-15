@@ -541,7 +541,7 @@ type llm.Error struct {
 
 | 符号 | 说明 |
 |---|---|
-| `PlanCatalogItem` | 套餐目录项：`PlanCode` / `PlanName` / `SaleStatus`（`on` = 在售；`off` = 停售，此时 `Options` 必为空、不可下单，客户端应展示「尚未开售」；已下架套餐不会出现在目录中）/ `Grade`（档位权重，升降级判定依据）/ `Badge` / `Summary` / `Entitlements`（`map[string]any`，与载荷权益表同语义）/ `Options` |
+| `PlanCatalogItem` | 套餐目录项：`PlanCode` / `PlanName` / `SaleStatus`（`on` = 在售；`off` = 停售，选项照常下发、价格正常展示但不可下单，客户端应展示「尚未开售」并禁用购买；已下架套餐不会出现在目录中）/ `Grade`（档位权重，升降级判定依据）/ `Badge` / `Summary` / `Entitlements`（`map[string]any`，与载荷权益表同语义）/ `Options` |
 | `PlanCatalogOption` | 计费选项：`Billing` / `Price`（标价，元）/ `SalePrice`（货架价，元：标价算入创始价或折扣后的展示价，创始价与折扣互斥、命中其一不再叠加，不含升级抵扣，仅供展示；下单金额以 `PlanOrderCreate` 结算为准）/ `DiscountTag` / `FounderLeft`（创始价剩余名额，-1 = 非创始价）/ `CreditAmount`（升级抵扣预览，元，0 = 无；仅升级视角下大于 0，随旧套餐剩余期限逐日变化，仅供展示，结算以 `PlanOrderCreate` 为准） |
 | `PlanCurrentSnapshot` | 当前生效付费套餐快照：`PlanCode` / `PlanName` / `Billing` / `ValidUntil`（RFC3339） |
 | `PlansCatalogResult` | 目录回执：`Plans` + `CurrentPlan`（无付费套餐或服务端返回空对象时归一为 `nil`） |
