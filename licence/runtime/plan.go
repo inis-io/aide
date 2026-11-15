@@ -86,12 +86,15 @@ type PlanCatalogOption struct {
 	CreditAmount float64 `json:"creditAmount"`
 }
 
-// PlanCatalogItem - 在售套餐目录项
+// PlanCatalogItem - 套餐目录项（含已下架套餐：saleStatus=off 时无计费选项，仅作「尚未开售」展示）
 type PlanCatalogItem struct {
 	// PlanCode - 套餐编码（下单入参）
 	PlanCode string `json:"planCode"`
 	// PlanName - 套餐名称
 	PlanName string `json:"planName"`
+	// SaleStatus - 售卖状态（on = 在售；off = 已下架/尚未开售）。
+	// off 时 Options 必为空（无价格档，不可下单），客户端应展示为「尚未开售」并禁用购买
+	SaleStatus string `json:"saleStatus"`
 	// Grade - 档位权重（0-1000，升降级判定依据）
 	Grade int `json:"grade"`
 	// Badge - 营销角标（如 "推荐"）
@@ -116,9 +119,9 @@ type PlanCurrentSnapshot struct {
 	ValidUntil string `json:"validUntil"`
 }
 
-// PlansCatalogResult - 在售套餐目录回执
+// PlansCatalogResult - 套餐目录回执（含已下架套餐：`SaleStatus=off` 时无计费选项，仅供「尚未开售」展示）
 type PlansCatalogResult struct {
-	// Plans - 在售套餐列表（按 sort/grade 服务端排序原样返回）
+	// Plans - 套餐列表（在售 + 已下架；按 sort/grade 服务端排序原样返回）
 	Plans []PlanCatalogItem
 	// CurrentPlan - 当前生效付费套餐快照（无付费套餐时为 nil；服务端返回空对象同样归一为 nil）
 	CurrentPlan *PlanCurrentSnapshot
