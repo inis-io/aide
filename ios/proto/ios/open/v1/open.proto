@@ -1,0 +1,286 @@
+syntax = "proto3";
+
+// ios.open.v1 - Inis Object Storage 开放服务契约（控制面）
+// 本文件是契约的唯一出处，由 SDK 仓库（github.com/inis-io/aide/ios）持有；
+// object-storage 后端复制同名文件生成服务端桩。字段一律 snake_case 定义，
+// protojson 序列化产出 lowerCamelCase，与 HTTP 链路 JSON tag 一致，
+// 保证两条链路对同一逻辑请求产出相同签名（签名时排除空值）。
+package ios.open.v1;
+
+option go_package = "ios/open/v1;openv1";
+
+// OpenService - 存储平台开放服务（控制面）
+// 全部方法要求 outgoing metadata 携带 x-ios-sign（MD5 大写签名，
+// 签名输入 = protojson 序列化请求消息 → map（排除 sign/空值）→ 字典序拼串 → &secret=<SK>）
+// 与 x-ios-access-key（AK 已在消息体内，metadata 供服务端拦截器取证与日志）。
+// timestamp（毫秒）参与签名，服务端做 ±15 分钟时间窗防重放。
+service OpenService {
+  rpc VerifyAccessKey(VerifyAccessKeyRequest) returns (VerifyAccessKeyResponse);   // 凭据验证/密钥自检
+  rpc ListBucketInfos(ListBucketInfosRequest) returns (ListBucketInfosResponse);   // 管理视角桶列表
+  rpc EmptyBucket(EmptyBucketRequest) returns (EmptyBucketResponse);               // 清空桶
+  rpc CreateShare(CreateShareRequest) returns (CreateShareResponse);               // 签发分享链接
+  rpc ListShares(ListSharesRequest) returns (ListSharesResponse);                  // 对象分享列表
+  rpc RevokeShare(RevokeShareRequest) returns (RevokeShareResponse);               // 吊销分享
+  rpc ListRecycle(ListRecycleRequest) returns (ListRecycleResponse);               // 回收站列表
+  rpc RestoreObjects(RestoreObjectsRequest) returns (RestoreObjectsResponse);      // 回收站还原
+  rpc PurgeObjects(PurgeObjectsRequest) returns (PurgeObjectsResponse);            // 回收站指定释放
+  rpc ClearRecycle(ClearRecycleRequest) returns (ClearRecycleResponse);            // 回收站全部释放
+  rpc GetUsageOverview(GetUsageOverviewRequest) returns (GetUsageOverviewResponse); // 用量总览
+  rpc ListBucketUsage(ListBucketUsageRequest) returns (ListBucketUsageResponse);   // 按桶用量列表
+  rpc GetEgressTrend(GetEgressTrendRequest) returns (GetEgressTrendResponse);      // 出口流量按日序列
+}
+
+// ============================= 公共结构 =============================
+
+// Envelope - 统一业务信封（与 HTTP 信封 {code,msg} 对齐；code==200 成功）
+message Envelope {
+  int32  code = 1;  // 业务码（200 成功，其余失败）
+  string msg  = 2;  // 中文文案
+}
+
+// AccessKeyInfo - 密钥自检信息（Secret 永不下发）
+message AccessKeyInfo {
+  string name         = 1;  // 备注名
+  string status       = 2;  // 状态（active/disabled）
+  string scope        = 3;  // 授权范围（"*"/{"buckets":[],"mode":"ro|rw"} JSON）
+  int64  last_used_at = 4;  // 最近使用时间（毫秒）
+  int64  expire_at    = 5;  // 到期时间（毫秒，0 = 永久）
+  int64  create_at    = 6;  // 创建时间（毫秒）
+}
+
+// BucketInfo - 管理视角桶信息
+message BucketInfo {
+  string name          = 1;  // 桶名（全局唯一）
+  string region        = 2;  // 区域
+  string acl           = 3;  // 预置 ACL（private/public-read/public-read-write）
+  string versioning    = 4;  // 版本控制（off/on/suspended）
+  string status        = 5;  // 状态（active/frozen）
+  string storage_class = 6;  // 默认存储级别
+  int64  create_at     = 7;  // 创建时间（毫秒）
+  int64  update_at     = 8;  // 更新时间（毫秒）
+}
+
+// Share - 分享链接（令牌制，支持永久与吊销）
+message Share {
+  int64  id        = 1;  // 分享 ID
+  string bucket    = 2;  // 桶名
+  string key       = 3;  // 对象键
+  string token     = 4;  // 访问令牌（完整链接 = 平台地址 + /share/{token}）
+  int64  expire_at = 5;  // 过期时间（毫秒，0 = 永久）
+  int64  visits    = 6;  // 累计访问次数
+  int64  create_at = 7;  // 创建时间（毫秒）
+}
+
+// RecycleEntry - 回收站条目
+message RecycleEntry {
+  int64  id           = 1;  // 对象行 ID（还原/释放凭据）
+  string bucket       = 2;  // 桶名
+  string key          = 3;  // 对象键
+  string etag         = 4;  // ETag
+  int64  size         = 5;  // 字节数
+  string mime         = 6;  // Content-Type
+  string storage_class = 7; // 存储级别
+  int64  deleted_at   = 8;  // 删除时间（毫秒）
+  int64  purge_at     = 9;  // 到期物理释放时间（毫秒）
+}
+
+// BucketUsage - 单桶用量
+message BucketUsage {
+  string bucket       = 1;  // 桶名
+  int64  storage_bytes = 2; // 存储量（字节）
+  int64  object_count = 3;  // 对象数
+  int64  egress_bytes = 4;  // 当月出口流量（字节）
+}
+
+// QuotaView - 有效配额（0 = 不限）
+message QuotaView {
+  int64 max_buckets               = 1;  // 桶数上限
+  int64 max_objects               = 2;  // 对象数上限
+  int64 max_storage_bytes         = 3;  // 总容量上限（字节）
+  int64 max_object_size           = 4;  // 单对象大小上限（字节）
+  int64 monthly_bandwidth_bytes   = 5;  // 月流量上限（字节）
+}
+
+// UsageOverview - 用量总览
+message UsageOverview {
+  int64     storage_bytes = 1;  // 存储总量（字节）
+  int64     object_count  = 2;  // 对象总数
+  int64     bucket_count  = 3;  // 桶数
+  int64     egress_bytes  = 4;  // 当月出口流量（字节）
+  QuotaView quota         = 5;  // 有效配额
+}
+
+// EgressPoint - 流量趋势点（date = YYYY-MM-DD）
+message EgressPoint {
+  string date  = 1;  // 日期
+  int64  bytes = 2;  // 出口流量（字节）
+}
+
+// ============================= 凭据 =============================
+
+// VerifyAccessKeyRequest - 凭据验证/密钥自检请求
+message VerifyAccessKeyRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳（参与签名，±15 分钟窗口）
+}
+
+message VerifyAccessKeyResponse {
+  Envelope      envelope = 1;  // 业务信封
+  AccessKeyInfo info     = 2;  // 密钥自检信息
+}
+
+// ============================= 桶 =============================
+
+// ListBucketInfosRequest - 管理视角桶列表请求
+message ListBucketInfosRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+}
+
+message ListBucketInfosResponse {
+  Envelope             envelope = 1;  // 业务信封
+  repeated BucketInfo  buckets  = 2;  // 桶列表
+}
+
+// EmptyBucketRequest - 清空桶请求（全部对象软删 + 物理文件清理）
+message EmptyBucketRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string bucket     = 3;  // 桶名（必填）
+}
+
+message EmptyBucketResponse {
+  Envelope envelope = 1;  // 业务信封
+  int64    removed  = 2;  // 清空的对象数
+}
+
+// ============================= 分享 =============================
+
+// CreateShareRequest - 签发分享链接请求（签名前须注入默认值 expires=0）
+message CreateShareRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string bucket     = 3;  // 桶名（必填）
+  string key        = 4;  // 对象键（必填，文件夹不支持分享）
+  int64  expires    = 5;  // 有效期（秒，默认 0 = 永久）
+}
+
+message CreateShareResponse {
+  Envelope envelope = 1;  // 业务信封
+  Share    share    = 2;  // 分享行
+  bool     reused   = 3;  // 是否命中 60s 幂等去重窗口（复用既有活跃分享）
+}
+
+// ListSharesRequest - 对象分享列表请求
+message ListSharesRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string bucket     = 3;  // 桶名（必填）
+  string key        = 4;  // 对象键（必填）
+}
+
+message ListSharesResponse {
+  Envelope       envelope = 1;  // 业务信封
+  repeated Share shares   = 2;  // 分享列表（含已过期项）
+}
+
+// RevokeShareRequest - 吊销分享请求（软删即失效）
+message RevokeShareRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  int64  id         = 3;  // 分享 ID（必填）
+}
+
+message RevokeShareResponse {
+  Envelope envelope = 1;  // 业务信封
+}
+
+// ============================= 回收站 =============================
+
+// ListRecycleRequest - 回收站列表请求（签名前须注入默认值 page=1、limit=20）
+message ListRecycleRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string bucket     = 3;  // 桶名（空 = 全部桶）
+  string keyword    = 4;  // key 模糊关键词
+  int32  page       = 5;  // 页码（默认 1）
+  int32  limit      = 6;  // 每页条数（默认 20，服务端封顶 200）
+}
+
+message ListRecycleResponse {
+  Envelope              envelope = 1;  // 业务信封
+  repeated RecycleEntry entries  = 2;  // 回收站条目
+  int64                 total    = 3;  // 总条数
+}
+
+// RestoreObjectsRequest - 回收站还原请求（ids 为逗号分隔的对象行 ID 列表）
+message RestoreObjectsRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string ids        = 3;  // 对象行 ID 列表（形如 "1,2,3"，必填）
+}
+
+message RestoreObjectsResponse {
+  Envelope        envelope = 1;  // 业务信封
+  int64           restored = 2;  // 已还原数量
+  repeated string conflicts = 3; // 冲突跳过的 key 列表（回收期间被重新上传占用）
+}
+
+// PurgeObjectsRequest - 回收站指定释放请求（硬删元数据 + 物理清理，不可恢复）
+message PurgeObjectsRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string ids        = 3;  // 对象行 ID 列表（形如 "1,2,3"，必填）
+}
+
+message PurgeObjectsResponse {
+  Envelope envelope = 1;  // 业务信封
+  int64    purged   = 2;  // 已释放数量
+}
+
+// ClearRecycleRequest - 回收站全部释放请求（可选指定桶；不可恢复）
+message ClearRecycleRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+  string bucket     = 3;  // 桶名（空 = 全部桶）
+}
+
+message ClearRecycleResponse {
+  Envelope envelope = 1;  // 业务信封
+  int64    purged   = 2;  // 已释放数量
+}
+
+// ============================= 用量 =============================
+
+// GetUsageOverviewRequest - 用量总览请求
+message GetUsageOverviewRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+}
+
+message GetUsageOverviewResponse {
+  Envelope      envelope = 1;  // 业务信封
+  UsageOverview overview = 2;  // 用量总览
+}
+
+// ListBucketUsageRequest - 按桶用量列表请求
+message ListBucketUsageRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+}
+
+message ListBucketUsageResponse {
+  Envelope             envelope = 1;  // 业务信封
+  repeated BucketUsage rows     = 2;  // 按桶用量（已软删的桶仍展示计量）
+}
+
+// GetEgressTrendRequest - 出口流量按日序列请求（近 30 天）
+message GetEgressTrendRequest {
+  string access_key = 1;  // AccessKey
+  int64  timestamp  = 2;  // 毫秒时间戳
+}
+
+message GetEgressTrendResponse {
+  Envelope              envelope = 1;  // 业务信封
+  repeated EgressPoint  points   = 2;  // 趋势点（日期升序）
+}

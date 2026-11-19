@@ -33,7 +33,8 @@
 ├── taskx/       # 异步队列：统一 Engine + file / Redis 双 Broker，支持重试、租约、死信、周期任务与检视管理（**嵌套独立模块**，依赖 logx）
 ├── pay/         # 支付能力工厂（**嵌套独立模块** `github.com/inis-io/aide/pay`，有自己的 go.mod，不参与父模块 `go build ./...`）：支付协议 + 统一 Driver + 多网关 Pool，providers/ 内置支付宝 / 微信 V3 / PayPal 适配，约定详见 pay/AGENTS.md
 ├── licence/     # 授权平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/licence`，有自己的 go.mod，不参与父模块 `go build ./...`）：根包 = 纯门面别名层（下游 `import licence` 零改动）；实现子包 `runtime/`（运行面客户端：激活/滑动刷新/请求签名/离线降级/权益闸门/指纹采集/加密存储 + 在线更新 + SaaS 租户 + 项目套餐目录与订单 + 实例指令通道）、`protocol/`（契约镜像：信封/签发验签/状态码/版本范围/canonical 助手）；另有 `admin/`（管理面 AdminClient）、`updater/`（自更新执行器）、`callback/`（回调接收 + 事件订阅）、`config/`（配置校验引擎，licen-hub backend 复用）、`apis/`（API 商城 typed 方法包，按能力子包分类：根包挂载 `lic.Apis.IPLocate.Query` / `lic.Apis.Email.Send` 能力子资源并 re-export 共享件，`Invoke`/`Usage` 跨能力方法留根包，共享核心件在 `apis/core`；另有 `apis/llm` LLM 网关独立轻客户端——sk-key Bearer 认证、不挂 `lic.Apis`、只依赖标准库）
-└── openpay/     # inis-pay 开放平台商户 SDK（**嵌套独立模块** `github.com/inis-io/aide/openpay`，有自己的 go.mod，不参与父模块 `go build ./...`）：根目录只有门面入口 `openpay.go`（`Client` + 七个业务方法（含 `VerifyCredentials` 凭据验证探针）+ 全部类型别名/转发），实现分区 `types/`（零依赖模型与错误）+ `sign/`（公开签名器，与服务端 `utils.Md5.GenSign` 逐字节等价）+ `notify/`（Webhook 验签）+ `internal/transport/`（HTTP/gRPC 双链路，默认 gRPC，`WithTransportHTTP()` 切换）；`proto/openpay/merchant/v1/merchant.proto` 为契约唯一出处，生成桩提交入库，约定详见 openpay/AGENTS.md
+├── openpay/     # inis-pay 开放平台商户 SDK（**嵌套独立模块** `github.com/inis-io/aide/openpay`，有自己的 go.mod，不参与父模块 `go build ./...`）：根目录只有门面入口 `openpay.go`（`Client` + 七个业务方法（含 `VerifyCredentials` 凭据验证探针）+ 全部类型别名/转发），实现分区 `types/`（零依赖模型与错误）+ `sign/`（公开签名器，与服务端 `utils.Md5.GenSign` 逐字节等价）+ `notify/`（Webhook 验签）+ `internal/transport/`（HTTP/gRPC 双链路，默认 gRPC，`WithTransportHTTP()` 切换）；`proto/openpay/merchant/v1/merchant.proto` 为契约唯一出处，生成桩提交入库，约定详见 openpay/AGENTS.md
+└── ios/         # inis 对象存储平台 Go SDK（**嵌套独立模块** `github.com/inis-io/aide/ios`，有自己的 go.mod，不参与父模块 `go build ./...`）：一个模块覆盖控制面（密钥自检/桶管理/分享/回收站/用量，HTTP+gRPC 双链路签名，默认 gRPC，`WithTransportHTTP()` 切换）与数据面（S3 兼容网关轻客户端，自实现 SigV4 + 分片上传/断点续传 + 批量删除/拷贝 + 桶配置族 + STS + 预签名，纯标准库）；根目录只有门面入口 `ios.go`（`Client` + 控制面 13 方法 + 数据面 26 方法 + 全部类型别名/转发），实现分区 `types/`（零依赖模型与错误）+ `sign/`（公开控制面签名器）+ `internal/transport/`（控制面双链路）+ `internal/s3/`（数据面）；`proto/ios/open/v1/open.proto` 为控制面契约唯一出处，生成桩提交入库，`examples/fullchain` 为全链联调 demo，约定详见 ios/AGENTS.md
 ```
 
 > **模块拆分说明**：除空占位 `main.go` 外，`utils`/`dto`/`pushx`/`cachex`/`storagex`/`logx`/`taskx` 均为嵌套独立模块（各自有 `go.mod` 与 `AGENTS.md`）。子模块经 `replace` 引用本地路径：`utils` 引用 `../dto`；`pushx`/`cachex`/`storagex`/`logx` 引用 `../utils` 与 `../dto`；`taskx` 额外引用 `../logx`。修改子模块依赖时必须同步维护其 `go.mod` 的 `require` / `replace` 列表。子模块的 `AGENTS.md` 与根文件同构，变更对应包时优先阅读子目录的 `AGENTS.md`。
@@ -137,6 +138,20 @@
 - **契约与向量**：`openpay/proto/openpay/merchant/v1/merchant.proto` 是契约唯一出处，生成桩（`proto/gen/`，包名 `merchantv1`）提交入库，商户免 protoc；`openpay/sign/sign_test.go` 的 `golden*` 常量由 `utils.Md5.GenSign` 实测生成（`notify/notify_test.go` 另有报文向量，生成方法见 `openpay/AGENTS.md`「签名黄金向量」），改动签名逻辑必须重新生成。
 - **安全**：`secret` 仅在内存参与签名，不落盘、不写日志、不进错误文案；Webhook 验签无跳过开关，README 强调「先验签 → 幂等落库 → 应答纯文本 `success`」。
 
+### ios 包约定（inis 对象存储平台 Go SDK）
+
+> 面向接入方的使用教程见 [`ios/README.md`](ios/README.md)，模块细节见 [`ios/AGENTS.md`](ios/AGENTS.md)。
+
+- **双平面单模块**：控制面（密钥自检 / 桶管理 / 分享 / 回收站 / 用量，13 方法）走 HTTP+gRPC 双链路签名（默认 gRPC `/ios.open.v1.OpenService/*`，`ios.WithTransportHTTP()` 一键切到 HTTP 开放端点）；数据面（桶与对象读写删列、分片上传、预签名，12 方法）直连平台 S3 兼容网关，与链路选择无关。
+- **控制面签名算法**与服务端 `utils.Md5.GenSign` 逐字节等价，但**不复用** `utils.Md5`（包级单例携带可变字段、并发不安全）：剔除 `sign` → 剔除「字符串形式为空」的值 → 键字典序拼 `k=v&...` → 追加 `&secret=<密钥>` → MD5 大写。数值 `0`/`false` 参与签名（格式化 `"0"`/`"false"`），只有空串与 `nil` 被剔除；gRPC 签名参数集固定 `protojson.MarshalOptions{EmitUnpopulated: true}`，服务端拦截器同参数集。
+- **默认值先注入再签名**：`ShareCreateRequest.Expires<0→0`、`RecycleListRequest.Page=1/Limit=20`；默认值只写在 `types` 的 `Normalize()` 内，两条链路共用。
+- **错误模型**：控制面 HTTP 状态恒 200（只看 `body.code`），`code!=200` → `*APIError{Code,Msg,Raw}`；gRPC `Unauthenticated` → `ErrInvalidSign`、其余 RPC 失败 → `ErrTransport`、`OK + Envelope.code!=200` → `*APIError`；数据面 S3 XML 错误体解为 `*S3Error`（`IsNotFound` 等助手），哨兵错误与 `types` 同源（平面无关的 `errors.Is` 判定）。
+- **控制面 13 端点不可自造**（`/api/open-accesskey/info`、`/api/open-bucket/list|empty`、`/api/open-share/create|list|remove`、`/api/open-object/recycle|restore|purge|clear`、`/api/open-usage/overview|buckets|egress-trend`），全部必签，gRPC metadata 键 `x-ios-sign`。
+- **数据面约定**：SigV4 + `UNSIGNED-PAYLOAD`（流式直通，完整性靠流式 MD5 与 ETag 回核）；`x-amz-meta-*` 键统一小写；`Upload` 分片编排「顺序读片 + 有界并发 + 失败自动 Abort」（阈值默认 8MB、并发默认 4）；`ResumeUpload` 复用同键进行中会话、已传分片按布局对齐本地跳过（Seek 优先否则读丢弃）、布局不一致报错且保留现场；`DeleteObjects` 超千自动分批、单键失败不阻断；`CopyObject` 源按「源桶/源键」原形态拼接不编码；桶配置族（CORS/Versioning/Lifecycle）PUT 整体覆盖、未配置读返回 S3 错误码（Versioning 为空串）；STS `GetSessionToken` 缺省 3600 秒钳制 [900, 43200]、临时凭证禁再签发且仅数据面可用；预签名本地产链零往返、硬上限 7 天；数据面不套整体超时。
+- **分区与公开面**：根目录只有 `ios.go` 一个入口（`Client`/`Option`/`NewClient`/`Close` + 控制面 13 方法 + 数据面 12 方法 + 全部类型别名与函数转发），实现分区为 `types/`（零依赖模型与错误）、`sign/`（公开控制面签名器）、`internal/transport/`（控制面双链路）、`internal/s3/`（数据面，纯标准库）；依赖方向 `types ← sign ← internal/transport ← 根包`、`internal/s3 ← 根包`，禁止成环，`types` 不得导入其它子包（s3 仅引用 `types` 哨兵错误一项例外）。
+- **契约与向量**：`ios/proto/ios/open/v1/open.proto` 是控制面契约唯一出处，生成桩（`proto/gen/`，包名 `openv1`）提交入库，接入方免 protoc；`ios/sign/sign_test.go` 的 `golden*` 常量由 `utils.Md5.GenSign` 实测生成（密钥 `INIS-TEST-SECRET-0123456789abcdef`），`internal/s3/signv4_test.go` 锚定 AWS 官方 SigV4 向量；改动签名逻辑必须重新生成。
+- **安全**：`secret` 仅在内存参与签名，不落盘、不写日志、不进错误文案；控制面时间窗 ±15 分钟由平台判定，SDK 不做本地预检。
+
 ## 构建与测试命令
 
 无 Makefile、无 CI 配置（仓库中没有 `.github/`），直接使用 Go 工具链：
@@ -155,11 +170,12 @@ cd taskx && go build ./... && go vet ./... && go test ./...   # taskx 模块单�
 cd licence && go build ./... && go vet ./... && go test ./...   # licence 模块单独执行
 cd pay && go build ./... && go vet ./... && go test ./...       # pay 模块单独执行
 cd openpay && go build ./... && go vet ./... && go test ./...   # openpay 模块单独执行
+cd ios && go build ./... && go vet ./... && go test ./...       # ios 模块单独执行
 ```
 
 > 一次性验证全部模块可依次执行上表命令；子模块的 `go.sum` 因 `replace` 指向本地路径，首次构建会自动补齐。
 
-当前有测试的包：`licence` 模块各包（`runtime`：httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户；`protocol`：golden 字节向量、签发/验签/防篡改、版本范围与本地状态判定；`admin`：管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传；`callback`/`updater`/`proto/licence/v1` 协议矩阵自检）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、全新根目录首次原子方法回归（真实 OsFs 多级目录）、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close）、layered 分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串、增减配平与不平衡累加）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法 Incr/IncrBy/Decr/SetNX/TTL——Driver 透传、file 固定窗口与并发自增、增减配平并发回归、redis 经 miniredis 实测 Lua 路径、storeError 错误透传）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）与 `openpay`（签名黄金向量 12 组 + 独立复算实现交叉校验、httptest 假平台覆盖 6 个操作的端点/默认值/签名/错误分层、bufconn 内存 gRPC 覆盖 metadata 验签与 Unauthenticated/APIError 映射、双链路同请求同签名一致性、Webhook 验签与字段篡改、Client 默认链路与选项，禁止联网）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.27.3（windows/amd64）下均已验证通过。
+当前有测试的包：`licence` 模块各包（`runtime`：httptest 假平台端到端激活与刷新、请求验签、离线降级、加密存储、在线更新、SaaS 租户；`protocol`：golden 字节向量、签发/验签/防篡改、版本范围与本地状态判定；`admin`：管理面登录/401 重登/错误分层/分页/公钥导出/发布物代验与上传；`callback`/`updater`/`proto/licence/v1` 协议矩阵自检）、`pay`（核心校验/观测链路/DedupeKey 派生/注册表一致性/Pool，支付宝与微信用假 sdkClient、PayPal 用假 HTTP Transport、支付宝通知用真实 RSA2 自签 fixture，禁止联网）、`pushx`（注册表、链式实例、配置/消息体归一化、模板渲染、云端参数组装、智能路由、控制器热重载，用假驱动避免联网）、`cachex`（注册表、链式实例、配置归一化、过期解析、标签簿记、标签并发簿记回归、文件驱动内存文件系统实测、全新根目录首次原子方法回归（真实 OsFs 多级目录）、memory 驱动实测（读写/类型保留/TTL 三态/过期/Close）、layered 分层驱动实测（回源回灌/写失效一致性/重启恢复/计数连续）、file 与 memory 分段锁并发回归（同键串行、异键不错串、增减配平与不平衡累加）、控制器热重载（含关闭旧 memory/layered 实例）、原子方法 Incr/IncrBy/Decr/SetNX/TTL——Driver 透传、file 固定窗口与并发自增、增减配平并发回归、redis 经 miniredis 实测 Lua 路径、storeError 错误透传）、`storagex`（注册表、链式值语义、配置归一化、上传命名与响应组装、公开路径换算与穿越防护、列目录过滤、本地驱动临时目录全流程实测、控制器热重载，用假驱动避免联网）、`logx`（配置归一化、级别文件精确收录、最低级别阈值、Disable、With 派生、caller 定位、控制器热重载，临时目录真实落盘验证）与 `taskx`（file/redis Broker 契约、并发排他认领、状态搬运、租约、去重、引擎重试与 panic、死信归档钩子、优雅退出、Scheduler、Inspect/Manage；Redis 用 miniredis，禁止联网测试）与 `openpay`（签名黄金向量 12 组 + 独立复算实现交叉校验、httptest 假平台覆盖 6 个操作的端点/默认值/签名/错误分层、bufconn 内存 gRPC 覆盖 metadata 验签与 Unauthenticated/APIError 映射、双链路同请求同签名一致性、Webhook 验签与字段篡改、Client 默认链路与选项，禁止联网）与 `ios`（控制面签名黄金向量 17 组 + 独立复算交叉校验、httptest 假平台与 bufconn 内存 gRPC 双链路覆盖端点/默认值/签名/错误分层、双链路同请求同签名一致性、SigV4 锚定 AWS 官方向量、内存假 S3 网关覆盖桶/对象/分片/预签名与 XML 错误解析、P2 扩展假网关覆盖批量删除（含超千分批）/拷贝/会话列表/断点续传（跳过断言与布局不一致）/桶配置族读写删/STS（有效期钳制与临时凭证全链路签名）、Client 默认链路与端点派生，禁止联网）。测试函数以 `Test` 开头、注释说明意图，使用标准库 `testing`。上述命令在 Go 1.27.3（windows/amd64）下均已验证通过。
 
 ## 代码风格指南
 
