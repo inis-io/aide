@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -20,9 +21,36 @@ const (
  * @param key string - 对象键
  * @param expires time.Duration - 有效期（<=0 默认 1 小时，硬上限 7 天）
  */
-func (this *Client) PresignGet(_ context.Context, bucket, key string, expires time.Duration) (string, error) {
+func (this *Client) PresignGet(ctx context.Context, bucket, key string, expires time.Duration) (string, error) {
 
-	return this.presign(http.MethodGet, bucket, key, nil, expires)
+	return this.PresignGetWith(ctx, bucket, key, expires, nil)
+}
+
+// PresignGetWith - 预签名下载链接（GET，叠加额外查询参数并一并签入，本地自签零往返）
+// 典型用法：把网关图片处理串签入（extraQuery{"x-inis-process": "image/resize,w_32,q_40"}），
+// 私有桶的 blur-up 双 URL（模糊小图 + 原图）必须走本方法，事后拼参数会破坏签名。
+/**
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param expires time.Duration - 有效期（<=0 默认 1 小时，硬上限 7 天）
+ * @param extraQuery map[string]string - 额外查询参数（参与签名 canonical query；空 = 与 PresignGet 等价）
+ */
+func (this *Client) PresignGetWith(_ context.Context, bucket, key string, expires time.Duration, extraQuery map[string]string) (string, error) {
+
+	return this.presign(http.MethodGet, bucket, key, extraQuery, expires)
+}
+
+// ImageProcessURL - 图片实时处理链接拼装（纯本地，零网络往返）：
+// s3Endpoint/{bucket}/{key}?x-inis-process=<process>，适用 public-read 公开桶的 blur-up 渐进加载；
+// 私有桶请改用 PresignGetWith 把处理串签入。
+/**
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param process string - 处理串（image/resize,w_32,q_40 形态，网关参数规范见 08 文档 §3）
+ */
+func (this *Client) ImageProcessURL(bucket, key, process string) string {
+
+	return this.endpoint + escapePath(bucket, key) + "?x-inis-process=" + url.QueryEscape(process)
 }
 
 // PresignPut - 预签名上传链接（PUT，本地自签零往返）

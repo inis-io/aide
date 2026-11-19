@@ -174,12 +174,12 @@ func TestNewClientOptions(t *testing.T) {
 		WithSessionToken("TOKEN"),
 		WithPartSize(16<<20),
 		WithConcurrency(8),
-		WithTimeout(-1),           // 非法值忽略
-		WithUserAgent("   "),      // 空白忽略
-		WithPartSize(0),           // 非法值忽略
-		WithConcurrency(0),        // 非法值忽略
-		WithRegion("  "),          // 空白忽略
-		nil,                       // nil 选项忽略
+		WithTimeout(-1),      // 非法值忽略
+		WithUserAgent("   "), // 空白忽略
+		WithPartSize(0),      // 非法值忽略
+		WithConcurrency(0),   // 非法值忽略
+		WithRegion("  "),     // 空白忽略
+		nil,                  // nil 选项忽略
 	)
 	if err != nil {
 		t.Fatalf("构造客户端失败：%v", err)
@@ -686,6 +686,60 @@ func TestDataPlaneValidation(t *testing.T) {
 }
 
 // ============================= 数据面端到端 - 结束 =============================
+
+// ============================= 图片处理助手 - 开始 =============================
+
+// TestImageProcessHelpers - 图片处理助手：拼链纯本地正确、叠加参数签入、空参校验
+func TestImageProcessHelpers(t *testing.T) {
+
+	client, err := NewClient("AK", "SK", WithEndpoint("https://storage.example.com"))
+	if err != nil {
+		t.Fatalf("构造客户端失败：%v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	ctx := context.Background()
+
+	// 拼链：派生数据面端点 + 处理串查询转义
+	raw, err := client.ImageProcessURL("photos", "a b.jpg", "image/resize,w_32,q_40")
+	if err != nil {
+		t.Fatalf("拼链失败：%v", err)
+	}
+	want := "https://storage.example.com:9000/photos/a%20b.jpg?x-inis-process=" +
+		url.QueryEscape("image/resize,w_32,q_40")
+	if raw != want {
+		t.Fatalf("处理链接不符：\n got %s\nwant %s", raw, want)
+	}
+
+	// 空参校验
+	if _, err = client.ImageProcessURL("", "a.jpg", "image/resize,w_32"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空桶名应报错：%v", err)
+	}
+	if _, err = client.ImageProcessURL("photos", "a.jpg", " "); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空处理串应报错：%v", err)
+	}
+
+	// 叠加参数签入：处理串进入预签名 URL，且带 X-Amz-Signature
+	signed, err := client.PresignGetObjectWith(ctx, "photos", "a.jpg", time.Hour,
+		map[string]string{"x-inis-process": "image/resize,w_32,q_40"})
+	if err != nil {
+		t.Fatalf("叠加预签名失败：%v", err)
+	}
+	parsed, err := url.Parse(signed)
+	if err != nil {
+		t.Fatalf("URL 解析失败：%v", err)
+	}
+	if got := parsed.Query().Get("x-inis-process"); got != "image/resize,w_32,q_40" {
+		t.Fatalf("处理串应原样进入查询参数，实际 %q", got)
+	}
+	if parsed.Query().Get("X-Amz-Signature") == "" {
+		t.Fatal("缺少 X-Amz-Signature")
+	}
+	if _, err = client.PresignGetObjectWith(ctx, "", "a.jpg", time.Hour, nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空桶名应报错：%v", err)
+	}
+}
+
+// ============================= 图片处理助手 - 结束 =============================
 
 // 确保内部包引用在测试中保持（reflect 断言依赖其实名）
 var (

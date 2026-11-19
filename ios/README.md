@@ -132,6 +132,8 @@ client, err = ios.NewClient(accessKey, secret,
 | `CopyObject` | CopyObject | 服务端拷贝（零流量回传） |
 | `ListObjects` | ListObjectsV2 | 浏览对象（prefix / delimiter / token 分页） |
 | `PresignGetObject` | 预签名 GET | 本地产链，零网络往返 |
+| `PresignGetObjectWith` | 预签名 GET（叠加查询参数并签入） | 图片处理串等参数必须签入，事后拼接会破坏签名 |
+| `ImageProcessURL` | 网关图片实时处理链接 | 纯本地拼链（`?x-inis-process=`），适用 public-read 公开桶 |
 | `PresignPutObject` | 预签名 PUT | 本地产链，零网络往返 |
 | `GetBucketCors` / `PutBucketCors` / `DeleteBucketCors` | 桶 CORS 三操作 | 跨域配置（整体覆盖语义） |
 | `GetBucketVersioning` / `PutBucketVersioning` | 桶版本控制 | 开启 / 暂停（开启后不可回 off） |
@@ -297,6 +299,33 @@ _ = client.PutBucketLifecycle(ctx, "my-bucket", []ios.LifecycleRule{{
 	AbortIncompleteDays: 3,
 }})
 ```
+
+### 5.8 图片渐进加载（blur-up，网关实时处理）
+
+网关在 GET 对象时支持 `?x-inis-process=image/...` 实时图片处理（缩放 / 质量 / 格式），
+变体按「源 ETag + 规格」自动缓存。典型用法是 blur-up：先展示一张极小模糊图（几 KB），
+原图加载完成后替换，弱网首屏体感显著改善。
+
+**处理串格式**：`image/resize,w_N,h_N,m_fit|fill|resize,q_1-100,f_jpg|png`
+（`w_`/`h_` 上限 4096，至少给一个；`m_` 默认 fit；`q_` 默认 85；`f_` 缺省跟随源格式，png 源出 png、其余出 jpg；
+GIF 只取首帧；jpg 输出自动把透明区压白底）。
+
+```go
+// 公开桶（public-read）：纯本地拼链，零网络往返
+blurURL, _ := client.ImageProcessURL("my-bucket", "photos/cover.jpg", "image/resize,w_32,q_40")
+fullURL, _ := client.ImageProcessURL("my-bucket", "photos/cover.jpg", "image/resize,w_1600,q_85")
+// 前端：<img src="blurURL" style="filter:blur(12px)"> → 加载 fullURL 完成后替换 src
+
+// 私有桶：处理串必须签进预签名（事后拼接会破坏签名 → 403）
+blurSigned, _ := client.PresignGetObjectWith(ctx, "my-bucket", "photos/cover.jpg", time.Hour,
+	map[string]string{"x-inis-process": "image/resize,w_32,q_40"})
+fullSigned, _ := client.PresignGetObjectWith(ctx, "my-bucket", "photos/cover.jpg", time.Hour,
+	map[string]string{"x-inis-process": "image/resize,w_1600,q_85"})
+```
+
+响应头 `X-Inis-Process-Cache` 标识 `HIT`/`MISS`，`ETag` 为变体内容 MD5（支持 `If-None-Match`），
+变体 `Cache-Control: public, max-age=31536000, immutable`（源覆盖写后变体键自动失效，可放心长缓存）。
+处理流量按实际发送字节计入出口配额，与普通 GET 同闸。
 
 ## 6. 处理事件通知（Webhook）
 

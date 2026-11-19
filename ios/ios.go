@@ -1138,6 +1138,54 @@ func (this *Client) PresignGetObject(ctx context.Context, bucket, key string, ex
 	return client.PresignGet(ctx, bucket, key, expires)
 }
 
+// PresignGetObjectWith - 预签名下载链接（叠加额外查询参数并一并签入；本地自签，零网络往返）
+// 典型用法：把网关图片处理串签入（extraQuery{"x-inis-process": "image/resize,w_32,q_40"}），
+// 私有桶的 blur-up 双 URL（模糊小图 + 原图）必须走本方法，事后拼参数会破坏签名。
+/**
+ * @param ctx context.Context - 调用上下文（本地操作，不发起请求）
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param expires time.Duration - 有效期（<= 0 默认 1 小时，硬上限 7 天）
+ * @param extraQuery map[string]string - 额外查询参数（参与签名；空 = 与 PresignGetObject 等价）
+ * @return string - 预签名 URL（GET 方法直接可访问）
+ * @return error - ErrInvalidRequest
+ */
+func (this *Client) PresignGetObjectWith(ctx context.Context, bucket, key string, expires time.Duration, extraQuery map[string]string) (string, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("%w：bucket 与 key 不能为空", ErrInvalidRequest)
+	}
+
+	return client.PresignGetWith(ctx, bucket, key, expires, extraQuery)
+}
+
+// ImageProcessURL - 图片实时处理链接拼装（纯本地，零网络往返）：
+// s3Endpoint/{bucket}/{key}?x-inis-process=<process>，适用 public-read 公开桶的 blur-up 渐进加载
+// （先加载模糊小图 URL，再替换原图 URL）；私有桶请改用 PresignGetObjectWith 把处理串签入。
+/**
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param process string - 处理串（image/resize,w_32,q_40 形态）
+ * @return string - 可直接 GET 的处理链接
+ * @return error - ErrInvalidRequest
+ */
+func (this *Client) ImageProcessURL(bucket, key, process string) (string, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" || strings.TrimSpace(process) == "" {
+		return "", fmt.Errorf("%w：bucket、key 与 process 不能为空", ErrInvalidRequest)
+	}
+
+	return client.ImageProcessURL(bucket, key, process), nil
+}
+
 // PresignPutObject - 预签名上传链接（本地自签，零网络往返；PUT 方法使用）
 /**
  * @param ctx context.Context - 调用上下文（本地操作，不发起请求）

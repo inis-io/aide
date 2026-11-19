@@ -13,7 +13,7 @@
 ## 目录结构
 
 ```
-├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 29 方法 + 全部别名与转发
+├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 31 方法 + 全部别名与转发
 ├── ios_test.go         # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、双端点派生
 ├── types/              # 公开：控制面请求/响应模型 + 错误模型（零依赖）
 │   ├── accesskey.go    # AccessKeyInfo（Secret 永不下发）
@@ -42,7 +42,7 @@
 │       ├── bucketconfig.go # 桶配置族（CORS/Versioning/Lifecycle 读写删 + putBucketConfig 公共件）
 │       ├── bucketnotification.go # 桶事件通知配置（读写 + Delete=PUT 空配置 + 规则本地校验 + 事件名常量）
 │       ├── sts.go        # GetSessionToken（STS 临时凭证签发）
-│       ├── presign.go    # 预签名 GET/PUT（本地产链，硬上限 7 天）
+│       ├── presign.go    # 预签名 GET/PUT（本地产链，硬上限 7 天；With 版叠加查询参数签入 + ImageProcessURL 拼链）
 │       └── xml.go        # S3 XML 编解码
 ├── examples/           # 示例（package main，go build 覆盖，禁止测试依赖）
 │   ├── fullchain/      # 全链联调 demo（设计方案 §13 P1 验收链 + P2 能力演示）
@@ -78,7 +78,7 @@ internal/s3（纯标准库，不依赖 types/sign/transport） ← 根包
 - **gRPC 错误映射**：`Unauthenticated` → `ErrInvalidSign`；其余 RPC 失败 → `ErrTransport`（文案带 `codes.Code`）；`OK + envelope.code != 200` → `*APIError`（`Raw` 为空）。
 - **控制面 13 端点不可自造**（与平台 `app/api/control/open-*.go` 逐一对齐）：`GET /api/open-accesskey/info`、`GET /api/open-bucket/list`、`POST /api/open-bucket/empty`、`POST /api/open-share/create`、`GET /api/open-share/list`、`POST /api/open-share/remove`、`GET /api/open-object/recycle`、`POST /api/open-object/restore`、`POST /api/open-object/purge`、`POST /api/open-object/clear`、`GET /api/open-usage/overview`、`GET /api/open-usage/buckets`、`GET /api/open-usage/egress-trend`。全部必签。
 - **gRPC metadata**：写 `x-ios-sign`（签名）；`accessKey`/`timestamp` 在消息体内，拦截器直接取。
-- **数据面约定**：SigV4 + `UNSIGNED-PAYLOAD`（请求体不预读哈希，流式直通）；`x-amz-meta-*` 键统一小写；`Upload` 分片编排固定「顺序读片 + 有界并发 + 任一失败自动 Abort」；预签名有效期硬上限 7 天（超出返回 `ErrInvalidRequest`）；数据面不套整体超时，`ctx` 由调用方全权控制。
+- **数据面约定**：SigV4 + `UNSIGNED-PAYLOAD`（请求体不预读哈希，流式直通）；`x-amz-meta-*` 键统一小写；`Upload` 分片编排固定「顺序读片 + 有界并发 + 任一失败自动 Abort」；预签名有效期硬上限 7 天（超出返回 `ErrInvalidRequest`），`PresignGetObjectWith` 可把额外查询参数（如网关图片处理串 `x-inis-process`）签入 canonical query（私有桶 blur-up 双 URL 必须走它，事后拼接会破坏签名），`ImageProcessURL` 纯本地拼公开桶处理链接零往返；数据面不套整体超时，`ctx` 由调用方全权控制。
 - **ResumeUpload 语义**：复用「同桶同键、最新 Initiated」的进行中会话；已传分片必须与本地上传布局一致（序号在界内、非末片大小 = partSize、末片大小 = 余量），不一致返回 `ErrInvalidRequest` 且**不自动中止**（保留现场，防误杀其他进程会话，治理入口是 `AbortMultipartUpload`）；已传分片信任网关记录不重核内容；调用方必须从头提供完整内容流，已传分片本地跳过（`io.ReadSeeker` 直接 Seek，否则读丢弃）；续传失败不自动 Abort（与 `Upload` 相反），供下次继续。
 - **DeleteObjects 语义**：超 1000 键 SDK 自动分批聚合；单键失败不阻断，逐键回传 `Errors`；不存在键按网关幂等语义归 `Deleted`。
 - **CopyObject 语义**：`X-Amz-Copy-Source` 按「源桶/源键」**原形态**拼接，不做 URL 编码（平台网关按原样解析，编码会破坏键查找）。
@@ -126,7 +126,7 @@ cd ios && protoc --proto_path=proto \
 - `sign/`：17 组黄金向量、`sign` 键剔除、`Value` 格式化逐类型（含 0/false 保留、毫秒时间戳不用科学计数法）。
 - `notify/`：黄金向量（黄金报文 + 黄金密钥 + 黄金签名逐字节一致）、大写签名归一、报文篡改 / 错误密钥 / 空参拒绝、字段完整性、缺头 / nil 头拒绝、坏 JSON 分层（验签过但载荷非法归普通错误而非 `ErrInvalidSign`）。
 - `internal/transport/`：`httptest` 假平台覆盖端点/方法/默认值/签名复算/`*APIError`/非法 JSON/网络错误/未知操作；`bufconn` + 手写 `OpenServiceServer` 覆盖 metadata 验签、`Unauthenticated → ErrInvalidSign`、空信封与业务错误、状态错误 → `ErrTransport`、拨号目标归一、关闭幂等；`consistency_test.go` 校验双链路同签名。
-- `internal/s3/`：`signv4_test.go` 锚定 AWS 官方签名向量（测试密钥 `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`，注意是斜杠 `/bPxRfiCY`）；`client_test.go` 用内存假网关覆盖桶/对象/分片/预签名与 XML 错误解析；`p2_test.go` 扩展假网关（STS/批删/拷贝/会话列表/桶配置三族/事件通知配置 + 会话凭据验签通道）覆盖 P2 与 P3：批量删除（成功/幂等/单键失败/超千分批/校验）、CopyObject（往返/NoSuchKey/校验）、ListMultipartUploads（全量/前缀/校验）、ResumeUpload（无会话全量/部分跳过-断言网关只收缺失片/非 Seeker 读丢弃跳过/布局不一致报错且保留现场）、桶配置族（未配置 404 码/写入回读一致/本地校验/删除回归）、GetSessionToken（默认与钳制有效期/响应解析/临时凭证全链路签名带令牌头/禁再签发）、事件通知配置族（未配置返回空列表不 404/写入回读含生成 Id 与 Secret/整组替换/本地校验/清除回归空列表）。
+- `internal/s3/`：`signv4_test.go` 锚定 AWS 官方签名向量（测试密钥 `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`，注意是斜杠 `/bPxRfiCY`）；`client_test.go` 用内存假网关覆盖桶/对象/分片/预签名与 XML 错误解析；`presign_extra_test.go` 覆盖叠加查询参数签入（处理串进入 canonical query、签名随参数变化、nil 参数与裸链等价）与 `ImageProcessURL` 拼链转义；`p2_test.go` 扩展假网关（STS/批删/拷贝/会话列表/桶配置三族/事件通知配置 + 会话凭据验签通道）覆盖 P2 与 P3：批量删除（成功/幂等/单键失败/超千分批/校验）、CopyObject（往返/NoSuchKey/校验）、ListMultipartUploads（全量/前缀/校验）、ResumeUpload（无会话全量/部分跳过-断言网关只收缺失片/非 Seeker 读丢弃跳过/布局不一致报错且保留现场）、桶配置族（未配置 404 码/写入回读一致/本地校验/删除回归）、GetSessionToken（默认与钳制有效期/响应解析/临时凭证全链路签名带令牌头/禁再签发）、事件通知配置族（未配置返回空列表不 404/写入回读含生成 Id 与 Secret/整组替换/本地校验/清除回归空列表）。
 
 测试里的 `referenceSign` / `referenceValue`（`internal/transport/helper_test.go`）是服务端签名算法的**独立复算实现**，与被测 `sign` 包互为校验；改动签名逻辑时两者必须同时更新。
 
