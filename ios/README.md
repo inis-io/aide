@@ -327,6 +327,26 @@ fullSigned, _ := client.PresignGetObjectWith(ctx, "my-bucket", "photos/cover.jpg
 变体 `Cache-Control: public, max-age=31536000, immutable`（源覆盖写后变体键自动失效，可放心长缓存）。
 处理流量按实际发送字节计入出口配额，与普通 GET 同闸。
 
+### 5.9 视频托管（自动 faststart，零接入成本）
+
+上传的 MP4 / MOV（`video/mp4`、`video/quicktime`）由网关**异步自动 faststart 重封装**：
+把 moov 索引原子搬到文件头，浏览器 / 播放器可边下边播，接入方无需任何改动——不重编码、
+不转码，上传链路与直链地址完全不变。
+
+需要了解的三点：
+
+- **尺寸闸**：仅 ≤ 2048MB（`media.video.faststart_max_mb`）的对象自动处理，超限文件原样落盘
+  （功能正常，仅起播慢）。超大视频建议上传端自行 faststart：
+  `ffmpeg -i in.mp4 -c copy -movflags +faststart out.mp4`（`-c copy` 不重编码，秒级完成）；
+- **ETag 语义变化**：重封装改变字节流，完成后对象 ETag 会更新为产物 MD5
+  （**分片上传的复合 ETag `xxx-N` 也随之收敛为普通 32 位 hex**）。`ObjectCreated` 事件载荷
+  携带的是上传完成时刻的 ETag；若依赖 ETag 校验完整性，请以下载时的 `ETag` 响应头为准
+  （SDK 的 ETag 回核本就用响应头值，天然兼容）；
+- **生效时机**：上传完成后由异步任务处理（通常秒级），期间旧文件完整可读；
+  重封装失败保留原文件，功能不受损。碎片化 MP4（fMP4）与多 mdat 等冷门形态自动跳过。
+
+范围说明：本期不做多码率 HLS 转码与封面抽帧（封面图可配合 §5.8 的图片处理管线按需缩放）。
+
 ## 6. 处理事件通知（Webhook）
 
 平台把桶内对象事件（创建 / 删除）以 Webhook 投递到接入方地址：每条规则一个目标 URL，
