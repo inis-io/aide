@@ -222,6 +222,20 @@ type xmlGetSessionTokenResponse struct {
 	} `xml:"GetSessionTokenResult"`
 }
 
+// xmlNotificationTopic - 事件通知条目（Secret 留空由服务端生成，GET 回读可见）
+type xmlNotificationTopic struct {
+	Id     string   `xml:"Id,omitempty"`
+	Topic  string   `xml:"Topic"`
+	Events []string `xml:"Event"`
+	Secret string   `xml:"Secret,omitempty"`
+}
+
+// xmlNotificationConfiguration - PutBucketNotification 请求体 / GetBucketNotification 响应
+type xmlNotificationConfiguration struct {
+	XMLName xml.Name                `xml:"NotificationConfiguration"`
+	Topics  []xmlNotificationTopic `xml:"TopicConfiguration"`
+}
+
 // trimETag - 去除 ETag 值的双引号（S3 返回的 ETag 带引号）
 func trimETag(etag string) string {
 

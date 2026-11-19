@@ -3,7 +3,7 @@
 `ios`（Inis Object Storage）是 inis 对象存储平台的官方 Go SDK，一个模块覆盖两个平面：
 
 - **控制面**：密钥自检、桶管理（列表 / 清空）、分享链接、回收站、用量与配额 —— HTTP / gRPC 双链路签名调用（默认 gRPC）
-- **数据面**：桶与对象的读写删列、分片上传、预签名链接 —— 直连平台 S3 兼容网关（自实现 SigV4 轻客户端，纯标准库）
+- **数据面**：桶与对象的读写删列、分片上传、批量与拷贝、断点续传、桶配置族、STS、预签名、事件通知 —— 直连平台 S3 兼容网关（自实现 SigV4 轻客户端，纯标准库）
 
 - 模块路径：`github.com/inis-io/aide/ios`（独立 Go 模块，与 `aide` 主模块并列）
 - 直接依赖：`google.golang.org/grpc`、`google.golang.org/protobuf`（HTTP 链路与数据面零第三方依赖）
@@ -136,6 +136,7 @@ client, err = ios.NewClient(accessKey, secret,
 | `GetBucketCors` / `PutBucketCors` / `DeleteBucketCors` | 桶 CORS 三操作 | 跨域配置（整体覆盖语义） |
 | `GetBucketVersioning` / `PutBucketVersioning` | 桶版本控制 | 开启 / 暂停（开启后不可回 off） |
 | `GetBucketLifecycle` / `PutBucketLifecycle` / `DeleteBucketLifecycle` | 桶生命周期三操作 | 过期 / 历史版本清理 / 分片中止 |
+| `GetBucketNotification` / `PutBucketNotification` / `DeleteBucketNotification` | 桶事件通知配置 | Webhook 订阅（整组替换；Secret 回读可见，详见「处理事件通知」） |
 | `GetSessionToken` | STS GetSessionToken | 签发临时凭证（默认 1 小时，钳制 15 分钟 - 12 小时） |
 
 ## 5. 常用示例
@@ -297,17 +298,86 @@ _ = client.PutBucketLifecycle(ctx, "my-bucket", []ios.LifecycleRule{{
 }})
 ```
 
-## 6. 数据面（S3）要点
+## 6. 处理事件通知（Webhook）
+
+平台把桶内对象事件（创建 / 删除）以 Webhook 投递到接入方地址：每条规则一个目标 URL，
+投递为 `POST application/json`，**at-least-once**（失败按 1s / 4s 退避最多重试 3 次，2xx 即视为成功）。
+
+### 6.1 订阅规则
+
+```go
+// 写入规则（整组替换语义；Secret 留空由服务端生成）
+err := client.PutBucketNotification(ctx, "my-bucket", []ios.NotificationRule{{
+	Topic:  "https://hooks.example.com/ios/webhook",
+	Events: []string{ios.EventObjectCreated, ios.EventObjectRemoved},
+}})
+
+// 回读取 Secret（接收方验签密钥；限属主签名端点可见）
+rules, err := client.GetBucketNotification(ctx, "my-bucket")
+secret := rules[0].Secret
+
+// 清除全部规则（AWS 无独立 Delete 操作，SDK 以 PUT 空配置实现）
+err = client.DeleteBucketNotification(ctx, "my-bucket")
+```
+
+### 6.2 投递报文
+
+| 头 | 含义 |
+|---|---|
+| `X-Inis-Event` | 事件名（`s3:ObjectCreated:*` / `s3:ObjectRemoved:*`） |
+| `X-Inis-Signature` | 投递签名（hex HMAC-SHA256(body, Secret)，小写 hex） |
+| `X-Inis-Delivery` | 投递号（同一逻辑投递在全部重试间稳定，**幂等键**） |
+
+载荷为 S3 风格 `{"Records":[...]}`，每条记录含事件名、事件时间（RFC3339）、桶名、对象键、大小与 ETag。
+
+### 6.3 接收与验签
+
+```go
+func handle(writer http.ResponseWriter, request *http.Request) {
+
+	body, _ := io.ReadAll(io.LimitReader(request.Body, 1<<20))
+
+	event, err := ios.ParseEvent(body, request.Header, secret)
+	if err != nil {
+		// 验签失败（含缺头）：一律 4xx，绝不解析载荷
+		writer.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// 按投递号幂等（重复投递直接 2xx 跳过）
+	if seen(event.Delivery) {
+		writer.WriteHeader(http.StatusOK)
+		return
+	}
+
+	for _, record := range event.Records {
+		// 业务处理：先落库再应答
+		log.Println(record.EventName, record.S3.Bucket.Name, record.S3.Object.Key)
+	}
+	writer.WriteHeader(http.StatusOK)
+}
+```
+
+三条铁律（与服务端 at-least-once 语义配套，**验签无跳过开关**）：
+
+1. **先验签再处理** —— 验签失败一律 4xx，不解析载荷、不向外区分失败细节；
+2. **按 `X-Inis-Delivery` 幂等** —— 同一逻辑投递会重试，重复投递直接 2xx 跳过；
+3. **先落库再 2xx** —— 2xx 即视为成功不再重试，务必先完成业务持久化。
+
+完整可运行示例见 `examples/webhook`（设置 `IOS_WEBHOOK_SECRET` 后 `go run ./examples/webhook`）。
+
+## 7. 数据面（S3）要点
 
 - **双端点**：控制面走 `WithEndpoint`；数据面走 `WithS3Endpoint`，缺省时从控制面端点派生（`scheme://host:9000`，IPv6 自动加方括号）。网关端口不是 9000 时必须显式注入 `WithS3Endpoint`。
 - **UNSIGNED-PAYLOAD**：请求体不参与签名（网关侧兼容 aws-chunked 与明文流），上传大文件不做全量哈希预读，流式直通；完整性由流式 MD5 与响应 ETag 回核兜底。
 - **分片上传**：`Upload` 按 `WithPartSize`（默认 8MB，平台约束单片 5MB 起，自动上调保证片数 ≤ 10000）与 `WithConcurrency`（默认 4）编排；顺序读片、有界并发、任一失败自动 Abort 清理。
 - **预签名**：本地产链零往返，有效期硬上限 7 天（SigV4 约束），超上限返回 `ErrInvalidRequest`。
 - **断点续传**：`ResumeUpload` 发现同桶同键的进行中分片会话即复用——已传分片信任网关记录（大小对齐布局即采纳），本地按布局跳过字节区间（`io.ReadSeeker` 直接 Seek，否则读丢弃），只补传缺失分片；布局不一致（PartSize 变化 / 键被其他会话占用）返回 `ErrInvalidRequest`，可先 `AbortMultipartUpload` 再重传。调用方必须从头提供完整内容流。
+- **事件通知配置**：`PutBucketNotification` 整组替换（0 - 100 条，空列表 = 清除）；`GetBucketNotification` 未配置返回空列表（AWS 语义不 404），回读含服务端生成的 `Id` 与 `Secret`；事件名当前仅 `s3:ObjectCreated:*` / `s3:ObjectRemoved:*`（常量 `EventObjectCreated` / `EventObjectRemoved`）。
 - **STS**：`GetSessionToken` 以永久凭证签发临时凭证（默认 1 小时，钳制 15 分钟 - 12 小时）；临时凭证**仅数据面可用**（控制面签名只收永久凭证），用 `WithSessionToken` 构造新客户端使用；临时凭证不可再签发（防令牌自我续期）。
 - **区域**：默认 `us-east-1`，须与平台网关配置一致，不一致用 `WithRegion` 对齐（签名域不同必然 SignatureDoesNotMatch）。
 
-## 7. 错误处理
+## 8. 错误处理
 
 ```go
 err := client.EmptyBucket(ctx, "my-bucket")
@@ -351,7 +421,9 @@ if errors.As(err, &s3Err) && s3Err.IsNotFound() {
 }
 ```
 
-## 8. 签名与默认值（控制面，务必了解）
+事件通知验签失败归 `ErrInvalidSign`（`ParseEvent`），密钥为空归 `ErrInvalidRequest`；载荷非法 JSON 为普通错误（验签已通过，属协议违例）。
+
+## 9. 签名与默认值（控制面，务必了解）
 
 签名算法与平台服务端 `utils.Md5.GenSign` **逐字节一致**：
 
@@ -372,15 +444,16 @@ if errors.As(err, &s3Err) && s3Err.IsNotFound() {
 
 需要切换签名协议（如平台升级 HMAC-SHA256）时用 `ios.WithSigner(...)` 注入新实现，业务代码零改动。
 
-## 9. 安全约定
+## 10. 安全约定
 
 - `secret` 由调用方**运行时注入**（环境变量 / 配置中心 / 密钥管理服务），SDK 不持久化、不写日志、不出现在任何错误文案中。
 - 生产环境 HTTP 链路必须 HTTPS；gRPC 链路默认 plaintext 仅适用于内网/开发环境，生产用 `WithGRPCDialOpts` 注入 TLS 凭证。
 - 签名时间窗 ±15 分钟（平台判定），请保证部署机器时钟同步；偏差过大一律 401。
 - 按最小授权在平台用户中心签发密钥：只读场景用 `scope=ro`，限定桶场景配置桶白名单；写操作与跨桶访问会被平台 403 拒绝。
 - 不要把 `secret` 下发给前端/客户端代码；预签名链接才是给终端用户的下发形态。
+- 事件通知的验签密钥（规则 `Secret`）与账号 Secret 相互独立：泄露面只影响通知验签，轮换只需重写规则。
 
-## 10. 常见问题
+## 11. 常见问题
 
 **Q：一直返回 401（签名无效）怎么办？**
 A：逐项核对 ① `secret` 是否与平台签发的密钥一致；② 机器时钟偏差是否超过 ±15 分钟；③ 是否自行构造了请求而漏了 SDK 注入的默认值（用 SDK 方法调用则无需关心）；④ 自建网关时确认参数集展开方式（gRPC 必须 `EmitUnpopulated`）。
@@ -391,36 +464,42 @@ A：先核对 `WithRegion` 与平台网关区域一致（默认 `us-east-1`）�
 **Q：S3 端点派生出来的端口不对？**
 A：派生规则固定为 `scheme://host:9000`。网关不在 9000 时必须显式 `WithS3Endpoint("https://s3.example.com:9443")`。
 
+**Q：Webhook 收不到 / 验签失败？**
+A：先确认规则已写入（`GetBucketNotification` 回读非空）且目标地址平台可达；验签密钥必须取回读到的 `Secret`（PUT 时留空则由服务端生成，以自己臆测的值验签必然失败）；验签用**原始请求体**，任何先解码再重排的中间件都会破坏签名。
+
 **Q：能并发调用吗？**
 A：可以。`Client` 无内部可变状态，`Signer` 是无状态纯函数；`Close()` 只在退出时调用一次（重复调用幂等）。
 
 **Q：控制面超时多久？数据面呢？**
 A：控制面单次调用默认 10 秒（`WithTimeout` 可调）。数据面是流式链路，不套整体超时，用 `ctx` 全权控制。
 
-## 11. 版本与演进
+## 12. 版本与演进
 
 - P2 已落地：数据面 `ResumeUpload` 断点续传（含 `ListMultipartUploads` / `AbortMultipartUpload` 会话治理）、`DeleteObjects` 批量删除、`CopyObject` 服务端拷贝、STS `GetSessionToken`（`WithSessionToken` 全链路）、桶配置族（CORS / Versioning / Lifecycle）。
-- P3 规划：事件通知 `notify` 子包（解析 + 验签）、`PutBucketNotification` 封装、更多示例（备份脚本、静态资源同步、CI 产物上传）。
+- P3 已落地：事件通知 `notify` 子包（`ParseEvent` 解析 + 验签、`VerifyEvent`）、桶通知配置族（`GetBucketNotification` / `PutBucketNotification` / `DeleteBucketNotification`）、`examples/webhook` 接收器示例；服务端同步增强：通知 `Secret` 经属主签名端点回读可见、投递号在重试间稳定（幂等键语义）。
+- 后续规划：更多示例（备份脚本、静态资源同步、CI 产物上传）与事件类型扩展。
 - 契约源文件 `proto/ios/open/v1/open.proto` 是控制面唯一事实源；平台后端复制同一份文件生成服务端桩。
 - SDK 方法签名稳定，能力上线后以新增方法方式扩展（不破坏现有接口）。
 - 全链联调 demo：`examples/fullchain`（设置 `IOS_ENDPOINT` / `IOS_ACCESS_KEY` / `IOS_SECRET` 后 `go run ./examples/fullchain`）。
 
-## 12. 代码结构
+## 13. 代码结构
 
 接入方只需 `import "github.com/inis-io/aide/ios"` 一个包：根包用类型别名与函数转发导出全部公开面，
 内部实现按职责分区（只为可维护性，不增加接入成本）。
 
 | 路径 | 作用 |
 |---|---|
-| `ios.go` | 唯一入口：包注释 + `Client` / `Option` / `NewClient` / `Close` + 控制面 13 方法 + 数据面 12 方法 + 全部别名与转发 |
+| `ios.go` | 唯一入口：包注释 + `Client` / `Option` / `NewClient` / `Close` + 控制面 13 方法 + 数据面 29 方法 + 全部别名与转发 |
 | `types/` | 控制面公开数据模型与错误模型（`Normalize` 默认值、`APIError`、哨兵错误；零依赖） |
 | `sign/` | 公开控制面签名器：`Signer` 接口 + MD5 实现（`sign.New()`），供 `WithSigner` 使用 |
+| `notify/` | 公开事件通知接收件：`ParseEvent`（解析 + 验签）与 `VerifyEvent`（仅验签），constant-time 比对 |
 | `internal/transport/` | 内部控制面传输链路（HTTP / gRPC 双链路实现与 `Operation` 常量），接入方不直接使用 |
-| `internal/s3/` | 内部数据面轻客户端（SigV4 签名、桶/对象/分片/续传/批量/拷贝/桶配置/STS，纯标准库） |
+| `internal/s3/` | 内部数据面轻客户端（SigV4 签名、桶/对象/分片/续传/批量/拷贝/桶配置/事件通知配置/STS，纯标准库） |
 | `proto/` | 控制面契约源 `ios/open/v1/open.proto` 与生成的客户端桩（已入库，接入方免装 protoc） |
 | `examples/fullchain/` | 全链联调 demo（建桶→上传→下载→分享→用量→回收站全链，含 P2 能力演示） |
+| `examples/webhook/` | 事件通知 Webhook 接收器 demo（验签 → 投递号幂等 → 落库 → 2xx） |
 
-## 13. 相关文档
+## 14. 相关文档
 
 - 模块 AI 约定：[AGENTS.md](AGENTS.md)
 - 包注释与 API 文档：`go doc github.com/inis-io/aide/ios`

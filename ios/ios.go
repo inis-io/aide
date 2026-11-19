@@ -3,7 +3,8 @@
 // 接入方通过本包调用平台开放能力，覆盖两个平面：
 //
 //   - 数据面（S3 协议子集）：桶增删查、对象上传（单 PUT / 自动分片并发）/下载（Range）/
-//     元数据/删除/浏览、预签名链接。直连平台 S3 网关（默认 :9000），SigV4 签名，全程流式。
+//     元数据/删除/浏览、批量与拷贝、断点续传、桶配置族、STS、预签名链接、事件通知配置。
+//     直连平台 S3 网关（默认 :9000），SigV4 签名，全程流式。
 //   - 控制面（平台开放接口）：凭据自检、管理视角桶列表、清空桶、分享链接、回收站、
 //     用量与配额视图。HTTP / gRPC 双链路对称（默认 gRPC，WithTransportHTTP 切换）。
 //
@@ -53,6 +54,7 @@ import (
 
 	"github.com/inis-io/aide/ios/internal/s3"
 	"github.com/inis-io/aide/ios/internal/transport"
+	"github.com/inis-io/aide/ios/notify"
 	"github.com/inis-io/aide/ios/sign"
 	"github.com/inis-io/aide/ios/types"
 )
@@ -176,6 +178,9 @@ type LifecycleRule = s3.LifecycleRule
 // SessionCredentials - STS 临时凭证（仅数据面可用）
 type SessionCredentials = s3.SessionCredentials
 
+// NotificationRule - 事件通知规则（Topic = Webhook 目标 URL；Secret = 投递验签密钥，GET 回读可见）
+type NotificationRule = s3.NotificationRule
+
 // 版本控制状态常量（PutBucketVersioning 仅收这两个值）
 const (
 	// VersioningEnabled - 开启版本控制
@@ -183,6 +188,31 @@ const (
 	// VersioningSuspended - 暂停版本控制（开启后不可回 off，只可暂停）
 	VersioningSuspended = s3.VersioningSuspended
 )
+
+// 事件名常量（PutBucketNotification 订阅；平台当前仅支持这两类通配）
+const (
+	// EventObjectCreated - 对象创建事件（上传 / 拷贝 / 分片完成触发）
+	EventObjectCreated = s3.EventObjectCreated
+	// EventObjectRemoved - 对象删除事件（软删进回收站触发）
+	EventObjectRemoved = s3.EventObjectRemoved
+)
+
+// ---------- 事件通知模型（别名 ios/notify.*） ----------
+
+// Event - 验签后的结构化事件报文（Name/Delivery 取自投递头，Delivery 为幂等键）
+type Event = notify.Event
+
+// Record - 单条事件记录（S3 风格）
+type Record = notify.Record
+
+// RecordS3 - S3 事件主体
+type RecordS3 = notify.RecordS3
+
+// RecordBucket - 事件桶信息
+type RecordBucket = notify.RecordBucket
+
+// RecordObject - 事件对象信息
+type RecordObject = notify.RecordObject
 
 // ---------- 错误与助手 ----------
 
@@ -206,6 +236,10 @@ var (
 	JoinIds = types.JoinIds
 	// ParseIds - 解析契约字符串为 ID 列表
 	ParseIds = types.ParseIds
+	// ParseEvent - 事件通知报文解析 + 验签（先验签后解析；验签失败一律 ErrInvalidSign）
+	ParseEvent = notify.ParseEvent
+	// VerifyEvent - 事件通知仅验签（constant-time 比对；secret 或签名缺失一律 false）
+	VerifyEvent = notify.VerifyEvent
 )
 
 // ============================= 公开面导出 - 结束 =============================
@@ -1419,6 +1453,76 @@ func (this *Client) DeleteBucketLifecycle(ctx context.Context, bucket string) er
 }
 
 // ============================= 数据面：桶配置 - 结束 =============================
+
+// ============================= 数据面：事件通知 - 开始 =============================
+
+// GetBucketNotification - 取桶事件通知配置（未配置返回空列表，AWS 语义不 404）
+// 返回规则含服务端生成的 Id 与 Secret（限属主签名端点），Secret 即接收方验签密钥。
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @return []NotificationRule - 规则列表（空 = 未配置）
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ */
+func (this *Client) GetBucketNotification(ctx context.Context, bucket string) ([]NotificationRule, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(bucket) == "" {
+		return nil, fmt.Errorf("%w：bucket 不能为空", ErrInvalidRequest)
+	}
+
+	return client.GetBucketNotification(ctx, bucket)
+}
+
+// PutBucketNotification - 写桶事件通知配置（整组替换语义；规则数 0-100，空列表 = 清除）
+// Secret 留空由服务端生成，写入后经 GetBucketNotification 回读可见（配置到接收方验签）。
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @param rules []NotificationRule - 规则列表（Topic 须为 http(s) 地址；Events 取 EventObjectCreated / EventObjectRemoved）
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ * @example：
+ * 	err := client.PutBucketNotification(ctx, "photos", []ios.NotificationRule{{
+ * 	    Topic:  "https://hooks.example.com/ios",
+ * 	    Events: []string{ios.EventObjectCreated, ios.EventObjectRemoved},
+ * 	}})
+ */
+func (this *Client) PutBucketNotification(ctx context.Context, bucket string, rules []NotificationRule) error {
+
+	client, err := this.data()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(bucket) == "" {
+		return fmt.Errorf("%w：bucket 不能为空", ErrInvalidRequest)
+	}
+
+	return client.PutBucketNotification(ctx, bucket, rules)
+}
+
+// DeleteBucketNotification - 清除桶事件通知配置（PUT 空配置语义，AWS 无独立 Delete 操作）
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ */
+func (this *Client) DeleteBucketNotification(ctx context.Context, bucket string) error {
+
+	client, err := this.data()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(bucket) == "" {
+		return fmt.Errorf("%w：bucket 不能为空", ErrInvalidRequest)
+	}
+
+	return client.DeleteBucketNotification(ctx, bucket)
+}
+
+// ============================= 数据面：事件通知 - 结束 =============================
 
 // ============================= 数据面：STS - 开始 =============================
 

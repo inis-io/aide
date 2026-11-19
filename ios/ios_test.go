@@ -19,6 +19,7 @@ import (
 
 	"github.com/inis-io/aide/ios/internal/s3"
 	"github.com/inis-io/aide/ios/internal/transport"
+	"github.com/inis-io/aide/ios/notify"
 	"github.com/inis-io/aide/ios/types"
 )
 
@@ -67,9 +68,23 @@ var (
 	_ s3.LifecycleRule       = LifecycleRule{}
 	_ s3.SessionCredentials  = SessionCredentials{}
 
+	// 数据面模型（P3：事件通知）
+	_ s3.NotificationRule = NotificationRule{}
+
+	// 事件通知模型（notify）
+	_ notify.Event        = Event{}
+	_ notify.Record       = Record{}
+	_ notify.RecordS3     = RecordS3{}
+	_ notify.RecordBucket = RecordBucket{}
+	_ notify.RecordObject = RecordObject{}
+
 	// 版本控制状态常量同源
 	_ = VersioningEnabled
 	_ = VersioningSuspended
+
+	// 事件名常量同源
+	_ = EventObjectCreated
+	_ = EventObjectRemoved
 
 	// 哨兵错误双平面同源（根包导出唯一一套）
 	_ = error(ErrInvalidRequest)
@@ -102,6 +117,17 @@ func TestAliasSentinels(t *testing.T) {
 	}
 	if ids, err := ParseIds("1,2,3"); err != nil || len(ids) != 3 || ids[2] != 3 {
 		t.Fatalf("ParseIds 转发失效：ids=%v err=%v", ids, err)
+	}
+
+	// ParseEvent / VerifyEvent 转发与事件名常量同源
+	if ParseEvent == nil || VerifyEvent == nil {
+		t.Fatalf("ParseEvent / VerifyEvent 转发失效")
+	}
+	if EventObjectCreated != s3.EventObjectCreated || EventObjectRemoved != s3.EventObjectRemoved {
+		t.Fatalf("事件名常量应与 internal/s3 同源")
+	}
+	if !VerifyEvent([]byte("body"), "", "secret") == false {
+		t.Fatalf("VerifyEvent 空签名应判 false")
 	}
 }
 
@@ -645,6 +671,17 @@ func TestDataPlaneValidation(t *testing.T) {
 	}
 	if _, err = client.PresignPutObject(ctx, "photos", "", "", time.Hour); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("空 key 应报错：%v", err)
+	}
+
+	// P3：事件通知配置族的桶名校验
+	if _, err = client.GetBucketNotification(ctx, " "); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空桶名应报错：%v", err)
+	}
+	if err = client.PutBucketNotification(ctx, "", []NotificationRule{{Topic: "https://x", Events: []string{EventObjectCreated}}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空桶名应报错：%v", err)
+	}
+	if err = client.DeleteBucketNotification(ctx, " "); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空桶名应报错：%v", err)
 	}
 }
 

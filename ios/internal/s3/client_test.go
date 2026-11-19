@@ -79,6 +79,8 @@ type fakeGateway struct {
 	lifecycleConfigs map[string][]byte
 	// versioningStatus - 桶版本控制状态（"" = 未开启）
 	versioningStatus map[string]string
+	// notificationRules - 桶事件通知规则（PUT 整组替换 / GET 回读含生成的 Id 与 Secret / 空集 = 清除）
+	notificationRules map[string][]NotificationRule
 	// stsDuration - 最近一次 GetSessionToken 的 DurationSeconds（断言锚点）
 	stsDuration int64
 	// sessionCreds - 会话凭据（非 nil 时验签额外接受该凭据 + 匹配令牌头）
@@ -91,14 +93,15 @@ type fakeGateway struct {
 func newFakeGateway() *fakeGateway {
 
 	return &fakeGateway{
-		creds:            credentials{accessKey: "AK", secret: "SK"},
-		buckets:          map[string]time.Time{},
-		objects:          map[string]map[string]fakeObject{},
-		uploads:          map[string]*fakeUpload{},
-		corsConfigs:      map[string][]byte{},
-		lifecycleConfigs: map[string][]byte{},
-		versioningStatus: map[string]string{},
-		partLog:          map[string][]int{},
+		creds:             credentials{accessKey: "AK", secret: "SK"},
+		buckets:           map[string]time.Time{},
+		objects:           map[string]map[string]fakeObject{},
+		uploads:           map[string]*fakeUpload{},
+		corsConfigs:       map[string][]byte{},
+		lifecycleConfigs:  map[string][]byte{},
+		versioningStatus:  map[string]string{},
+		notificationRules: map[string][]NotificationRule{},
+		partLog:           map[string][]int{},
 	}
 }
 
@@ -232,6 +235,7 @@ func (this *fakeGateway) ServeHTTP(response http.ResponseWriter, request *http.R
 	_, hasCors := query["cors"]
 	_, hasVersioning := query["versioning"]
 	_, hasLifecycle := query["lifecycle"]
+	_, hasNotification := query["notification"]
 	copySource := request.Header.Get("X-Amz-Copy-Source")
 
 	switch {
@@ -269,6 +273,10 @@ func (this *fakeGateway) ServeHTTP(response http.ResponseWriter, request *http.R
 		this.putLifecycle(response, request, bucket)
 	case request.Method == http.MethodDelete && hasLifecycle && key == "":
 		this.deleteLifecycle(response, bucket)
+	case request.Method == http.MethodGet && hasNotification && key == "":
+		this.getNotification(response, bucket)
+	case request.Method == http.MethodPut && hasNotification && key == "":
+		this.putNotification(response, request, bucket)
 	case request.Method == http.MethodPut && copySource != "":
 		this.copyObject(response, request, bucket, key, copySource)
 	case request.Method == http.MethodGet && bucket == "":

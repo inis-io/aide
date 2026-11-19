@@ -246,6 +246,70 @@ func (this *fakeGateway) deleteLifecycle(response http.ResponseWriter, bucket st
 	response.WriteHeader(http.StatusNoContent)
 }
 
+// getNotification - GET /{bucket}?notification（未配置返回空配置，AWS 语义不 404；回读含 Id 与 Secret）
+func (this *fakeGateway) getNotification(response http.ResponseWriter, bucket string) {
+
+	rules := this.notificationRules[bucket]
+	raw := xmlNotificationConfiguration{Topics: make([]xmlNotificationTopic, 0, len(rules))}
+	for _, rule := range rules {
+		raw.Topics = append(raw.Topics, xmlNotificationTopic{
+			Id: rule.Id, Topic: rule.Topic, Events: rule.Events, Secret: rule.Secret,
+		})
+	}
+
+	body, _ := xml.Marshal(raw)
+	response.Header().Set("Content-Type", "application/xml")
+	_, _ = response.Write(body)
+}
+
+// putNotification - PUT /{bucket}?notification（整组替换；空 Id / Secret 由「服务端」生成，空配置 = 清除）
+func (this *fakeGateway) putNotification(response http.ResponseWriter, request *http.Request, bucket string) {
+
+	if !this.bucketExists(bucket) {
+		this.writeError(response, http.StatusNotFound, "NoSuchBucket", "桶不存在", "/"+bucket)
+		return
+	}
+	body, _ := io.ReadAll(request.Body)
+	var parsed xmlNotificationConfiguration
+	if err := xml.Unmarshal(body, &parsed); err != nil {
+		this.writeError(response, http.StatusBadRequest, "MalformedXML", "事件通知配置不合法", "/"+bucket)
+		return
+	}
+	if len(parsed.Topics) > maxNotificationRules {
+		this.writeError(response, http.StatusBadRequest, "InvalidArgument", "规则数超限", "/"+bucket)
+		return
+	}
+
+	rules := make([]NotificationRule, 0, len(parsed.Topics))
+	for index, item := range parsed.Topics {
+		if !strings.HasPrefix(item.Topic, "https://") && !strings.HasPrefix(item.Topic, "http://") {
+			this.writeError(response, http.StatusBadRequest, "InvalidArgument", "Topic 须为 http(s) 地址", "/"+bucket)
+			return
+		}
+		if len(item.Events) == 0 {
+			this.writeError(response, http.StatusBadRequest, "InvalidArgument", "Events 不能为空", "/"+bucket)
+			return
+		}
+		for _, name := range item.Events {
+			if name != EventObjectCreated && name != EventObjectRemoved {
+				this.writeError(response, http.StatusBadRequest, "InvalidArgument", "事件名不支持", "/"+bucket)
+				return
+			}
+		}
+		rule := NotificationRule{Id: item.Id, Topic: item.Topic, Events: item.Events, Secret: item.Secret}
+		if rule.Id == "" {
+			rule.Id = fmt.Sprintf("rule-fake-%d", index+1)
+		}
+		if rule.Secret == "" {
+			rule.Secret = fmt.Sprintf("secret-fake-%d", index+1)
+		}
+		rules = append(rules, rule)
+	}
+
+	this.notificationRules[bucket] = rules
+	response.WriteHeader(http.StatusOK)
+}
+
 // ============================= 假网关 P2 处理器 - 结束 =============================
 
 // ============================= P2 测试 - 开始 =============================
@@ -720,6 +784,77 @@ func TestBucketLifecycleConfig(t *testing.T) {
 	}
 	if _, err = client.GetBucketLifecycle(ctx, "demo"); !IsCode(err, "NoSuchLifecycleConfiguration") {
 		t.Fatalf("删除后应回到未配置：%v", err)
+	}
+}
+
+// TestBucketNotificationConfig - 事件通知配置族：未配置返回空列表（不 404）、写入回读含生成 Id/Secret、整组替换、清除、本地校验
+func TestBucketNotificationConfig(t *testing.T) {
+
+	gateway := newFakeGateway()
+	client := newTestClient(t, gateway)
+	ctx := context.Background()
+	mustCreateBucket(t, client, ctx, "demo")
+
+	// 未配置 → 空列表（AWS 语义不 404）
+	got, err := client.GetBucketNotification(ctx, "demo")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("未配置应返回空列表：rules=%v err=%v", got, err)
+	}
+
+	// 写入（Id / Secret 留空由服务端生成）→ 回读含生成值
+	rules := []NotificationRule{
+		{Topic: "https://hooks.example.com/ios", Events: []string{EventObjectCreated, EventObjectRemoved}},
+	}
+	if err = client.PutBucketNotification(ctx, "demo", rules); err != nil {
+		t.Fatalf("写入事件通知失败：%v", err)
+	}
+	got, err = client.GetBucketNotification(ctx, "demo")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("回读事件通知失败：rules=%v err=%v", got, err)
+	}
+	if got[0].Id == "" || got[0].Secret == "" {
+		t.Fatalf("服务端应生成 Id 与 Secret：%+v", got[0])
+	}
+	if got[0].Topic != rules[0].Topic || len(got[0].Events) != 2 {
+		t.Fatalf("回读内容不一致：%+v", got[0])
+	}
+
+	// 整组替换（自带 Secret 保留）
+	if err = client.PutBucketNotification(ctx, "demo", []NotificationRule{
+		{Topic: "https://hooks.example.com/only-created", Events: []string{EventObjectCreated}, Secret: "my-secret"},
+	}); err != nil {
+		t.Fatalf("整组替换失败：%v", err)
+	}
+	got, err = client.GetBucketNotification(ctx, "demo")
+	if err != nil || len(got) != 1 || got[0].Secret != "my-secret" || len(got[0].Events) != 1 {
+		t.Fatalf("整组替换回读不符合预期：%+v err=%v", got, err)
+	}
+
+	// 本地校验
+	if err = client.PutBucketNotification(ctx, "demo", []NotificationRule{{Topic: "ftp://x", Events: []string{EventObjectCreated}}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("非 http(s) Topic 应返回 ErrInvalidRequest：%v", err)
+	}
+	if err = client.PutBucketNotification(ctx, "demo", []NotificationRule{{Topic: "https://x"}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空事件集应返回 ErrInvalidRequest：%v", err)
+	}
+	if err = client.PutBucketNotification(ctx, "demo", []NotificationRule{{Topic: "https://x", Events: []string{"s3:Bad"}}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("非法事件名应返回 ErrInvalidRequest：%v", err)
+	}
+	over := make([]NotificationRule, maxNotificationRules+1)
+	for i := range over {
+		over[i] = NotificationRule{Topic: "https://x", Events: []string{EventObjectCreated}}
+	}
+	if err = client.PutBucketNotification(ctx, "demo", over); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("超上限应返回 ErrInvalidRequest：%v", err)
+	}
+
+	// 清除 → 回读空列表
+	if err = client.DeleteBucketNotification(ctx, "demo"); err != nil {
+		t.Fatalf("清除事件通知失败：%v", err)
+	}
+	got, err = client.GetBucketNotification(ctx, "demo")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("清除后应回到空列表：rules=%v err=%v", got, err)
 	}
 }
 

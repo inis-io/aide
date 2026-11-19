@@ -5,15 +5,15 @@
 ## 模块定位
 
 - 模块路径 `github.com/inis-io/aide/ios`（见 `go.mod`），**嵌套独立模块**：不参与父模块 `go build ./...`。
-- 定位：inis 对象存储平台（Inis Object Storage）的**接入方 SDK**，一个模块覆盖两个平面——控制面（密钥自检 / 桶管理 / 分享 / 回收站 / 用量，HTTP+gRPC 双链路签名）与数据面（桶与对象读写删列、分片上传、预签名，直连 S3 兼容网关）。
+- 定位：inis 对象存储平台（Inis Object Storage）的**接入方 SDK**，一个模块覆盖两个平面——控制面（密钥自检 / 桶管理 / 分享 / 回收站 / 用量，HTTP+gRPC 双链路签名）与数据面（桶与对象读写删列、分片上传、批量与拷贝、断点续传、桶配置族、事件通知、STS、预签名，直连 S3 兼容网关）。
 - 直接依赖仅 `google.golang.org/grpc` + `google.golang.org/protobuf`（默认 gRPC 链路所需）；HTTP 链路、签名器与数据面为纯标准库实现。**新增依赖前先确认是否真的必要**。
 - 控制面契约唯一事实源：`proto/ios/open/v1/open.proto`（平台后端复制同一份文件生成服务端桩）；生成的客户端桩 `proto/gen/ios/open/v1/*.pb.go`（包名 `openv1`）**提交入库**，接入方 `go get` 后无需安装 protoc。
-- **接入方只 import 根包**：根目录仅保留 `ios.go` 一个入口文件，全部公开类型以别名、哨兵与函数转发的方式从根包导出；实现按职责拆在 `types` / `sign` / `internal/transport` / `internal/s3`。
+- **接入方只 import 根包**：根目录仅保留 `ios.go` 一个入口文件，全部公开类型以别名、哨兵与函数转发的方式从根包导出；实现按职责拆在 `types` / `sign` / `notify` / `internal/transport` / `internal/s3`。
 
 ## 目录结构
 
 ```
-├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 12 方法 + 全部别名与转发
+├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 29 方法 + 全部别名与转发
 ├── ios_test.go         # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、双端点派生
 ├── types/              # 公开：控制面请求/响应模型 + 错误模型（零依赖）
 │   ├── accesskey.go    # AccessKeyInfo（Secret 永不下发）
@@ -23,6 +23,9 @@
 │   ├── usage.go        # QuotaView/UsageOverview/BucketUsage/EgressPoint
 │   └── errors.go       # APIError + 哨兵错误 ErrInvalidRequest/ErrInvalidSign/ErrTransport
 ├── sign/               # 公开：Signer 接口 + MD5 实现 + 值格式化（Value）
+├── notify/             # 公开：事件通知接收件（P3）
+│   ├── notify.go       # Event/Record 模型 + ParseEvent（解析+验签）+ VerifyEvent（仅验签，constant-time）
+│   └── notify_test.go  # 黄金向量（服务端同算法复算）、篡改/缺头/坏密钥拒绝、坏 JSON 分层
 ├── internal/           # 内部实现，接入方不直接接触
 │   ├── transport/      # 控制面 Transport 接口 + Operation 常量 + HTTP/gRPC 实现
 │   │   ├── transport.go  # Config、Operation、Transport、签名参数组装公共件
@@ -36,12 +39,14 @@
 │       ├── delete.go     # DeleteObjects（超千自动分批，单键失败不阻断）
 │       ├── copy.go       # CopyObject（源按原形态拼接，不做 URL 编码）
 │       ├── multipart.go  # 分片编排 + ListMultipartUploads + ResumeUpload 断点续传
-│       ├── bucketconfig.go # 桶配置族（CORS/Versioning/Lifecycle 读写删）
+│       ├── bucketconfig.go # 桶配置族（CORS/Versioning/Lifecycle 读写删 + putBucketConfig 公共件）
+│       ├── bucketnotification.go # 桶事件通知配置（读写 + Delete=PUT 空配置 + 规则本地校验 + 事件名常量）
 │       ├── sts.go        # GetSessionToken（STS 临时凭证签发）
 │       ├── presign.go    # 预签名 GET/PUT（本地产链，硬上限 7 天）
 │       └── xml.go        # S3 XML 编解码
 ├── examples/           # 示例（package main，go build 覆盖，禁止测试依赖）
-│   └── fullchain/      # 全链联调 demo（设计方案 §13 P1 验收链 + P2 能力演示）
+│   ├── fullchain/      # 全链联调 demo（设计方案 §13 P1 验收链 + P2 能力演示）
+│   └── webhook/        # 事件通知 Webhook 接收器 demo（验签 → 投递号幂等 → 落库 → 2xx）
 ├── README.md           # 接入方使用教程
 └── proto/              # 控制面契约源 + 生成桩（提交入库）
 ```
@@ -50,10 +55,12 @@
 
 ```
 types（零依赖） ← sign（零依赖） ← internal/transport（sign + types + proto/gen） ← 根包（全部）
+notify（types） ← 根包
 internal/s3（纯标准库，不依赖 types/sign/transport） ← 根包
 ```
 
-- `types` 保持零依赖：不得导入 `sign`/`transport`/`s3`/根包，也不得导入 `proto/gen`。
+- `types` 保持零依赖：不得导入 `sign`/`notify`/`transport`/`s3`/根包，也不得导入 `proto/gen`。
+- `notify` 只依赖 `types`（哨兵错误同源：`ErrInvalidRequest` / `ErrInvalidSign`），与 openpay/notify 同款依赖方向。
 - `internal/s3` 与 `internal/transport` 互不导入；两者在根包汇合（控制面走 `invoke`，数据面走 `data()`）。
 - 根包不得导入 `proto/gen`；只有 `internal/transport/grpc.go` 需要它。
 - `sign` 之所以是公开子包：`Signer` 类型出现在根包公开选项签名上（`WithSigner`）；`internal/*` 是纯实现细节。
@@ -76,14 +83,17 @@ internal/s3（纯标准库，不依赖 types/sign/transport） ← 根包
 - **DeleteObjects 语义**：超 1000 键 SDK 自动分批聚合；单键失败不阻断，逐键回传 `Errors`；不存在键按网关幂等语义归 `Deleted`。
 - **CopyObject 语义**：`X-Amz-Copy-Source` 按「源桶/源键」**原形态**拼接，不做 URL 编码（平台网关按原样解析，编码会破坏键查找）。
 - **桶配置族语义**：PUT 均为整体覆盖；CORS/Lifecycle 未配置时 GET 返回 `*S3Error`（`NoSuchCORSConfiguration` / `NoSuchLifecycleConfiguration`），Versioning 未开启返回空串（S3 语义）；`PutBucketVersioning` 本地只收 `Enabled`/`Suspended`（常量导出在 s3 与根包）。
+- **事件通知语义（P3）**：规则数 0-100（空列表 = 清除，AWS 无独立 Delete，`DeleteBucketNotification` 以 PUT 空配置实现）；GET 未配置返回空列表（不 404），回读含服务端生成的 `Id` 与 `Secret`（限属主签名端点）；事件名当前仅 `EventObjectCreated`（`s3:ObjectCreated:*`）与 `EventObjectRemoved`（`s3:ObjectRemoved:*`）两个常量，本地校验拒绝其它取值；投递 at-least-once（退避 1s/4s 最多 3 次，2xx 即成功），报文头 `X-Inis-Event` / `X-Inis-Signature`（hex HMAC-SHA256(body, Secret)，小写）/ `X-Inis-Delivery`（投递号，重试间稳定，幂等键）。
+- **notify 验签约定**：`ParseEvent` 先验签后解析——密钥为空归 `ErrInvalidRequest`，缺签名头或验签不符一律 `ErrInvalidSign`（不区分细节），载荷非法 JSON 归普通错误；`VerifyEvent` 大小写归一后 `subtle.ConstantTimeCompare`。**验签无跳过开关**，README 强调三条铁律（先验签 → 按投递号幂等 → 先落库再 2xx）。
 - **STS 语义**：`GetSessionToken` 有效期缺省 3600 秒、本地钳制 [900, 43200]（与网关一致）；持有会话令牌的客户端再签发直接本地 `ErrInvalidRequest`（防令牌自我续期，网关层同样拒绝）；临时凭证仅数据面可用。
-- **根包公开面同步**：`types`/`sign`/`internal/s3` 新增任何公开类型，必须在 `ios.go` 补别名（并注明来源），同时在 `ios_test.go` 顶部的编译期断言里加一行 `_ types.X = X{}`（或 `_ s3.X = X{}`），否则接入方看不到该类型。
+- **根包公开面同步**：`types`/`sign`/`notify`/`internal/s3` 新增任何公开类型，必须在 `ios.go` 补别名（并注明来源），同时在 `ios_test.go` 顶部的编译期断言里加一行 `_ types.X = X{}`（或 `_ s3.X = X{}` / `_ notify.X = X{}`），否则接入方看不到该类型。
 - 风格：注释全中文（`// 名称 - 简述`）、结构体内字段逐行中文注释、接收者统一 `this`、对外方法首参 `ctx context.Context`、错误包装 `fmt.Errorf("%w：中文细节", ErrXxx)`、不引入全局状态。
 
 ## 签名黄金向量
 
 - `sign/sign_test.go` 顶部的 `golden*` 常量是**服务端实测值**（用 `aide/utils` 的 `utils.Md5.GenSign` 对固定参数集 + 固定密钥 `INIS-TEST-SECRET-0123456789abcdef` 生成），是签名兼容性的验收线。
 - `internal/transport/consistency_test.go` 校验 HTTP 与 gRPC 对同一逻辑请求产出同一签名（等于黄金向量）。
+- `notify/notify_test.go` 的 `golden*` 常量是**事件投递签名实测值**（按服务端 `dispatcher` 同算法 `hex(HMAC-SHA256(body, secret))` 对固定报文 + 固定密钥复算），改动验签逻辑必须重新生成。
 
 改动 `sign.Sign` / `sign.Value` / `Normalize()` 默认值后必须重新生成全部向量：
 
@@ -95,7 +105,7 @@ internal/s3（纯标准库，不依赖 types/sign/transport） ← 根包
 
 ```bash
 cd ios && go mod tidy && go build ./... && go vet ./... && go test ./...   # 本模块独立执行（含全部子包）
-cd ios && go test ./sign/ ./types/ ./internal/transport/ ./internal/s3/     # 只跑分区包
+cd ios && go test ./sign/ ./types/ ./notify/ ./internal/transport/ ./internal/s3/     # 只跑分区包
 ```
 
 重新生成 gRPC 桩（仅在契约变更时执行；产物提交入库）：
@@ -114,8 +124,9 @@ cd ios && protoc --proto_path=proto \
 - `ios_test.go`（根包）：别名编译期等价、默认链路为 gRPC / `WithTransportHTTP` 切换、选项默认值与覆盖、必填参数与业务参数校验、`Close` 幂等、S3 端点派生（含 IPv6 方括号）。
 - `types/`：`Normalize` 默认值（Share/Recycle）、`APIError`（含 nil 接收者）与哨兵错误。
 - `sign/`：17 组黄金向量、`sign` 键剔除、`Value` 格式化逐类型（含 0/false 保留、毫秒时间戳不用科学计数法）。
+- `notify/`：黄金向量（黄金报文 + 黄金密钥 + 黄金签名逐字节一致）、大写签名归一、报文篡改 / 错误密钥 / 空参拒绝、字段完整性、缺头 / nil 头拒绝、坏 JSON 分层（验签过但载荷非法归普通错误而非 `ErrInvalidSign`）。
 - `internal/transport/`：`httptest` 假平台覆盖端点/方法/默认值/签名复算/`*APIError`/非法 JSON/网络错误/未知操作；`bufconn` + 手写 `OpenServiceServer` 覆盖 metadata 验签、`Unauthenticated → ErrInvalidSign`、空信封与业务错误、状态错误 → `ErrTransport`、拨号目标归一、关闭幂等；`consistency_test.go` 校验双链路同签名。
-- `internal/s3/`：`signv4_test.go` 锚定 AWS 官方签名向量（测试密钥 `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`，注意是斜杠 `/bPxRfiCY`）；`client_test.go` 用内存假网关覆盖桶/对象/分片/预签名与 XML 错误解析；`p2_test.go` 扩展假网关（STS/批删/拷贝/会话列表/桶配置三族 + 会话凭据验签通道）覆盖 P2：批量删除（成功/幂等/单键失败/超千分批/校验）、CopyObject（往返/NoSuchKey/校验）、ListMultipartUploads（全量/前缀/校验）、ResumeUpload（无会话全量/部分跳过-断言网关只收缺失片/非 Seeker 读丢弃跳过/布局不一致报错且保留现场）、桶配置族（未配置 404 码/写入回读一致/本地校验/删除回归）、GetSessionToken（默认与钳制有效期/响应解析/临时凭证全链路签名带令牌头/禁再签发）。
+- `internal/s3/`：`signv4_test.go` 锚定 AWS 官方签名向量（测试密钥 `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`，注意是斜杠 `/bPxRfiCY`）；`client_test.go` 用内存假网关覆盖桶/对象/分片/预签名与 XML 错误解析；`p2_test.go` 扩展假网关（STS/批删/拷贝/会话列表/桶配置三族/事件通知配置 + 会话凭据验签通道）覆盖 P2 与 P3：批量删除（成功/幂等/单键失败/超千分批/校验）、CopyObject（往返/NoSuchKey/校验）、ListMultipartUploads（全量/前缀/校验）、ResumeUpload（无会话全量/部分跳过-断言网关只收缺失片/非 Seeker 读丢弃跳过/布局不一致报错且保留现场）、桶配置族（未配置 404 码/写入回读一致/本地校验/删除回归）、GetSessionToken（默认与钳制有效期/响应解析/临时凭证全链路签名带令牌头/禁再签发）、事件通知配置族（未配置返回空列表不 404/写入回读含生成 Id 与 Secret/整组替换/本地校验/清除回归空列表）。
 
 测试里的 `referenceSign` / `referenceValue`（`internal/transport/helper_test.go`）是服务端签名算法的**独立复算实现**，与被测 `sign` 包互为校验；改动签名逻辑时两者必须同时更新。
 
@@ -123,6 +134,7 @@ cd ios && protoc --proto_path=proto \
 
 - 不硬编码任何真实密钥；控制面测试密钥 `INIS-TEST-SECRET-0123456789abcdef`、SigV4 测试密钥为 AWS 官方向量密钥，仅用于测试。
 - `secret` 只在内存中参与签名：不落盘、不写日志、不进错误文案（`Client.secret` 私有字段，无导出；`types`/`sign`/`s3` 均只接收密钥参数，不保存）。
+- 事件通知验签密钥（规则 `Secret`）与账号 Secret 相互独立；`notify` 验签无跳过开关。
 - 生产环境 HTTP 链路必须 HTTPS；gRPC 默认 plaintext 仅用于内网/开发，TLS 经 `WithGRPCDialOpts` 注入（传了 dial 选项即不由 SDK 补 insecure 凭证）。
 - 控制面时间窗 ±15 分钟由平台判定，SDK 不在本地做时间窗预检（避免双时钟分叉）。
 
