@@ -13,7 +13,7 @@
 ## 目录结构
 
 ```
-├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 31 方法 + 全部别名与转发
+├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 35 方法 + 全部别名与转发
 ├── ios_test.go         # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、双端点派生
 ├── types/              # 公开：控制面请求/响应模型 + 错误模型（零依赖）
 │   ├── accesskey.go    # AccessKeyInfo（Secret 永不下发）

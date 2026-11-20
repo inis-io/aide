@@ -673,6 +673,35 @@ func TestDataPlaneValidation(t *testing.T) {
 		t.Fatalf("空 key 应报错：%v", err)
 	}
 
+	// 分片原语的参数校验
+	if _, err = client.CreateMultipartUpload(ctx, "", "a.bin", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空桶名应报错：%v", err)
+	}
+	if _, err = client.CreateMultipartUpload(ctx, "photos", " ", ""); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空 key 应报错：%v", err)
+	}
+	if _, err = client.UploadPart(ctx, "photos", "a.bin", "", 1, strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空 uploadId 应报错：%v", err)
+	}
+	if _, err = client.UploadPart(ctx, "photos", "a.bin", "U", 0, strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("partNumber 越界应报错：%v", err)
+	}
+	if _, err = client.UploadPart(ctx, "photos", "a.bin", "U", 10001, strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("partNumber 越界应报错：%v", err)
+	}
+	if _, err = client.UploadPart(ctx, "photos", "a.bin", "U", 1, nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空内容流应报错：%v", err)
+	}
+	if _, err = client.ListParts(ctx, "photos", "", "U"); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空 key 应报错：%v", err)
+	}
+	if _, err = client.CompleteMultipartUpload(ctx, "photos", "a.bin", " ", []Part{{PartNumber: 1, ETag: "e"}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空 uploadId 应报错：%v", err)
+	}
+	if _, err = client.CompleteMultipartUpload(ctx, "photos", "a.bin", "U", nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空分片清单应报错：%v", err)
+	}
+
 	// P3：事件通知配置族的桶名校验
 	if _, err = client.GetBucketNotification(ctx, " "); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("空桶名应报错：%v", err)

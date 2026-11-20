@@ -45,6 +45,7 @@ package ios
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -1339,6 +1340,110 @@ func (this *Client) AbortMultipartUpload(ctx context.Context, bucket, key, uploa
 }
 
 // ============================= 数据面：断点续传 - 结束 =============================
+
+// ============================= 数据面：分片原语 - 开始 =============================
+
+// CreateMultipartUpload - 初始化分片会话，返回 uploadId（低层原语；高层编排见 Upload / ResumeUpload）
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param mime string - Content-Type（空 = 网关缺省）
+ * @return string - 分片会话 ID
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ */
+func (this *Client) CreateMultipartUpload(ctx context.Context, bucket, key, mime string) (string, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("%w：bucket 与 key 不能为空", ErrInvalidRequest)
+	}
+
+	return client.CreateMultipartUpload(ctx, bucket, key, mime)
+}
+
+// UploadPart - 上传单个分片（流式 + MD5 回核 ETag）
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param uploadId string - 分片会话 ID（取自 CreateMultipartUpload）
+ * @param partNumber int - 分片序号（1-10000）
+ * @param body io.Reader - 分片内容流
+ * @return *Part - 已传分片记录（PartNumber / ETag / Size）
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ */
+func (this *Client) UploadPart(ctx context.Context, bucket, key, uploadId string, partNumber int, body io.Reader) (*Part, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" || strings.TrimSpace(uploadId) == "" {
+		return nil, fmt.Errorf("%w：bucket、key 与 uploadId 均不能为空", ErrInvalidRequest)
+	}
+	if partNumber < 1 || partNumber > 10000 {
+		return nil, fmt.Errorf("%w：partNumber 必须在 1-10000 之间", ErrInvalidRequest)
+	}
+	if body == nil {
+		return nil, fmt.Errorf("%w：分片内容流不能为空", ErrInvalidRequest)
+	}
+
+	return client.UploadPart(ctx, bucket, key, uploadId, partNumber, body)
+}
+
+// ListParts - 查询会话已传分片（自动翻页取全量，按序号升序）
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param uploadId string - 分片会话 ID
+ * @return []Part - 已传分片列表
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ */
+func (this *Client) ListParts(ctx context.Context, bucket, key, uploadId string) ([]Part, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" || strings.TrimSpace(uploadId) == "" {
+		return nil, fmt.Errorf("%w：bucket、key 与 uploadId 均不能为空", ErrInvalidRequest)
+	}
+
+	return client.ListParts(ctx, bucket, key, uploadId)
+}
+
+// CompleteMultipartUpload - 完成分片上传（清单需按序号升序携带；Size 为清单各分片字节数之和）
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param bucket string - 桶名
+ * @param key string - 对象键
+ * @param uploadId string - 分片会话 ID
+ * @param parts []Part - 分片清单（至少一条；ETag 取自 UploadPart / ListParts 回值）
+ * @return *PutResult - 完成结果（ETag / Size / VersionId）
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ */
+func (this *Client) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadId string, parts []Part) (*PutResult, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" || strings.TrimSpace(uploadId) == "" {
+		return nil, fmt.Errorf("%w：bucket、key 与 uploadId 均不能为空", ErrInvalidRequest)
+	}
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("%w：分片清单不能为空", ErrInvalidRequest)
+	}
+
+	return client.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts)
+}
+
+// ============================= 数据面：分片原语 - 结束 =============================
 
 // ============================= 数据面：桶配置 - 开始 =============================
 

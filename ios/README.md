@@ -125,6 +125,10 @@ client, err = ios.NewClient(accessKey, secret,
 | `ResumeUpload` | 分片续传编排 | 断点续传（复用进行中会话，已传分片本地跳过） |
 | `ListMultipartUploads` | ListMultipartUploads | 进行中分片会话（续传发现 / 遗留治理） |
 | `AbortMultipartUpload` | AbortMultipartUpload | 中止分片会话（幂等） |
+| `CreateMultipartUpload` | CreateMultipartUpload | 分片原语：初始化会话，返回 uploadId |
+| `UploadPart` | UploadPart | 分片原语：上传单个分片（流式 + MD5 回核，序号 1-10000） |
+| `ListParts` | ListParts | 分片原语：查询会话已传分片（自动翻页） |
+| `CompleteMultipartUpload` | CompleteMultipartUpload | 分片原语：按分片清单完成合并（清单需升序） |
 | `GetObject` | GetObject | 下载（流式，支持 Range） |
 | `HeadObject` | HeadObject | 取对象元数据 |
 | `DeleteObject` | DeleteObject | 删除对象（软删进回收站） |
