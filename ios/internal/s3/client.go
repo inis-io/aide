@@ -83,7 +83,8 @@ func New(config Config) (*Client, error) {
 		creds:     credentials{accessKey: config.AccessKey, secret: config.Secret, sessionToken: config.SessionToken},
 		client:    httpClient,
 		userAgent: config.UserAgent,
-		now:       time.Now,
+		// 签名时间必须 UTC：X-Amz-Date 尾部带 Z 标记，本地时区时钟会被网关判 RequestTimeTooSkewed
+		now: func() time.Time { return time.Now().UTC() },
 	}, nil
 }
 
