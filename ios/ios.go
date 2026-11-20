@@ -21,7 +21,8 @@
 //
 // # 双平面地址
 //
-// 控制面地址经 WithEndpoint 指定（必填）；数据面网关默认按
+// 控制面地址经 WithEndpoint 指定（可空，缺省回退 DefaultEndpoint = 官方平台
+// https://ios.inis.cn）；数据面网关默认按
 // 「endpoint 的 scheme://host + :9000」派生，可用 WithS3Endpoint 显式覆盖：
 //
 //	client, err := ios.NewClient(accessKey, secret,
@@ -248,6 +249,8 @@ var (
 // ============================= 客户端 - 开始 =============================
 
 const (
+	// DefaultEndpoint - 默认控制面平台地址（官方平台；WithEndpoint 未指定时使用）
+	DefaultEndpoint = "https://ios.inis.cn"
 	// defaultTimeout - 控制面单次调用的整体超时
 	defaultTimeout = 10 * time.Second
 	// defaultUserAgent - 默认请求 User-Agent
@@ -303,7 +306,7 @@ type Client struct {
 // Option - Client 构造选项（直接作用于接收者）
 type Option func(*Client)
 
-// WithEndpoint - 控制面平台地址（必填，无默认）
+// WithEndpoint - 控制面平台地址（可空，缺省回退 DefaultEndpoint = 官方平台 https://ios.inis.cn）
 /**
  * @param addr string - 平台地址，如 https://storage.example.com
  */
@@ -458,7 +461,7 @@ func WithConcurrency(n int) Option {
 /**
  * @param accessKey string - AccessKey
  * @param secret string - SecretKey（运行时注入，勿硬编码）
- * @param opts ...Option - 构造选项（WithEndpoint 必填）
+ * @param opts ...Option - 构造选项（WithEndpoint 可空，缺省 DefaultEndpoint）
  * @return *Client - 客户端实例
  * @return error - 参数缺失或链路装配失败（包装 ErrInvalidRequest / ErrTransport）
  * @example：
@@ -492,7 +495,7 @@ func NewClient(accessKey, secret string, opts ...Option) (*Client, error) {
 	this.s3Endpoint = strings.TrimRight(strings.TrimSpace(this.s3Endpoint), "/")
 
 	if this.endpoint == "" {
-		return nil, fmt.Errorf("%w：endpoint 不能为空（使用 WithEndpoint 指定控制面平台地址）", ErrInvalidRequest)
+		this.endpoint = DefaultEndpoint
 	}
 	if this.accessKey == "" {
 		return nil, fmt.Errorf("%w：accessKey 不能为空", ErrInvalidRequest)

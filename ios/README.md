@@ -36,7 +36,7 @@ func main() {
 	secret := os.Getenv("IOS_SECRET")        // 对应 Secret，运行时注入
 
 	client, err := ios.NewClient(accessKey, secret,
-		ios.WithEndpoint("https://oss.example.com"),
+		ios.WithEndpoint("https://oss.example.com"), // 可省略：缺省回退官方平台 ios.DefaultEndpoint（https://ios.inis.cn）
 	)
 	if err != nil {
 		log.Fatalf("构造客户端失败：%v", err)
@@ -421,7 +421,7 @@ func handle(writer http.ResponseWriter, request *http.Request) {
 
 ## 7. 数据面（S3）要点
 
-- **双端点**：控制面走 `WithEndpoint`；数据面走 `WithS3Endpoint`，缺省时从控制面端点派生（`scheme://host:9000`，IPv6 自动加方括号）。网关端口不是 9000 时必须显式注入 `WithS3Endpoint`。
+- **双端点**：控制面走 `WithEndpoint`（可空，缺省回退官方平台 `DefaultEndpoint = https://ios.inis.cn`）；数据面走 `WithS3Endpoint`，缺省时从控制面端点派生（`scheme://host:9000`，IPv6 自动加方括号）。网关端口不是 9000 时必须显式注入 `WithS3Endpoint`。
 - **UNSIGNED-PAYLOAD**：请求体不参与签名（网关侧兼容 aws-chunked 与明文流），上传大文件不做全量哈希预读，流式直通；完整性由流式 MD5 与响应 ETag 回核兜底。
 - **分片上传**：`Upload` 按 `WithPartSize`（默认 8MB，平台约束单片 5MB 起，自动上调保证片数 ≤ 10000）与 `WithConcurrency`（默认 4）编排；顺序读片、有界并发、任一失败自动 Abort 清理。
 - **预签名**：本地产链零往返，有效期硬上限 7 天（SigV4 约束），超上限返回 `ErrInvalidRequest`。

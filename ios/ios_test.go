@@ -201,12 +201,19 @@ func TestNewClientOptions(t *testing.T) {
 	}
 }
 
-// TestNewClientValidation - 必填参数校验
+// TestNewClientValidation - 必填参数校验与 endpoint 缺省回退
 func TestNewClientValidation(t *testing.T) {
 
-	if _, err := NewClient("AK", "SK"); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("缺少 endpoint 应报错：%v", err)
+	// endpoint 可空：缺省回退官方默认地址，数据面网关同步派生
+	zero, err := NewClient("AK", "SK")
+	if err != nil {
+		t.Fatalf("缺省 endpoint 应允许构造：%v", err)
 	}
+	if zero.endpoint != DefaultEndpoint || zero.s3Endpoint != DefaultEndpoint+":9000" {
+		t.Fatalf("缺省 endpoint 回退不符合预期：endpoint=%s s3=%s", zero.endpoint, zero.s3Endpoint)
+	}
+	_ = zero.Close()
+
 	if _, err := NewClient("", "SK", WithEndpoint("https://storage.example.com")); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("缺少 accessKey 应报错：%v", err)
 	}
