@@ -51,6 +51,7 @@ var (
 	_ s3.PutInput    = PutRequest{}
 	_ s3.PutResult   = PutResult{}
 	_ s3.UploadInput = UploadRequest{}
+	_ s3.CreateInput = CreateMultipartUploadRequest{}
 	_ s3.GetOptions  = GetOptions{}
 	_ s3.GetResult   = GetResult{}
 	_ s3.ObjectMeta  = ObjectMeta{}
@@ -686,6 +687,12 @@ func TestDataPlaneValidation(t *testing.T) {
 	}
 	if _, err = client.CreateMultipartUpload(ctx, "photos", " ", ""); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("空 key 应报错：%v", err)
+	}
+	if _, err = client.CreateMultipartUploadEx(ctx, nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("空分片初始化请求应报错：%v", err)
+	}
+	if _, err = client.CreateMultipartUploadEx(ctx, &CreateMultipartUploadRequest{Bucket: "photos"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("CreateMultipartUploadEx 缺 key 应报错：%v", err)
 	}
 	if _, err = client.UploadPart(ctx, "photos", "a.bin", "", 1, strings.NewReader("x")); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("空 uploadId 应报错：%v", err)

@@ -16,6 +16,16 @@ type BucketInfo struct {
 	Status string `json:"status"`
 	// StorageClass - 默认存储级别
 	StorageClass string `json:"storageClass"`
+	// Shared - 公共桶开关（true = 匿名读 + 登录用户限前缀写）
+	Shared bool `json:"shared"`
+	// SharePrefix - 非桶主可写前缀（规范化后以 / 结尾）
+	SharePrefix string `json:"sharePrefix"`
+	// ShareMaxObjects - 单个写作者在本桶的对象数上限（0 = 不限）
+	ShareMaxObjects int64 `json:"shareMaxObjects"`
+	// ShareMaxBytes - 单个写作者在本桶的累计字节上限（0 = 不限）
+	ShareMaxBytes int64 `json:"shareMaxBytes"`
+	// AllowExts - 上传扩展名白名单（逗号分隔、小写、带点；空 = 不限制）
+	AllowExts string `json:"allowExts"`
 	// CreateAt - 创建时间（毫秒）
 	CreateAt int64 `json:"createAt"`
 	// UpdateAt - 更新时间（毫秒）

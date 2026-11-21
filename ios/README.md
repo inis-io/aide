@@ -126,6 +126,7 @@ client, err = ios.NewClient(accessKey, secret,
 | `ListMultipartUploads` | ListMultipartUploads | 进行中分片会话（续传发现 / 遗留治理） |
 | `AbortMultipartUpload` | AbortMultipartUpload | 中止分片会话（幂等） |
 | `CreateMultipartUpload` | CreateMultipartUpload | 分片原语：初始化会话，返回 uploadId |
+| `CreateMultipartUploadEx` | CreateMultipartUpload（带元数据） | 分片原语：初始化会话，支持 `Meta` / `CacheControl` |
 | `UploadPart` | UploadPart | 分片原语：上传单个分片（流式 + MD5 回核，序号 1-10000） |
 | `ListParts` | ListParts | 分片原语：查询会话已传分片（自动翻页） |
 | `CompleteMultipartUpload` | CompleteMultipartUpload | 分片原语：按分片清单完成合并（清单需升序） |
@@ -351,6 +352,40 @@ fullSigned, _ := client.PresignGetObjectWith(ctx, "my-bucket", "photos/cover.jpg
 
 范围说明：本期不做多码率 HLS 转码与封面抽帧（封面图可配合 §5.8 的图片处理管线按需缩放）。
 
+### 5.10 公共桶写入（备注名 + 长缓存）
+
+公共桶（`shared=true`）允许任意登录用户写入 `sharePrefix` 前缀（默认 `community/`）；
+写入时可携带 `Meta`（序列化为 `x-amz-meta-*`，其中 `name` 由网关镜像为对象备注名）与 `CacheControl`：
+
+```go
+_, err := client.PutObject(ctx, &ios.PutRequest{
+	Bucket: "emoji",
+	Key:    "community/moyu.png",
+	Body:   file,
+	Mime:   "image/png",
+	// 备注名（x-amz-meta-name → 网关 inis_objects.name，可被管理面/搜索消费）
+	Meta: map[string]string{"name": "摸鱼"},
+	// 静态资源长缓存（GET/HEAD 原样透传）
+	CacheControl: "public, max-age=604800",
+})
+```
+
+分片链路给 `UploadRequest` 传同两个字段即可（`Upload` 内部走 `CreateMultipartUploadEx`）；
+直接使用分片原语时用 `CreateMultipartUploadEx`（旧 `CreateMultipartUpload` 保留为不含元数据的薄封装）：
+
+```go
+uploadId, err := client.CreateMultipartUploadEx(ctx, &ios.CreateMultipartUploadRequest{
+	Bucket: "emoji", Key: "community/big.gif", Mime: "image/gif",
+	Meta:         map[string]string{"name": "大图"},
+	CacheControl: "public, max-age=2592000",
+})
+```
+
+读侧对齐：`HeadObject` / `GetObject` 返回的 `ObjectMeta` 含 `CacheControl`，
+备注名经既有 `Meta["name"]` 读取（键统一小写）。
+
+> 目标版本 `ios/v0.2.0`：公共桶契约字段与 Meta/CacheControl 数据面能力均为追加式，不破坏既有签名。
+
 ## 6. 处理事件通知（Webhook）
 
 平台把桶内对象事件（创建 / 删除）以 Webhook 投递到接入方地址：每条规则一个目标 URL，
@@ -423,6 +458,7 @@ func handle(writer http.ResponseWriter, request *http.Request) {
 
 - **双端点**：控制面走 `WithEndpoint`（可空，缺省回退官方平台 `DefaultEndpoint = https://ios.inis.cn`）；数据面走 `WithS3Endpoint`，缺省时从控制面端点派生（`scheme://host:9000`，IPv6 自动加方括号）。网关端口不是 9000 时必须显式注入 `WithS3Endpoint`。
 - **UNSIGNED-PAYLOAD**：请求体不参与签名（网关侧兼容 aws-chunked 与明文流），上传大文件不做全量哈希预读，流式直通；完整性由流式 MD5 与响应 ETag 回核兜底。
+- **用户元数据与缓存头**：`PutInput` / `UploadInput` / `CreateInput` 的 `Meta` 序列化为 `x-amz-meta-*`（键统一小写，按字典序装配），`CacheControl` 原样写入 `Cache-Control`；`GetObject` / `HeadObject` 的 `ObjectMeta.CacheControl` 回读透传值，备注名用 `ObjectMeta.Meta["name"]`。
 - **分片上传**：`Upload` 按 `WithPartSize`（默认 8MB，平台约束单片 5MB 起，自动上调保证片数 ≤ 10000）与 `WithConcurrency`（默认 4）编排；顺序读片、有界并发、任一失败自动 Abort 清理。
 - **预签名**：本地产链零往返，有效期硬上限 7 天（SigV4 约束），超上限返回 `ErrInvalidRequest`。
 - **断点续传**：`ResumeUpload` 发现同桶同键的进行中分片会话即复用——已传分片信任网关记录（大小对齐布局即采纳），本地按布局跳过字节区间（`io.ReadSeeker` 直接 Seek，否则读丢弃），只补传缺失分片；布局不一致（PartSize 变化 / 键被其他会话占用）返回 `ErrInvalidRequest`，可先 `AbortMultipartUpload` 再重传。调用方必须从头提供完整内容流。
@@ -530,6 +566,7 @@ A：控制面单次调用默认 10 秒（`WithTimeout` 可调）。数据面是�
 
 - P2 已落地：数据面 `ResumeUpload` 断点续传（含 `ListMultipartUploads` / `AbortMultipartUpload` 会话治理）、`DeleteObjects` 批量删除、`CopyObject` 服务端拷贝、STS `GetSessionToken`（`WithSessionToken` 全链路）、桶配置族（CORS / Versioning / Lifecycle）。
 - P3 已落地：事件通知 `notify` 子包（`ParseEvent` 解析 + 验签、`VerifyEvent`）、桶通知配置族（`GetBucketNotification` / `PutBucketNotification` / `DeleteBucketNotification`）、`examples/webhook` 接收器示例；服务端同步增强：通知 `Secret` 经属主签名端点回读可见、投递号在重试间稳定（幂等键语义）。
+- `ios/v0.2.0`：公共桶契约追加（`BucketInfo` 的 `shared` / `sharePrefix` / `shareMaxObjects` / `shareMaxBytes` / `allowExts`）与数据面 `Meta` / `CacheControl`（含 `CreateMultipartUploadEx`），全部追加式升级。
 - 后续规划：更多示例（备份脚本、静态资源同步、CI 产物上传）与事件类型扩展。
 - 契约源文件 `proto/ios/open/v1/open.proto` 是控制面唯一事实源；平台后端复制同一份文件生成服务端桩。
 - SDK 方法签名稳定，能力上线后以新增方法方式扩展（不破坏现有接口）。
@@ -542,7 +579,7 @@ A：控制面单次调用默认 10 秒（`WithTimeout` 可调）。数据面是�
 
 | 路径 | 作用 |
 |---|---|
-| `ios.go` | 唯一入口：包注释 + `Client` / `Option` / `NewClient` / `Close` + 控制面 13 方法 + 数据面 29 方法 + 全部别名与转发 |
+| `ios.go` | 唯一入口：包注释 + `Client` / `Option` / `NewClient` / `Close` + 控制面 13 方法 + 数据面 36 方法 + 全部别名与转发 |
 | `types/` | 控制面公开数据模型与错误模型（`Normalize` 默认值、`APIError`、哨兵错误；零依赖） |
 | `sign/` | 公开控制面签名器：`Signer` 接口 + MD5 实现（`sign.New()`），供 `WithSigner` 使用 |
 | `notify/` | 公开事件通知接收件：`ParseEvent`（解析 + 验签）与 `VerifyEvent`（仅验签），constant-time 比对 |

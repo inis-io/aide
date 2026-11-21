@@ -13,7 +13,7 @@
 ## 目录结构
 
 ```
-├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 35 方法 + 全部别名与转发
+├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 36 方法 + 全部别名与转发
 ├── ios_test.go         # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、双端点派生
 ├── types/              # 公开：控制面请求/响应模型 + 错误模型（零依赖）
 │   ├── accesskey.go    # AccessKeyInfo（Secret 永不下发）
@@ -78,7 +78,7 @@ internal/s3（纯标准库，不依赖 types/sign/transport） ← 根包
 - **gRPC 错误映射**：`Unauthenticated` → `ErrInvalidSign`；其余 RPC 失败 → `ErrTransport`（文案带 `codes.Code`）；`OK + envelope.code != 200` → `*APIError`（`Raw` 为空）。
 - **控制面 13 端点不可自造**（与平台 `app/api/control/open-*.go` 逐一对齐）：`GET /api/open-accesskey/info`、`GET /api/open-bucket/list`、`POST /api/open-bucket/empty`、`POST /api/open-share/create`、`GET /api/open-share/list`、`POST /api/open-share/remove`、`GET /api/open-object/recycle`、`POST /api/open-object/restore`、`POST /api/open-object/purge`、`POST /api/open-object/clear`、`GET /api/open-usage/overview`、`GET /api/open-usage/buckets`、`GET /api/open-usage/egress-trend`。全部必签。
 - **gRPC metadata**：写 `x-ios-sign`（签名）；`accessKey`/`timestamp` 在消息体内，拦截器直接取。
-- **数据面约定**：SigV4 + `UNSIGNED-PAYLOAD`（请求体不预读哈希，流式直通）；`x-amz-meta-*` 键统一小写；`Upload` 分片编排固定「顺序读片 + 有界并发 + 任一失败自动 Abort」；预签名有效期硬上限 7 天（超出返回 `ErrInvalidRequest`），`PresignGetObjectWith` 可把额外查询参数（如网关图片处理串 `x-inis-process`）签入 canonical query（私有桶 blur-up 双 URL 必须走它，事后拼接会破坏签名），`ImageProcessURL` 纯本地拼公开桶处理链接零往返；数据面不套整体超时，`ctx` 由调用方全权控制。
+- **数据面约定**：SigV4 + `UNSIGNED-PAYLOAD`（请求体不预读哈希，流式直通）；`x-amz-meta-*` 键统一小写并按字典序装配（`PutInput` / `UploadInput` / `CreateInput` 的 `Meta`，`CacheControl` 原样写入 `Cache-Control`；`ObjectMeta.CacheControl` 回读）；分片初始化带元数据用 `CreateMultipartUploadEx`，旧 `CreateMultipartUpload` 保留为薄封装；`Upload` 分片编排固定「顺序读片 + 有界并发 + 任一失败自动 Abort」；预签名有效期硬上限 7 天（超出返回 `ErrInvalidRequest`），`PresignGetObjectWith` 可把额外查询参数（如网关图片处理串 `x-inis-process`）签入 canonical query（私有桶 blur-up 双 URL 必须走它，事后拼接会破坏签名），`ImageProcessURL` 纯本地拼公开桶处理链接零往返；数据面不套整体超时，`ctx` 由调用方全权控制。
 - **ResumeUpload 语义**：复用「同桶同键、最新 Initiated」的进行中会话；已传分片必须与本地上传布局一致（序号在界内、非末片大小 = partSize、末片大小 = 余量），不一致返回 `ErrInvalidRequest` 且**不自动中止**（保留现场，防误杀其他进程会话，治理入口是 `AbortMultipartUpload`）；已传分片信任网关记录不重核内容；调用方必须从头提供完整内容流，已传分片本地跳过（`io.ReadSeeker` 直接 Seek，否则读丢弃）；续传失败不自动 Abort（与 `Upload` 相反），供下次继续。
 - **DeleteObjects 语义**：超 1000 键 SDK 自动分批聚合；单键失败不阻断，逐键回传 `Errors`；不存在键按网关幂等语义归 `Deleted`。
 - **CopyObject 语义**：`X-Amz-Copy-Source` 按「源桶/源键」**原形态**拼接，不做 URL 编码（平台网关按原样解析，编码会破坏键查找）。

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -80,5 +81,45 @@ func TestSentinelErrors(t *testing.T) {
 	wrapped := errors.Join(ErrInvalidSign, errors.New("细节"))
 	if !errors.Is(wrapped, ErrInvalidSign) {
 		t.Fatalf("errors.Is 应命中 ErrInvalidSign")
+	}
+}
+
+// TestBucketInfoSharedFields - 公共桶契约字段按服务端 camelCase 解析；旧响应缺字段时归零（向后兼容）
+func TestBucketInfoSharedFields(t *testing.T) {
+
+	raw := `{
+		"name": "emoji",
+		"region": "us-east-1",
+		"acl": "public-read",
+		"versioning": "off",
+		"status": "active",
+		"storageClass": "STANDARD",
+		"shared": true,
+		"sharePrefix": "community/",
+		"shareMaxObjects": 500,
+		"shareMaxBytes": 524288000,
+		"allowExts": ".png,.apng,.gif,.webp,.jpg,.jpeg,.json",
+		"createAt": 1700000000000,
+		"updateAt": 1700000000001
+	}`
+
+	var info BucketInfo
+	if err := json.Unmarshal([]byte(raw), &info); err != nil {
+		t.Fatalf("BucketInfo 解析失败：%v", err)
+	}
+	if !info.Shared || info.SharePrefix != "community/" ||
+		info.ShareMaxObjects != 500 || info.ShareMaxBytes != 524288000 ||
+		info.AllowExts != ".png,.apng,.gif,.webp,.jpg,.jpeg,.json" {
+		t.Fatalf("公共桶字段解析不符合预期：%+v", info)
+	}
+
+	// 老版本服务端响应不含新字段：解析应成功且字段保持零值（追加式契约）
+	var legacy BucketInfo
+	if err := json.Unmarshal([]byte(`{"name":"photos","acl":"private"}`), &legacy); err != nil {
+		t.Fatalf("旧版 BucketInfo 解析失败：%v", err)
+	}
+	if legacy.Shared || legacy.SharePrefix != "" || legacy.ShareMaxObjects != 0 ||
+		legacy.ShareMaxBytes != 0 || legacy.AllowExts != "" {
+		t.Fatalf("旧版响应缺字段时应保持零值：%+v", legacy)
 	}
 }

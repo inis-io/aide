@@ -135,6 +135,9 @@ type PutResult = s3.PutResult
 // UploadRequest - 高级上传输入（按阈值自动单 PUT / 分片编排）
 type UploadRequest = s3.UploadInput
 
+// CreateMultipartUploadRequest - 分片会话初始化输入（CreateMultipartUploadEx 使用；支持 Meta / CacheControl）
+type CreateMultipartUploadRequest = s3.CreateInput
+
 // GetOptions - 下载选项（Range 字节区间）
 type GetOptions = s3.GetOptions
 
@@ -968,7 +971,7 @@ func (this *Client) ListBuckets(ctx context.Context) ([]BucketRow, error) {
 // ============================= 数据面：对象 - 开始 =============================
 
 // PutObject - 简单上传（单请求流式直通，默认流式 MD5 与响应 ETag 回核）
-// 大对象请用 Upload（按阈值自动分片并发）。
+// 大对象请用 Upload（按阈值自动分片并发）；Meta（如 {"name": "摸鱼"}）与 CacheControl 随请求头写入。
 /**
  * @param ctx context.Context - 调用上下文（流式不套整体超时）
  * @param req *PutRequest - 上传输入（Body 不整读内存，调用方负责关闭）
@@ -1366,6 +1369,34 @@ func (this *Client) CreateMultipartUpload(ctx context.Context, bucket, key, mime
 	}
 
 	return client.CreateMultipartUpload(ctx, bucket, key, mime)
+}
+
+// CreateMultipartUploadEx - 初始化分片会话，返回 uploadId（支持用户元数据与 Cache-Control；低层原语）
+/**
+ * @param ctx context.Context - 调用上下文
+ * @param req *CreateMultipartUploadRequest - 会话初始化输入（Bucket/Key 必填；Meta/CacheControl 可选）
+ * @return string - 分片会话 ID
+ * @return error - ErrInvalidRequest / ErrTransport / *S3Error
+ * @example：
+ * 	uploadId, err := client.CreateMultipartUploadEx(ctx, &ios.CreateMultipartUploadRequest{
+ * 	    Bucket: "emoji", Key: "community/big.gif", Mime: "image/gif",
+ * 	    Meta: map[string]string{"name": "大图"}, CacheControl: "public, max-age=2592000",
+ * 	})
+ */
+func (this *Client) CreateMultipartUploadEx(ctx context.Context, req *CreateMultipartUploadRequest) (string, error) {
+
+	client, err := this.data()
+	if err != nil {
+		return "", err
+	}
+	if req == nil {
+		return "", fmt.Errorf("%w：分片初始化请求不能为空", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.Bucket) == "" || strings.TrimSpace(req.Key) == "" {
+		return "", fmt.Errorf("%w：bucket 与 key 不能为空", ErrInvalidRequest)
+	}
+
+	return client.CreateMultipartUploadEx(ctx, *req)
 }
 
 // UploadPart - 上传单个分片（流式 + MD5 回核 ETag）

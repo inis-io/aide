@@ -61,6 +61,10 @@ type fakeGateway struct {
 	uploads map[string]*fakeUpload
 	// lastRange - 最近一次 GET 的 Range 头
 	lastRange string
+	// putHeaders - 最近一次 PutObject 的请求头（Meta/CacheControl 透传断言锚点）
+	putHeaders http.Header
+	// initiateHeaders - 最近一次 CreateMultipartUpload 的请求头（Meta/CacheControl 透传断言锚点）
+	initiateHeaders http.Header
 	// completeBody - 最近一次 Complete 的请求体
 	completeBody []byte
 	// abortIds - 已中止的 uploadId 序列
@@ -368,6 +372,7 @@ func (this *fakeGateway) initiate(response http.ResponseWriter, request *http.Re
 		this.writeError(response, http.StatusNotFound, "NoSuchBucket", "桶不存在", "/"+bucket)
 		return
 	}
+	this.initiateHeaders = request.Header.Clone()
 	id := fmt.Sprintf("upload-%d", len(this.uploads)+1)
 	this.uploads[id] = &fakeUpload{
 		bucket: bucket, key: key,
@@ -490,6 +495,7 @@ func (this *fakeGateway) putObject(response http.ResponseWriter, request *http.R
 		this.writeError(response, http.StatusNotFound, "NoSuchBucket", "桶不存在", "/"+bucket)
 		return
 	}
+	this.putHeaders = request.Header.Clone()
 
 	data, _ := io.ReadAll(request.Body)
 	mime := request.Header.Get("Content-Type")
@@ -517,6 +523,7 @@ func (this *fakeGateway) objectHeaders(response http.ResponseWriter, item fakeOb
 	response.Header().Set("Content-Length", strconv.Itoa(len(item.data)))
 	response.Header().Set("Last-Modified", fakeModTime.UTC().Format(http.TimeFormat))
 	response.Header().Set("X-Amz-Meta-Owner", "rabbit")
+	response.Header().Set("Cache-Control", "public, max-age=604800")
 }
 
 // getObject - GET /{bucket}/{key}（支持 Range）

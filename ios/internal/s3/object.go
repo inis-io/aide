@@ -9,6 +9,7 @@ import (
 	"hash"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ type ObjectMeta struct {
 	LastModified time.Time
 	// Meta - 用户元数据（x-amz-meta-*，键已去除前缀）
 	Meta map[string]string
+	// CacheControl - Cache-Control（写入时设置，GET/HEAD 原样透传）
+	CacheControl string
 	// VersionId - 版本号（无版本控制为 "null"）
 	VersionId string
 }
@@ -84,6 +87,10 @@ type PutInput struct {
 	Body io.Reader
 	// Mime - Content-Type（空 = 网关嗅探/默认）
 	Mime string
+	// Meta - 用户元数据（序列化为 x-amz-meta-* 头，键统一小写；如 {"name": "摸鱼"} 写对象备注名）
+	Meta map[string]string
+	// CacheControl - Cache-Control 头（空 = 不携带；静态资源长缓存依赖它）
+	CacheControl string
 	// VerifyETag - 流式计算 MD5 并与响应 ETag 回核（默认开启；调用方置 false 关闭）
 	VerifyETag bool
 }
@@ -98,13 +105,59 @@ type PutResult struct {
 	VersionId string
 }
 
+// writeHeaders - 写入类请求头装配（Content-Type + 用户元数据 + Cache-Control）
+// 用户元数据键统一小写并按字典序装配，保证请求头集合确定性。
+func writeHeaders(mime string, meta map[string]string, cacheControl string) map[string]string {
+
+	headers := map[string]string{}
+	if mime != "" {
+		headers["Content-Type"] = mime
+	}
+	for _, pair := range userMetaHeaders(meta) {
+		headers[pair[0]] = pair[1]
+	}
+	if cacheControl != "" {
+		headers["Cache-Control"] = cacheControl
+	}
+	return headers
+}
+
+// userMetaHeaders - 用户元数据头键值对（前缀 x-amz-meta-，键去空白并统一小写后按字典序返回）
+func userMetaHeaders(meta map[string]string) [][2]string {
+
+	rawKeys := make([]string, 0, len(meta))
+	for key := range meta {
+		rawKeys = append(rawKeys, key)
+	}
+	// 先对原始键排序再归一，大小写重复键的覆盖顺序也是确定的
+	sort.Strings(rawKeys)
+
+	normalized := make(map[string]string, len(meta))
+	for _, key := range rawKeys {
+		lower := strings.ToLower(strings.TrimSpace(key))
+		if lower == "" {
+			continue
+		}
+		normalized[lower] = meta[key]
+	}
+
+	keys := make([]string, 0, len(normalized))
+	for key := range normalized {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	pairs := make([][2]string, 0, len(keys))
+	for _, key := range keys {
+		pairs = append(pairs, [2]string{"x-amz-meta-" + key, normalized[key]})
+	}
+	return pairs
+}
+
 // PutObject - 简单上传（PUT /{bucket}/{key}，流式直通）
 func (this *Client) PutObject(ctx context.Context, in PutInput) (*PutResult, error) {
 
-	headers := map[string]string{}
-	if in.Mime != "" {
-		headers["Content-Type"] = in.Mime
-	}
+	headers := writeHeaders(in.Mime, in.Meta, in.CacheControl)
 
 	body := in.Body
 	var tracker *md5Tracker
@@ -257,11 +310,12 @@ func (this *Client) ListObjects(ctx context.Context, in ListInput) (*ListResult,
 func headerMeta(header http.Header) ObjectMeta {
 
 	meta := ObjectMeta{
-		ETag:      trimETag(header.Get("ETag")),
-		Size:      headerSize(header.Get("Content-Length")),
-		Mime:      header.Get("Content-Type"),
-		VersionId: header.Get("x-amz-version-id"),
-		Meta:      map[string]string{},
+		ETag:         trimETag(header.Get("ETag")),
+		Size:         headerSize(header.Get("Content-Length")),
+		Mime:         header.Get("Content-Type"),
+		CacheControl: header.Get("Cache-Control"),
+		VersionId:    header.Get("x-amz-version-id"),
+		Meta:         map[string]string{},
 	}
 	if meta.VersionId == "" {
 		meta.VersionId = "null"

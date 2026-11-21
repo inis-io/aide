@@ -35,6 +35,10 @@ type UploadInput struct {
 	Size int64
 	// Mime - Content-Type（空 = 网关嗅探/默认）
 	Mime string
+	// Meta - 用户元数据（x-amz-meta-*，分片会话初始化时写入；单 PUT 路径同样透传）
+	Meta map[string]string
+	// CacheControl - Cache-Control（分片会话初始化时写入；单 PUT 路径同样透传）
+	CacheControl string
 	// PartSize - 分片大小（0 = 8MB；自动上调保证片数 ≤10000）
 	PartSize int64
 	// Concurrency - 分片并发数（0 = 4）
@@ -51,20 +55,29 @@ type Part struct {
 	Size int64
 }
 
-// CreateMultipartUpload - 初始化分片会话（POST /{bucket}/{key}?uploads）
-func (this *Client) CreateMultipartUpload(ctx context.Context, bucket, key, mime string) (string, error) {
+// CreateInput - 分片会话初始化输入（CreateMultipartUploadEx）
+type CreateInput struct {
+	// Bucket - 桶名
+	Bucket string
+	// Key - 对象键
+	Key string
+	// Mime - Content-Type（空 = 网关缺省）
+	Mime string
+	// Meta - 用户元数据（序列化为 x-amz-meta-* 头，键统一小写；如 {"name": "摸鱼"} 写对象备注名）
+	Meta map[string]string
+	// CacheControl - Cache-Control 头（空 = 不携带）
+	CacheControl string
+}
 
-	headers := map[string]string{}
-	if mime != "" {
-		headers["Content-Type"] = mime
-	}
+// CreateMultipartUploadEx - 初始化分片会话（POST /{bucket}/{key}?uploads；支持用户元数据与 Cache-Control）
+func (this *Client) CreateMultipartUploadEx(ctx context.Context, in CreateInput) (string, error) {
 
 	response, err := this.do(ctx, requestInput{
 		method:  http.MethodPost,
-		bucket:  bucket,
-		key:     key,
+		bucket:  in.Bucket,
+		key:     in.Key,
 		query:   map[string]string{"uploads": ""},
-		headers: headers,
+		headers: writeHeaders(in.Mime, in.Meta, in.CacheControl),
 	})
 	if err != nil {
 		return "", err
@@ -80,6 +93,12 @@ func (this *Client) CreateMultipartUpload(ctx context.Context, bucket, key, mime
 	}
 
 	return result.UploadId, nil
+}
+
+// CreateMultipartUpload - 初始化分片会话（不含元数据的薄封装；完整能力用 CreateMultipartUploadEx）
+func (this *Client) CreateMultipartUpload(ctx context.Context, bucket, key, mime string) (string, error) {
+
+	return this.CreateMultipartUploadEx(ctx, CreateInput{Bucket: bucket, Key: key, Mime: mime})
 }
 
 // UploadPart - 上传分片（PUT /{bucket}/{key}?partNumber=N&uploadId=U，流式 + MD5 回核）
@@ -224,7 +243,8 @@ func (this *Client) Upload(ctx context.Context, in UploadInput) (*PutResult, err
 
 	if in.Size <= partSize {
 		return this.PutObject(ctx, PutInput{
-			Bucket: in.Bucket, Key: in.Key, Body: in.Body, Mime: in.Mime, VerifyETag: true,
+			Bucket: in.Bucket, Key: in.Key, Body: in.Body, Mime: in.Mime,
+			Meta: in.Meta, CacheControl: in.CacheControl, VerifyETag: true,
 		})
 	}
 
@@ -233,7 +253,10 @@ func (this *Client) Upload(ctx context.Context, in UploadInput) (*PutResult, err
 		concurrency = 4
 	}
 
-	uploadId, err := this.CreateMultipartUpload(ctx, in.Bucket, in.Key, in.Mime)
+	uploadId, err := this.CreateMultipartUploadEx(ctx, CreateInput{
+		Bucket: in.Bucket, Key: in.Key, Mime: in.Mime,
+		Meta: in.Meta, CacheControl: in.CacheControl,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -438,6 +461,7 @@ func (this *Client) ListMultipartUploads(ctx context.Context, bucket, prefix str
 // 调用方必须从头提供完整内容流；已上传分片的字节区间由 SDK 在本地跳过
 // （Body 实现 io.ReadSeeker 时直接 Seek，否则读丢弃）。已传分片信任网关记录（大小对齐布局即采纳，
 // 不重新校验内容），如需强一致请先 AbortMultipartUpload 后重新全量上传。
+// 复用已有会话时，Meta / CacheControl 沿用会话创建时的取值（S3 语义：元数据在初始化时确定）。
 func (this *Client) ResumeUpload(ctx context.Context, in UploadInput) (*PutResult, error) {
 
 	if err := checkUploadInput(&in); err != nil {
@@ -448,7 +472,8 @@ func (this *Client) ResumeUpload(ctx context.Context, in UploadInput) (*PutResul
 
 	if in.Size <= partSize {
 		return this.PutObject(ctx, PutInput{
-			Bucket: in.Bucket, Key: in.Key, Body: in.Body, Mime: in.Mime, VerifyETag: true,
+			Bucket: in.Bucket, Key: in.Key, Body: in.Body, Mime: in.Mime,
+			Meta: in.Meta, CacheControl: in.CacheControl, VerifyETag: true,
 		})
 	}
 
@@ -474,7 +499,10 @@ func (this *Client) ResumeUpload(ctx context.Context, in UploadInput) (*PutResul
 
 	// 无进行中会话：退化为全量分片上传
 	if current == nil {
-		uploadId, createErr := this.CreateMultipartUpload(ctx, in.Bucket, in.Key, in.Mime)
+		uploadId, createErr := this.CreateMultipartUploadEx(ctx, CreateInput{
+			Bucket: in.Bucket, Key: in.Key, Mime: in.Mime,
+			Meta: in.Meta, CacheControl: in.CacheControl,
+		})
 		if createErr != nil {
 			return nil, createErr
 		}
