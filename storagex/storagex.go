@@ -620,12 +620,23 @@ func fileNameFromPath(path string) string {
 }
 
 // splitPublicPath - 将公开路径转换为相对存储根的路径
-// root 为存储根目录名（storage、AIDE），返回空串表示存储根本身，false 表示路径非法或越界
+// root 为存储根目录名（storage、AIDE；空串 = 驱动 Path 留空，桶/盘根目录直存，整个公开路径即相对 key），
+// 返回空串表示存储根本身，false 表示路径非法或越界
 func splitPublicPath(root, path string) (string, bool) {
 	root = strings.Trim(strings.TrimSpace(root), "/")
 	path = strings.Trim(strings.TrimSpace(strings.ReplaceAll(path, "\\", "/")), "/")
 	if utils.Is.Empty(root) {
-		return "", false
+		if utils.Is.Empty(path) {
+			return "", true
+		}
+		rel := pathpkg.Clean(path)
+		if rel == ".." || strings.HasPrefix(rel, "../") {
+			return "", false
+		}
+		if rel == "." {
+			return "", true
+		}
+		return rel, true
 	}
 	if utils.Is.Empty(path) || path == root {
 		return "", true

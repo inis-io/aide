@@ -724,6 +724,55 @@ func TestDriverSignedURLKey(t *testing.T) {
 	}
 }
 
+// TestSplitPublicPathEmptyRoot - 空根（驱动 Path 留空 = 桶/盘根目录直存）：
+// 公开路径整体即相对 key，根自身与路径穿越口径不变
+func TestSplitPublicPathEmptyRoot(t *testing.T) {
+
+	rel, ok := splitPublicPath("", "/2026-11/21/x.jpg")
+	if !ok || rel != "2026-11/21/x.jpg" {
+		t.Fatalf("空根换算失败：rel=%q ok=%v", rel, ok)
+	}
+	// 空路径 = 根自身
+	if rel, ok = splitPublicPath("", ""); !ok || rel != "" {
+		t.Fatalf("空根空路径应为根自身：rel=%q ok=%v", rel, ok)
+	}
+	// 路径穿越一律拒绝
+	for _, bad := range []string{"../escape", "/a/../../escape", "/.."} {
+		if _, ok = splitPublicPath("", bad); ok {
+			t.Fatalf("空根穿越路径 %q 应拒绝", bad)
+		}
+	}
+	// 非空根回归：越根拒绝、根内正常换算
+	if _, ok = splitPublicPath("AIDE", "/OTHER/x.jpg"); ok {
+		t.Fatalf("非空根越根路径应拒绝")
+	}
+	if rel, ok = splitPublicPath("AIDE", "/AIDE/x.jpg"); !ok || rel != "x.jpg" {
+		t.Fatalf("非空根回归失败：rel=%q ok=%v", rel, ok)
+	}
+}
+
+// TestDriverSignedURLEmptyRoot - 空根驱动的 SignedURL：公开路径即桶根下 key，签名 URL 不多层前缀（本地计算签名，不联网）
+func TestDriverSignedURLEmptyRoot(t *testing.T) {
+
+	factory, err := newOssStore(Config{OSS: OSSConfig{
+		AccessKeyId: "test-access-key", AccessKeySecret: "test-secret", Bucket: "smoke-bucket", Endpoint: "oss-cn-guangzhou.aliyuncs.com", Path: "",
+	}})
+	if err != nil {
+		t.Fatalf("构造 OSS 驱动失败：%v", err)
+	}
+	signed, err := NewDriver(factory).SignedURL("/artifacts/app.bin", time.Minute)
+	if err != nil {
+		t.Fatalf("空根 SignedURL 失败：%v", err)
+	}
+	parsed, err := url.Parse(signed)
+	if err != nil {
+		t.Fatalf("预签名 URL 解析失败：%v", err)
+	}
+	if parsed.Path != "/artifacts/app.bin" {
+		t.Fatalf("空根签名 URL 路径不符：%s", signed)
+	}
+}
+
 // TestLocalMultipart - 验证本地驱动分片全生命周期：Init → 乱序上传 → ListParts 升序 → Complete 逐字节一致且临时区清空 → Abort 清理
 func TestLocalMultipart(t *testing.T) {
 

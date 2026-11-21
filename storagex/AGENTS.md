@@ -26,7 +26,7 @@
 - **Driver 层公开路径入口**：`SignedURL` / `Get` / `InitMultipart` / `UploadPart` / `ListParts` / `CompleteMultipart` / `AbortMultipart` 接收**公开路径**（带前导斜杠），由 Driver 层统一 `splitPublicPath` 换算为相对根 key 后断言调用——消费方（im/licen-hub）不得自行 TrimPrefix 拼根，历史双前缀缺陷即源于此。
 - **`Store` 契约**：所有方法的 key / dir / src / dst 均为**相对存储根**的路径（不含根目录名），由 Driver 层完成公开路径换算与路径穿越校验后传入；`List` 返回条目只需填 `Name` / `IsDir` / `Size` / `ModTime`，`Path` / `Url` 由 Driver 层组装。
 - **`Driver` 链式包装**（`Ctx` / `Dir` / `Name` / `Ext` / `Put` / `List` / `MakeDir` / `Remove` / `Move` / `Root`），**值语义**：每次链式调用返回副本。**对象命名统一收敛在 Driver 层**（缺省目录 `年-月/日/`、缺省文件名 `毫秒时间戳-随机后缀` 防同毫秒撞名）；`Name` 统一 `path.Base` 去目录成分。`storagex.New("oss", config)` 创建独立实例。
-- **公开路径语义**：根为 `store.Root()`（local 取根目录最后一段，OSS/COS 为配置的 `Path`），`Put` 响应与 `List` 条目的 `Path` 带前导 `/`，`Url = Domain + Path`；`List` 的 `Prefix` 为 Driver 层页内过滤（云端分页场景命中数量可能少于 Limit）。
+- **公开路径语义**：根为 `store.Root()`（local 取根目录最后一段，OSS/COS 为配置的 `Path`），`Put` 响应与 `List` 条目的 `Path` 带前导 `/`，`Url = Domain + Path`；`List` 的 `Prefix` 为 Driver 层页内过滤（云端分页场景命中数量可能少于 Limit）。**v0.0.5 起支持空根**：驱动 `Path` 留空 = 桶/盘根目录直存，`splitPublicPath` 视整个公开路径为相对 key（仍挡 `..` 穿越），各驱动 `key()` 空根时不得补前导斜杠。
 - **云驱动不自动建桶**：OSS/COS 的 Bucket 需预先创建，配置不完整（缺 AK/SK/Bucket 等）在工厂阶段直接报错，不做静默降级；初始化失败时全局位用 `storeError` 占位，所有操作返回原始初始化错误。
 - **配置自包含**：`storagex.Config`（含 `local` / `oss` / `cos` 三组内置驱动配置，外部扩展配置放 `Config.Options`）；`normConfig()` 补齐默认值（引擎未注册回退 `local`，本地根目录默认 `public/storage`、域名默认 `http://localhost:2000`）。
 - **全局门面**：控制器单例 `storagex.Inst`（`Init` / `ReloadIfChanged`，`sync.RWMutex` 保护）+ 全局实例 `storagex.Storage`。

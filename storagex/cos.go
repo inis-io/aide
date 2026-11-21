@@ -166,10 +166,15 @@ func (this *CosStore) Move(ctx context.Context, src, dst string) (err error) {
 // key - 相对路径转对象 Key
 func (this *CosStore) key(rel string) string {
 	rel = strings.Trim(rel, "/")
+	root := this.Root()
 	if utils.Is.Empty(rel) {
-		return this.Root()
+		return root
 	}
-	return this.Root() + "/" + rel
+	// 空根（Path 留空 = 桶根直存）：rel 即对象 key，不补前导斜杠
+	if utils.Is.Empty(root) {
+		return rel
+	}
+	return root + "/" + rel
 }
 
 // SignedURL - 签发 COS 预签名 URL（GET，expire 内有效，SDK 可直接下载）
