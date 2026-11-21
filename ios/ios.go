@@ -971,11 +971,13 @@ func (this *Client) ListBuckets(ctx context.Context) ([]BucketRow, error) {
 // ============================= 数据面：对象 - 开始 =============================
 
 // PutObject - 简单上传（单请求流式直通，默认流式 MD5 与响应 ETag 回核）
+// 默认开启秒传探测：Body 实现 io.Seeker 时先本地算全量 SHA-256 探测，命中零字节上行；
+// 未命中/旧网关/网络失败自动回退正常上传。InstantUpload 显式 false 可关闭，OnInstantHit 可感知命中。
 // 大对象请用 Upload（按阈值自动分片并发）；Meta（如 {"name": "摸鱼"}）与 CacheControl 随请求头写入。
 /**
  * @param ctx context.Context - 调用上下文（流式不套整体超时）
  * @param req *PutRequest - 上传输入（Body 不整读内存，调用方负责关闭）
- * @return *PutResult - ETag / 实际写入字节数 / 版本号
+ * @return *PutResult - ETag / 实际写入字节数 / 版本号（秒传命中时 Size 为本地内容长度）
  * @return error - ErrInvalidRequest / ErrTransport / *S3Error
  * @example：
  * 	file, _ := os.Open("a.jpg")

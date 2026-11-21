@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
@@ -93,6 +94,12 @@ type PutInput struct {
 	CacheControl string
 	// VerifyETag - 流式计算 MD5 并与响应 ETag 回核（默认开启；调用方置 false 关闭）
 	VerifyETag bool
+	// InstantUpload - 秒传探测开关（nil = 默认开启；显式 false 关闭）
+	// 开启且 Body 实现 io.Seeker 时：本地流式算全量 SHA-256 → POST ?instant 探测；
+	// 命中直接返回（零字节上行），未命中/旧网关/网络/协议错误一律复位内容流后回退原上传。
+	InstantUpload *bool
+	// OnInstantHit - 秒传命中回调（key 为对象键；未命中、回退上传均不触发）
+	OnInstantHit func(key string)
 }
 
 // PutResult - 上传结果
@@ -155,7 +162,15 @@ func userMetaHeaders(meta map[string]string) [][2]string {
 }
 
 // PutObject - 简单上传（PUT /{bucket}/{key}，流式直通）
+// 默认先做秒传探测（InstantUpload=nil 即开启）：可 Seek 流命中零字节上行，
+// 未命中或探测失败自动回退原上传，调用方无感。
 func (this *Client) PutObject(ctx context.Context, in PutInput) (*PutResult, error) {
+
+	if result, hit, err := this.instantProbe(ctx, in); err != nil {
+		return nil, err
+	} else if hit {
+		return result, nil
+	}
 
 	headers := writeHeaders(in.Mime, in.Meta, in.CacheControl)
 
@@ -198,6 +213,80 @@ func (this *Client) PutObject(ctx context.Context, in PutInput) (*PutResult, err
 	}
 
 	return result, nil
+}
+
+// instantEnabled - 秒传探测是否开启（nil = 默认开启，显式 false 关闭）
+func instantEnabled(in PutInput) bool {
+
+	return in.InstantUpload == nil || *in.InstantUpload
+}
+
+// instantProbe - 秒传探测（可 Seek 流本地全量 SHA-256 → POST /{bucket}/{key}?instant）
+// 命中返回 (result, true, nil)；未命中、旧网关、网络/协议错误静默返回 (nil, false, nil)，内容流已复位；
+// 探测读取后无法复位内容流时返回错误（不能带着已被消费的流继续上传）。
+func (this *Client) instantProbe(ctx context.Context, in PutInput) (*PutResult, bool, error) {
+
+	if !instantEnabled(in) {
+		return nil, false, nil
+	}
+	seeker, ok := in.Body.(io.Seeker)
+	if !ok {
+		return nil, false, nil
+	}
+	start, err := seeker.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, false, nil
+	}
+
+	hasher := sha256.New()
+	size, readErr := io.Copy(hasher, in.Body)
+	if _, seekErr := seeker.Seek(start, io.SeekStart); seekErr != nil {
+		return nil, false, fmt.Errorf("%w：秒传探测后无法复位内容流（%v）", ErrTransport, seekErr)
+	}
+	if readErr != nil {
+		// 读取失败按探测失败处理，回退原上传（原上传会再次读取并暴露真实错误）
+		return nil, false, nil
+	}
+
+	headers := writeHeaders(in.Mime, in.Meta, in.CacheControl)
+	headers["x-inis-sha256"] = hex.EncodeToString(hasher.Sum(nil))
+	headers["x-inis-size"] = strconv.FormatInt(size, 10)
+
+	response, err := this.do(ctx, requestInput{
+		method:  http.MethodPost,
+		bucket:  in.Bucket,
+		key:     in.Key,
+		query:   map[string]string{"instant": ""},
+		headers: headers,
+	})
+	if err != nil {
+		// 404 未命中 / 403 越权 / 旧网关无路由 / 网络失败：静默回退原上传
+		return nil, false, nil
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, false, nil
+	}
+	var parsed xmlInstantResult
+	if err = xml.Unmarshal(raw, &parsed); err != nil || !parsed.Hit {
+		// 200 但响应非 InstantResult 或 Hit=false：按未命中处理，绝不误判命中
+		return nil, false, nil
+	}
+
+	result := &PutResult{
+		ETag:      trimETag(parsed.ETag),
+		Size:      size,
+		VersionId: response.Header.Get("x-amz-version-id"),
+	}
+	if result.VersionId == "" {
+		result.VersionId = "null"
+	}
+	if in.OnInstantHit != nil {
+		in.OnInstantHit(in.Key)
+	}
+	return result, true, nil
 }
 
 // GetOptions - 下载选项

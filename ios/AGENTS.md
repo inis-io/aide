@@ -5,7 +5,7 @@
 ## 模块定位
 
 - 模块路径 `github.com/inis-io/aide/ios`（见 `go.mod`），**嵌套独立模块**：不参与父模块 `go build ./...`。
-- 定位：inis 对象存储平台（Inis Object Storage）的**接入方 SDK**，一个模块覆盖两个平面——控制面（密钥自检 / 桶管理 / 分享 / 回收站 / 用量，HTTP+gRPC 双链路签名）与数据面（桶与对象读写删列、分片上传、批量与拷贝、断点续传、桶配置族、事件通知、STS、预签名，直连 S3 兼容网关）。
+- 定位：inis 对象存储平台（Inis Object Storage）的**接入方 SDK**，一个模块覆盖两个平面——控制面（密钥自检 / 桶管理 / 分享 / 回收站 / 用量，HTTP+gRPC 双链路签名）与数据面（桶与对象读写删列、秒传探测、分片上传、批量与拷贝、断点续传、桶配置族、事件通知、STS、预签名，直连 S3 兼容网关）。
 - 直接依赖仅 `google.golang.org/grpc` + `google.golang.org/protobuf`（默认 gRPC 链路所需）；HTTP 链路、签名器与数据面为纯标准库实现。**新增依赖前先确认是否真的必要**。
 - 控制面契约唯一事实源：`proto/ios/open/v1/open.proto`（平台后端复制同一份文件生成服务端桩）；生成的客户端桩 `proto/gen/ios/open/v1/*.pb.go`（包名 `openv1`）**提交入库**，接入方 `go get` 后无需安装 protoc。
 - **接入方只 import 根包**：根目录仅保留 `ios.go` 一个入口文件，全部公开类型以别名、哨兵与函数转发的方式从根包导出；实现按职责拆在 `types` / `sign` / `notify` / `internal/transport` / `internal/s3`。
@@ -35,7 +35,7 @@
 │       ├── signv4.go     # SigV4 签名（UNSIGNED-PAYLOAD）
 │       ├── client.go     # 底层请求装配、XML 错误解析（S3Error）
 │       ├── bucket.go     # CreateBucket/DeleteBucket/HeadBucket/ListBuckets
-│       ├── object.go     # PutObject/GetObject/HeadObject/DeleteObject/ListObjects(V2)
+│       ├── object.go     # PutObject（含秒传探测）/GetObject/HeadObject/DeleteObject/ListObjects(V2)
 │       ├── delete.go     # DeleteObjects（超千自动分批，单键失败不阻断）
 │       ├── copy.go       # CopyObject（源按原形态拼接，不做 URL 编码）
 │       ├── multipart.go  # 分片编排 + ListMultipartUploads + ResumeUpload 断点续传
@@ -79,6 +79,7 @@ internal/s3（纯标准库，不依赖 types/sign/transport） ← 根包
 - **控制面 13 端点不可自造**（与平台 `app/api/control/open-*.go` 逐一对齐）：`GET /api/open-accesskey/info`、`GET /api/open-bucket/list`、`POST /api/open-bucket/empty`、`POST /api/open-share/create`、`GET /api/open-share/list`、`POST /api/open-share/remove`、`GET /api/open-object/recycle`、`POST /api/open-object/restore`、`POST /api/open-object/purge`、`POST /api/open-object/clear`、`GET /api/open-usage/overview`、`GET /api/open-usage/buckets`、`GET /api/open-usage/egress-trend`。全部必签。
 - **gRPC metadata**：写 `x-ios-sign`（签名）；`accessKey`/`timestamp` 在消息体内，拦截器直接取。
 - **数据面约定**：SigV4 + `UNSIGNED-PAYLOAD`（请求体不预读哈希，流式直通）；`x-amz-meta-*` 键统一小写并按字典序装配（`PutInput` / `UploadInput` / `CreateInput` 的 `Meta`，`CacheControl` 原样写入 `Cache-Control`；`ObjectMeta.CacheControl` 回读）；分片初始化带元数据用 `CreateMultipartUploadEx`，旧 `CreateMultipartUpload` 保留为薄封装；`Upload` 分片编排固定「顺序读片 + 有界并发 + 任一失败自动 Abort」；预签名有效期硬上限 7 天（超出返回 `ErrInvalidRequest`），`PresignGetObjectWith` 可把额外查询参数（如网关图片处理串 `x-inis-process`）签入 canonical query（私有桶 blur-up 双 URL 必须走它，事后拼接会破坏签名），`ImageProcessURL` 纯本地拼公开桶处理链接零往返；数据面不套整体超时，`ctx` 由调用方全权控制。
+- **秒传探测（P2）**：`PutObject` 默认先走秒传——`PutInput.InstantUpload` 为 nil 即开启（显式 `false` 关闭），仅当 `Body` 实现 `io.Seeker` 时生效：保存原偏移 → 流式 SHA-256 + size → Seek 复位 → 签名 `POST /{bucket}/{key}?instant`（头 `x-inis-sha256` / `x-inis-size`，并透传 `Content-Type` / `x-amz-meta-*` / `Cache-Control`）。`200 + InstantResult.Hit=true` 直接返回（ETag 取 XML，Size 取本地长度，VersionId 取响应头或 `null`，触发 `OnInstantHit(key)`）；未命中 / 404 / 403 / 旧网关 / 网络 / 协议错误一律静默回退原上传，不得把探测失败抛给调用方。不可 Seek 的纯流跳过探测；探测后无法复位流属本地流错误，返回 `ErrTransport`（不能带着已消费的流继续上传）。`Upload` / `ResumeUpload` 的小文件单 PUT 路径复用 `PutObject`，自动继承该能力。
 - **ResumeUpload 语义**：复用「同桶同键、最新 Initiated」的进行中会话；已传分片必须与本地上传布局一致（序号在界内、非末片大小 = partSize、末片大小 = 余量），不一致返回 `ErrInvalidRequest` 且**不自动中止**（保留现场，防误杀其他进程会话，治理入口是 `AbortMultipartUpload`）；已传分片信任网关记录不重核内容；调用方必须从头提供完整内容流，已传分片本地跳过（`io.ReadSeeker` 直接 Seek，否则读丢弃）；续传失败不自动 Abort（与 `Upload` 相反），供下次继续。
 - **DeleteObjects 语义**：超 1000 键 SDK 自动分批聚合；单键失败不阻断，逐键回传 `Errors`；不存在键按网关幂等语义归 `Deleted`。
 - **CopyObject 语义**：`X-Amz-Copy-Source` 按「源桶/源键」**原形态**拼接，不做 URL 编码（平台网关按原样解析，编码会破坏键查找）。
@@ -126,7 +127,7 @@ cd ios && protoc --proto_path=proto \
 - `sign/`：17 组黄金向量、`sign` 键剔除、`Value` 格式化逐类型（含 0/false 保留、毫秒时间戳不用科学计数法）。
 - `notify/`：黄金向量（黄金报文 + 黄金密钥 + 黄金签名逐字节一致）、大写签名归一、报文篡改 / 错误密钥 / 空参拒绝、字段完整性、缺头 / nil 头拒绝、坏 JSON 分层（验签过但载荷非法归普通错误而非 `ErrInvalidSign`）。
 - `internal/transport/`：`httptest` 假平台覆盖端点/方法/默认值/签名复算/`*APIError`/非法 JSON/网络错误/未知操作；`bufconn` + 手写 `OpenServiceServer` 覆盖 metadata 验签、`Unauthenticated → ErrInvalidSign`、空信封与业务错误、状态错误 → `ErrTransport`、拨号目标归一、关闭幂等；`consistency_test.go` 校验双链路同签名。
-- `internal/s3/`：`signv4_test.go` 锚定 AWS 官方签名向量（测试密钥 `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`，注意是斜杠 `/bPxRfiCY`）；`client_test.go` 用内存假网关覆盖桶/对象/分片/预签名与 XML 错误解析；`presign_extra_test.go` 覆盖叠加查询参数签入（处理串进入 canonical query、签名随参数变化、nil 参数与裸链等价）与 `ImageProcessURL` 拼链转义；`p2_test.go` 扩展假网关（STS/批删/拷贝/会话列表/桶配置三族/事件通知配置 + 会话凭据验签通道）覆盖 P2 与 P3：批量删除（成功/幂等/单键失败/超千分批/校验）、CopyObject（往返/NoSuchKey/校验）、ListMultipartUploads（全量/前缀/校验）、ResumeUpload（无会话全量/部分跳过-断言网关只收缺失片/非 Seeker 读丢弃跳过/布局不一致报错且保留现场）、桶配置族（未配置 404 码/写入回读一致/本地校验/删除回归）、GetSessionToken（默认与钳制有效期/响应解析/临时凭证全链路签名带令牌头/禁再签发）、事件通知配置族（未配置返回空列表不 404/写入回读含生成 Id 与 Secret/整组替换/本地校验/清除回归空列表）。
+- `internal/s3/`：`signv4_test.go` 锚定 AWS 官方签名向量（测试密钥 `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`，注意是斜杠 `/bPxRfiCY`）；`client_test.go` 用内存假网关覆盖桶/对象/分片/预签名与 XML 错误解析；`object_meta_test.go` 覆盖 Meta/CacheControl 透传；`instant_test.go` 用独立假网关覆盖秒传探测与失败回退——命中零上行（断言 `x-inis-sha256` / `x-inis-size` / Content-Type / Meta / Cache-Control / SigV4 头）、未命中 404 复位后完整重传（断言 PUT 体逐字节一致）、旧网关路由级 404 回退、200 坏 XML 协议错误回退、不可 Seek 纯流直通、`InstantUpload=false` 跳过；`presign_extra_test.go` 覆盖叠加查询参数签入（处理串进入 canonical query、签名随参数变化、nil 参数与裸链等价）与 `ImageProcessURL` 拼链转义；`p2_test.go` 扩展假网关（STS/批删/拷贝/会话列表/桶配置三族/事件通知配置 + 会话凭据验签通道）覆盖 P2 与 P3：批量删除（成功/幂等/单键失败/超千分批/校验）、CopyObject（往返/NoSuchKey/校验）、ListMultipartUploads（全量/前缀/校验）、ResumeUpload（无会话全量/部分跳过-断言网关只收缺失片/非 Seeker 读丢弃跳过/布局不一致报错且保留现场）、桶配置族（未配置 404 码/写入回读一致/本地校验/删除回归）、GetSessionToken（默认与钳制有效期/响应解析/临时凭证全链路签名带令牌头/禁再签发）、事件通知配置族（未配置返回空列表不 404/写入回读含生成 Id 与 Secret/整组替换/本地校验/清除回归空列表）。
 
 测试里的 `referenceSign` / `referenceValue`（`internal/transport/helper_test.go`）是服务端签名算法的**独立复算实现**，与被测 `sign` 包互为校验；改动签名逻辑时两者必须同时更新。
 

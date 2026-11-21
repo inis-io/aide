@@ -87,6 +87,13 @@ type xmlCompleteMultipartUploadResult struct {
 	ETag     string   `xml:"ETag"`
 }
 
+// xmlInstantResult - 秒传探测响应（POST /{bucket}/{key}?instant；Hit=true 表示命中并已建关系链）
+type xmlInstantResult struct {
+	XMLName xml.Name `xml:"InstantResult"`
+	ETag    string   `xml:"ETag"`
+	Hit     bool     `xml:"Hit"`
+}
+
 // xmlListPartsResult - ListParts 响应
 type xmlListPartsResult struct {
 	XMLName              xml.Name `xml:"ListPartsResult"`

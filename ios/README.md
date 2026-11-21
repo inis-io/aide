@@ -120,7 +120,7 @@ client, err = ios.NewClient(accessKey, secret,
 | `DeleteBucket` | DeleteBucket | 删除桶（桶必须为空） |
 | `HeadBucket` | HeadBucket | 探测桶存在与访问权 |
 | `ListBuckets` | ListBuckets | 当前 AK 用户的桶（名称 + 创建时间） |
-| `PutObject` | PutObject | 简单上传（流式 MD5 与 ETag 回核） |
+| `PutObject` | PutObject | 简单上传（流式 MD5 与 ETag 回核；默认秒传探测，命中零字节上行） |
 | `Upload` | 单 PUT / 分片自动编排 | 高级上传（阈值默认 8MB，并发默认 4） |
 | `ResumeUpload` | 分片续传编排 | 断点续传（复用进行中会话，已传分片本地跳过） |
 | `ListMultipartUploads` | ListMultipartUploads | 进行中分片会话（续传发现 / 遗留治理） |
@@ -386,6 +386,34 @@ uploadId, err := client.CreateMultipartUploadEx(ctx, &ios.CreateMultipartUploadR
 
 > 目标版本 `ios/v0.2.0`：公共桶契约字段与 Meta/CacheControl 数据面能力均为追加式，不破坏既有签名。
 
+### 5.11 秒传（内容寻址去重）
+
+`PutObject` 默认开启秒传探测：当 `Body` 实现 `io.Seeker` 时，SDK 先在本地流式计算
+全量 SHA-256 与字节数，再以 `POST /{bucket}/{key}?instant` 探测（SigV4 签名）：
+
+```go
+result, err := client.PutObject(ctx, &ios.PutRequest{
+	Bucket: "emoji",
+	Key:    "community/moyu.png",
+	Body:   file, // 需可 Seek（*os.File / bytes.Reader 等）
+	Mime:   "image/png",
+	// 可选：命中时回调（可用于提示「秒传完成」）
+	OnInstantHit: func(key string) {
+		fmt.Println("秒传命中：", key)
+	},
+	// 可选：显式关闭探测（nil = 默认开启）
+	// InstantUpload: &disabled,
+})
+```
+
+- **命中**（`200`）：零字节上行，`PutResult.Size` 为本地内容长度，`ETag` 来自探测响应，
+  `VersionId` 取响应头（无版本控制为 `null`）；
+- **未命中 / 回退**：`404`、`403`、旧网关无该路由、网络或协议错误一律复位内容流后自动重试
+  正常上传，探测失败不会暴露给调用方；
+- **纯流**：`Body` 不可 Seek 时跳过探测，行为与未开启时完全一致；
+- `Upload` / `ResumeUpload` 的小文件单 PUT 路径复用 `PutObject`，同样自动受益；
+- 探测请求携带 `x-inis-sha256` / `x-inis-size`，并原样透传 `Content-Type` / `x-amz-meta-*` / `Cache-Control`。
+
 ## 6. 处理事件通知（Webhook）
 
 平台把桶内对象事件（创建 / 删除）以 Webhook 投递到接入方地址：每条规则一个目标 URL，
@@ -458,6 +486,7 @@ func handle(writer http.ResponseWriter, request *http.Request) {
 
 - **双端点**：控制面走 `WithEndpoint`（可空，缺省回退官方平台 `DefaultEndpoint = https://ios.inis.cn`）；数据面走 `WithS3Endpoint`，缺省时从控制面端点派生（`scheme://host:9000`，IPv6 自动加方括号）。网关端口不是 9000 时必须显式注入 `WithS3Endpoint`。
 - **UNSIGNED-PAYLOAD**：请求体不参与签名（网关侧兼容 aws-chunked 与明文流），上传大文件不做全量哈希预读，流式直通；完整性由流式 MD5 与响应 ETag 回核兜底。
+- **秒传（L1 去重）**：`PutObject` 默认先探测——可 Seek 流本地全量 SHA-256 后签名 `POST ?instant`，命中零字节上行；未命中 / 旧网关 / 网络 / 协议错误静默回退原上传（`InstantUpload` 显式 `false` 关闭，`OnInstantHit` 感知命中）。
 - **用户元数据与缓存头**：`PutInput` / `UploadInput` / `CreateInput` 的 `Meta` 序列化为 `x-amz-meta-*`（键统一小写，按字典序装配），`CacheControl` 原样写入 `Cache-Control`；`GetObject` / `HeadObject` 的 `ObjectMeta.CacheControl` 回读透传值，备注名用 `ObjectMeta.Meta["name"]`。
 - **分片上传**：`Upload` 按 `WithPartSize`（默认 8MB，平台约束单片 5MB 起，自动上调保证片数 ≤ 10000）与 `WithConcurrency`（默认 4）编排；顺序读片、有界并发、任一失败自动 Abort 清理。
 - **预签名**：本地产链零往返，有效期硬上限 7 天（SigV4 约束），超上限返回 `ErrInvalidRequest`。
@@ -564,7 +593,7 @@ A：控制面单次调用默认 10 秒（`WithTimeout` 可调）。数据面是�
 
 ## 12. 版本与演进
 
-- P2 已落地：数据面 `ResumeUpload` 断点续传（含 `ListMultipartUploads` / `AbortMultipartUpload` 会话治理）、`DeleteObjects` 批量删除、`CopyObject` 服务端拷贝、STS `GetSessionToken`（`WithSessionToken` 全链路）、桶配置族（CORS / Versioning / Lifecycle）。
+- P2 已落地：数据面 `ResumeUpload` 断点续传（含 `ListMultipartUploads` / `AbortMultipartUpload` 会话治理）、`DeleteObjects` 批量删除、`CopyObject` 服务端拷贝、STS `GetSessionToken`（`WithSessionToken` 全链路）、桶配置族（CORS / Versioning / Lifecycle）、`PutObject` 秒传探测（`InstantUpload` / `OnInstantHit`）。
 - P3 已落地：事件通知 `notify` 子包（`ParseEvent` 解析 + 验签、`VerifyEvent`）、桶通知配置族（`GetBucketNotification` / `PutBucketNotification` / `DeleteBucketNotification`）、`examples/webhook` 接收器示例；服务端同步增强：通知 `Secret` 经属主签名端点回读可见、投递号在重试间稳定（幂等键语义）。
 - `ios/v0.2.0`：公共桶契约追加（`BucketInfo` 的 `shared` / `sharePrefix` / `shareMaxObjects` / `shareMaxBytes` / `allowExts`）与数据面 `Meta` / `CacheControl`（含 `CreateMultipartUploadEx`），全部追加式升级。
 - 后续规划：更多示例（备份脚本、静态资源同步、CI 产物上传）与事件类型扩展。
@@ -584,7 +613,7 @@ A：控制面单次调用默认 10 秒（`WithTimeout` 可调）。数据面是�
 | `sign/` | 公开控制面签名器：`Signer` 接口 + MD5 实现（`sign.New()`），供 `WithSigner` 使用 |
 | `notify/` | 公开事件通知接收件：`ParseEvent`（解析 + 验签）与 `VerifyEvent`（仅验签），constant-time 比对 |
 | `internal/transport/` | 内部控制面传输链路（HTTP / gRPC 双链路实现与 `Operation` 常量），接入方不直接使用 |
-| `internal/s3/` | 内部数据面轻客户端（SigV4 签名、桶/对象/分片/续传/批量/拷贝/桶配置/事件通知配置/STS，纯标准库） |
+| `internal/s3/` | 内部数据面轻客户端（SigV4 签名、桶/对象/秒传探测/分片/续传/批量/拷贝/桶配置/事件通知配置/STS，纯标准库） |
 | `proto/` | 控制面契约源 `ios/open/v1/open.proto` 与生成的客户端桩（已入库，接入方免装 protoc） |
 | `examples/fullchain/` | 全链联调 demo（建桶→上传→下载→分享→用量→回收站全链，含 P2 能力演示） |
 | `examples/webhook/` | 事件通知 Webhook 接收器 demo（验签 → 投递号幂等 → 落库 → 2xx） |
