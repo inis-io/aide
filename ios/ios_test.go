@@ -136,7 +136,7 @@ func TestAliasSentinels(t *testing.T) {
 
 // ============================= 装配与选项 - 开始 =============================
 
-// TestNewClientDefault - 默认装配：gRPC 控制面 + 派生数据面 + 默认值
+// TestNewClientDefault - 默认装配：HTTP 控制面 + 派生数据面 + 默认值
 func TestNewClientDefault(t *testing.T) {
 
 	client, err := NewClient("AK", "SK", WithEndpoint("https://storage.example.com"))
@@ -145,8 +145,8 @@ func TestNewClientDefault(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
-	if name := reflect.TypeOf(client.transport).String(); name != "*transport.grpcTransport" {
-		t.Fatalf("默认控制面链路应为 gRPC，实际：%s", name)
+	if name := reflect.TypeOf(client.transport).String(); name != "*transport.httpTransport" {
+		t.Fatalf("默认控制面链路应为 HTTP，实际：%s", name)
 	}
 	if client.s3Endpoint != "https://storage.example.com" {
 		t.Fatalf("数据面网关应与控制面同源（合并模式），实际：%s", client.s3Endpoint)
@@ -169,7 +169,7 @@ func TestNewClientOptions(t *testing.T) {
 		WithEndpoint("https://storage.example.com/"),
 		WithS3Endpoint("https://s3.example.com:9443/"),
 		WithRegion("cn-north-1"),
-		WithTransportHTTP(),
+		WithTransportGRPC(),
 		WithTimeout(30*time.Second),
 		WithUserAgent("custom-agent/1.0"),
 		WithSessionToken("TOKEN"),
@@ -187,8 +187,8 @@ func TestNewClientOptions(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
-	if name := reflect.TypeOf(client.transport).String(); name != "*transport.httpTransport" {
-		t.Fatalf("WithTransportHTTP 未生效：%s", name)
+	if name := reflect.TypeOf(client.transport).String(); name != "*transport.grpcTransport" {
+		t.Fatalf("WithTransportGRPC 未生效：%s", name)
 	}
 	if client.endpoint != "https://storage.example.com" || client.s3Endpoint != "https://s3.example.com:9443" {
 		t.Fatalf("地址末尾斜杠应被裁剪：endpoint=%s s3=%s", client.endpoint, client.s3Endpoint)

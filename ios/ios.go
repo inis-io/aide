@@ -6,7 +6,7 @@
 //     元数据/删除/浏览、批量与拷贝、断点续传、桶配置族、STS、预签名链接、事件通知配置。
 //     直连平台 S3 网关（默认与控制面同源，合并模式单端口部署），SigV4 签名，全程流式。
 //   - 控制面（平台开放接口）：凭据自检、管理视角桶列表、清空桶、分享链接、回收站、
-//     用量与配额视图。HTTP / gRPC 双链路对称（默认 gRPC，WithTransportHTTP 切换）。
+//     用量与配额视图。HTTP / gRPC 双链路对称（默认 HTTP，WithTransportGRPC 切换）。
 //
 // 一对 AccessKey + Secret 同时是两个平面的凭据：数据面作 SigV4 密钥，
 // 控制面作 MD5 GenSign 同源签名密钥（与平台服务端 utils.Md5.GenSign 逐字节等价）。
@@ -283,7 +283,7 @@ type Client struct {
 	secret string
 	// signer - 控制面签名器（默认 MD5）
 	signer Signer
-	// transport - 控制面传输链路（默认 gRPC，WithTransportHTTP 切换）
+	// transport - 控制面传输链路（默认 HTTP，WithTransportGRPC 切换）
 	transport transport.Transport
 	// s3Client - 数据面轻客户端
 	s3Client *s3.Client
@@ -291,8 +291,8 @@ type Client struct {
 	timeout time.Duration
 	// userAgent - 请求 User-Agent
 	userAgent string
-	// transportHTTP - 控制面是否使用 HTTP 链路（默认 false → gRPC）
-	transportHTTP bool
+	// transportGRPC - 控制面是否使用 gRPC 链路（默认 false → HTTP；反代零配置场景请保持默认）
+	transportGRPC bool
 	// httpClient - 控制面 HTTP 链路自定义客户端（nil 时按 timeout 内置）
 	httpClient *http.Client
 	// dialOpts - gRPC 拨号选项（TLS 凭证等，WithGRPCDialOpts 累积）
@@ -344,11 +344,23 @@ func WithRegion(region string) Option {
 	}
 }
 
-// WithTransportHTTP - 控制面切换为 HTTP 链路（默认 gRPC）
+// WithTransportHTTP - 控制面使用 HTTP 链路
+// Deprecated：自 v0.2.3 起 HTTP 即默认链路，本选项保留为兼容空操作。
 func WithTransportHTTP() Option {
 
 	return func(this *Client) {
-		this.transportHTTP = true
+		this.transportGRPC = false
+	}
+}
+
+// WithTransportGRPC - 控制面切换为 gRPC 链路（默认 HTTP）
+// 注意：gRPC 需要端到端 HTTP/2 直通，仅适用于直连平台或内网部署；
+// 经 nginx 等反向代理时必须配置 grpc_pass，否则请求被降级为 HTTP/1.1 导致调用失败。
+// 经 HTTPS 反代零配置的场景请保持默认 HTTP 链路。
+func WithTransportGRPC() Option {
+
+	return func(this *Client) {
+		this.transportGRPC = true
 	}
 }
 
@@ -469,7 +481,6 @@ func WithConcurrency(n int) Option {
  * @example：
  * 	client, err := ios.NewClient(accessKey, secret,
  * 	    ios.WithEndpoint("https://storage.example.com"),
- * 	    ios.WithTransportHTTP(),
  * 	)
  * 	if err != nil { return err }
  * 	defer client.Close()
@@ -525,14 +536,14 @@ func NewClient(accessKey, secret string, opts ...Option) (*Client, error) {
 		DialOpts:   this.dialOpts,
 	}
 
-	if this.transportHTTP {
-		this.transport = transport.NewHTTP(config)
-	} else {
+	if this.transportGRPC {
 		link, err := transport.NewGRPC(config)
 		if err != nil {
 			return nil, err
 		}
 		this.transport = link
+	} else {
+		this.transport = transport.NewHTTP(config)
 	}
 
 	s3Client, err := s3.New(s3.Config{

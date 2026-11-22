@@ -2,12 +2,12 @@
 
 `ios`（Inis Object Storage）是 inis 对象存储平台的官方 Go SDK，一个模块覆盖两个平面：
 
-- **控制面**：密钥自检、桶管理（列表 / 清空）、分享链接、回收站、用量与配额 —— HTTP / gRPC 双链路签名调用（默认 gRPC）
+- **控制面**：密钥自检、桶管理（列表 / 清空）、分享链接、回收站、用量与配额 —— HTTP / gRPC 双链路签名调用（默认 HTTP）
 - **数据面**：桶与对象的读写删列、分片上传、批量与拷贝、断点续传、桶配置族、STS、预签名、事件通知 —— 直连平台 S3 兼容网关（自实现 SigV4 轻客户端，纯标准库）
 
 - 模块路径：`github.com/inis-io/aide/ios`（独立 Go 模块，与 `aide` 主模块并列）
 - 直接依赖：`google.golang.org/grpc`、`google.golang.org/protobuf`（HTTP 链路与数据面零第三方依赖）
-- 默认控制面链路：**gRPC**；`WithTransportHTTP()` 一键切换到 HTTP 开放端点
+- 默认控制面链路：**HTTP**（经 HTTPS 反代零配置）；`WithTransportGRPC()` 切换到 gRPC（直连 / 内网场景）
 
 ## 1. 安装
 
@@ -41,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("构造客户端失败：%v", err)
 	}
-	defer client.Close() // 释放 gRPC 连接（HTTP 链路与数据面为 no-op）
+	defer client.Close() // 释放控制面连接（gRPC 链路关闭连接，HTTP 链路与数据面为 no-op）
 
 	_ = context.Background()
 }
@@ -61,29 +61,29 @@ if err != nil {
 // info.Name / info.Scope / info.ExpiredAt（Secret 永不下发）
 ```
 
-## 3. 选择链路：gRPC（默认）还是 HTTP（仅控制面）
+## 3. 选择链路：HTTP（默认）还是 gRPC
 
-| 维度 | gRPC（默认） | HTTP |
+| 维度 | HTTP（默认） | gRPC |
 |---|---|---|
-| 端点 | `/ios.open.v1.OpenService/*` | `GET/POST /api/open-accesskey/info`、`/api/open-bucket/list` 等 |
-| 开关 | 默认 | `ios.WithTransportHTTP()` |
-| 端口 | 与 HTTP 同端口（平台按 HTTP/2 + `application/grpc` 分流），无需额外端口 | 同 HTTP |
-| 签名位置 | outgoing metadata `x-ios-sign` | body 的 `sign` 字段 / query 的 `sign` 参数 |
-| 传输安全 | 缺省凭证按端点 scheme 选择：`https://` 端点自动 TLS，其余 plaintext（见下） | 生产必须 HTTPS |
-| 错误模型 | 与 HTTP 完全一致 | 与 gRPC 完全一致 |
+| 端点 | `GET/POST /api/open-accesskey/info`、`/api/open-bucket/list` 等 | `/ios.open.v1.OpenService/*` |
+| 开关 | 默认 | `ios.WithTransportGRPC()` |
+| 端口 | 与站点同端口，标准 HTTPS 反代零配置 | 与 HTTP 同端口（平台按 HTTP/2 + `application/grpc` 分流），但要求端到端 HTTP/2 直通：经 nginx 等反代时必须配置 `grpc_pass`，否则请求被降级为 HTTP/1.1 导致调用失败 |
+| 签名位置 | body 的 `sign` 字段 / query 的 `sign` 参数 | outgoing metadata `x-ios-sign` |
+| 传输安全 | 生产必须 HTTPS | 缺省凭证按端点 scheme 选择：`https://` 端点自动 TLS，其余 plaintext |
+| 错误模型 | 与 gRPC 完全一致 | 与 HTTP 完全一致 |
 
 两条链路的业务方法、签名器、默认值注入与错误模型完全相同，切换链路不改一行业务代码。数据面（S3 网关）与链路选择无关，永远走独立的数据面端点。
 
 ```go
-// HTTP 链路
+// 默认即 HTTP 链路（经 HTTPS 反代零配置）
 client, err := ios.NewClient(accessKey, secret,
 	ios.WithEndpoint("https://oss.example.com"),
-	ios.WithTransportHTTP(),
 )
 
-// gRPC 链路启用 TLS（https 端点缺省即 TLS，此处演示自定义 TLS 配置）
+// gRPC 链路（直连/内网场景；https 端点缺省即 TLS，此处演示自定义 TLS 配置）
 client, err = ios.NewClient(accessKey, secret,
 	ios.WithEndpoint("oss.example.com:9443"),
+	ios.WithTransportGRPC(),
 	ios.WithGRPCDialOpts(
 		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})),
 	),

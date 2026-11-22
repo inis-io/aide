@@ -52,8 +52,8 @@ func main() {
 	if s3Endpoint := os.Getenv("IOS_S3_ENDPOINT"); s3Endpoint != "" {
 		options = append(options, ios.WithS3Endpoint(s3Endpoint))
 	}
-	if os.Getenv("IOS_TRANSPORT") == "http" {
-		options = append(options, ios.WithTransportHTTP())
+	if os.Getenv("IOS_TRANSPORT") == "grpc" {
+		options = append(options, ios.WithTransportGRPC())
 	}
 
 	client, err := ios.NewClient(accessKey, secret, options...)
