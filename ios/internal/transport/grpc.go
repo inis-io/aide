@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -77,8 +79,9 @@ func NewGRPC(config Config) (Transport, error) {
 
 	dialOpts := []grpc.DialOption{grpc.WithUserAgent(config.UserAgent)}
 	if len(config.DialOpts) == 0 {
-		// 缺省 plaintext（h2c），对齐平台 HTTP/gRPC 同端口分流现状
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		// 缺省凭证按端点 scheme 选择：https 用 TLS（grpc-go 自动协商 h2），
+		// 其余（http/无 scheme）维持 plaintext（h2c），对齐本地同端口分流部署
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(defaultCredentials(config.Endpoint)))
 	} else {
 		dialOpts = append(dialOpts, config.DialOpts...)
 	}
@@ -164,6 +167,20 @@ func (this *grpcTransport) signature(message proto.Message) (string, error) {
 	}
 
 	return this.signer.Sign(params, this.secret), nil
+}
+
+// defaultCredentials - 缺省传输凭证（未显式传入拨号选项时按端点 scheme 选择）
+// https 端点回退 TLS（grpc-go 自动带 h2 ALPN）；http/无 scheme 端点回退 plaintext（h2c），对齐本地开发部署
+func defaultCredentials(endpoint string) credentials.TransportCredentials {
+
+	scheme := strings.TrimSpace(endpoint)
+	if index := strings.Index(scheme, "://"); index >= 0 {
+		if strings.EqualFold(scheme[:index], "https") {
+			return credentials.NewTLS(&tls.Config{})
+		}
+	}
+
+	return insecure.NewCredentials()
 }
 
 // GRPCTarget - 平台地址归一为拨号目标（剥离 scheme 与路径，缺省端口按 443 补全）

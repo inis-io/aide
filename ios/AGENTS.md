@@ -136,7 +136,7 @@ cd ios && protoc --proto_path=proto \
 - 不硬编码任何真实密钥；控制面测试密钥 `INIS-TEST-SECRET-0123456789abcdef`、SigV4 测试密钥为 AWS 官方向量密钥，仅用于测试。
 - `secret` 只在内存中参与签名：不落盘、不写日志、不进错误文案（`Client.secret` 私有字段，无导出；`types`/`sign`/`s3` 均只接收密钥参数，不保存）。
 - 事件通知验签密钥（规则 `Secret`）与账号 Secret 相互独立；`notify` 验签无跳过开关。
-- 生产环境 HTTP 链路必须 HTTPS；gRPC 默认 plaintext 仅用于内网/开发，TLS 经 `WithGRPCDialOpts` 注入（传了 dial 选项即不由 SDK 补 insecure 凭证）。
+- 生产环境 HTTP 链路必须 HTTPS；gRPC 缺省凭证按端点 scheme 选择（`https://` 端点自动 TLS，http/无 scheme 端点 plaintext 仅用于内网/开发），自定义 TLS 配置经 `WithGRPCDialOpts` 注入（传了 dial 选项即不由 SDK 补缺省凭证）。
 - 控制面时间窗 ±15 分钟由平台判定，SDK 不在本地做时间窗预检（避免双时钟分叉）。
 
 ## 版本发布

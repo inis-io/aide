@@ -256,6 +256,33 @@ func TestGRPCTarget(t *testing.T) {
 	}
 }
 
+// TestDefaultCredentials - 缺省传输凭证按端点 scheme 选择（https → TLS，http/无 scheme → plaintext）
+// 回归锚点：https 端点走明文 h2c 会被 TLS 端口直接拒绝（nginx 回 HTTP/1.1 400）。
+func TestDefaultCredentials(t *testing.T) {
+
+	cases := []struct {
+		// endpoint - 平台地址
+		endpoint string
+		// want - 期望的安全协议（tls / insecure）
+		want string
+	}{
+		{endpoint: "https://storage.example.com", want: "tls"},
+		{endpoint: "HTTPS://storage.example.com", want: "tls"},
+		{endpoint: "  https://storage.example.com  ", want: "tls"},
+		{endpoint: "https://storage.example.com/base/path", want: "tls"},
+		{endpoint: "http://127.0.0.1:2000", want: "insecure"},
+		{endpoint: "127.0.0.1:9000", want: "insecure"},
+		{endpoint: "storage.example.com:2000", want: "insecure"},
+		{endpoint: "[::1]:2000", want: "insecure"},
+	}
+
+	for _, item := range cases {
+		if got := defaultCredentials(item.endpoint).Info().SecurityProtocol; got != item.want {
+			t.Fatalf("缺省凭证不符合预期：endpoint=%q got=%q want=%q", item.endpoint, got, item.want)
+		}
+	}
+}
+
 // TestGRPCCloseIdempotent - 关闭幂等（重复关闭返回首次结果，不 panic）
 func TestGRPCCloseIdempotent(t *testing.T) {
 

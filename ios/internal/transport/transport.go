@@ -33,7 +33,7 @@ type Config struct {
 	UserAgent string
 	// HTTPClient - HTTP 链路自定义客户端（nil 时按 Timeout 内置）
 	HTTPClient *http.Client
-	// DialOpts - gRPC 拨号选项（为空时使用 plaintext）
+	// DialOpts - gRPC 拨号选项（为空时按端点 scheme 选择缺省凭证：https → TLS，其余 → plaintext）
 	DialOpts []grpc.DialOption
 }
 

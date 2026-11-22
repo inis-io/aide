@@ -40,7 +40,8 @@
 //
 // secret 由调用方运行时注入（环境变量/配置中心），本包不持久化、不写日志、
 // 不出现在任何错误文案中。生产环境两条链路都必须走 HTTPS；
-// gRPC 链路默认 plaintext（对齐平台 HTTP/gRPC 同端口分流），TLS 经 WithGRPCDialOpts 注入。
+// gRPC 链路缺省凭证按端点 scheme 选择：https 端点自动 TLS，http/无 scheme 端点 plaintext
+// （对齐平台 HTTP/gRPC 同端口分流），自定义拨号经 WithGRPCDialOpts 注入。
 package ios
 
 import (
@@ -352,8 +353,8 @@ func WithTransportHTTP() Option {
 }
 
 // WithGRPCDialOpts - 透传 gRPC 拨号选项（TLS 凭证、拦截器、保活等）
-// 未传入任何选项时使用 plaintext（insecure）拨号，对齐平台 HTTP/gRPC 同端口分流现状；
-// 只要传入选项，TLS 凭证由调用方自行负责。
+// 未传入任何选项时按端点 scheme 选择缺省凭证：https 端点自动 TLS，http/无 scheme 端点
+// plaintext（对齐平台 HTTP/gRPC 同端口分流）；只要传入选项，传输凭证由调用方自行负责。
 /**
  * @param opts ...grpc.DialOption - 拨号选项
  */

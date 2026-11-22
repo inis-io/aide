@@ -69,7 +69,7 @@ if err != nil {
 | 开关 | 默认 | `ios.WithTransportHTTP()` |
 | 端口 | 与 HTTP 同端口（平台按 HTTP/2 + `application/grpc` 分流），无需额外端口 | 同 HTTP |
 | 签名位置 | outgoing metadata `x-ios-sign` | body 的 `sign` 字段 / query 的 `sign` 参数 |
-| 传输安全 | 默认 plaintext，生产建议 TLS（见下） | 生产必须 HTTPS |
+| 传输安全 | 缺省凭证按端点 scheme 选择：`https://` 端点自动 TLS，其余 plaintext（见下） | 生产必须 HTTPS |
 | 错误模型 | 与 HTTP 完全一致 | 与 gRPC 完全一致 |
 
 两条链路的业务方法、签名器、默认值注入与错误模型完全相同，切换链路不改一行业务代码。数据面（S3 网关）与链路选择无关，永远走独立的数据面端点。
@@ -81,7 +81,7 @@ client, err := ios.NewClient(accessKey, secret,
 	ios.WithTransportHTTP(),
 )
 
-// gRPC 链路启用 TLS
+// gRPC 链路启用 TLS（https 端点缺省即 TLS，此处演示自定义 TLS 配置）
 client, err = ios.NewClient(accessKey, secret,
 	ios.WithEndpoint("oss.example.com:9443"),
 	ios.WithGRPCDialOpts(
@@ -90,7 +90,7 @@ client, err = ios.NewClient(accessKey, secret,
 )
 ```
 
-> gRPC 拨号目标由 endpoint 自动归一：剥离 `http://`/`https://` 与路径，缺省端口按 `443` 补全。
+> gRPC 拨号目标由 endpoint 自动归一：剥离 `http://`/`https://` 与路径，缺省端口按 `443` 补全；缺省传输凭证按 scheme 选择——`https://` 端点自动 TLS，其余（`http://`/无 scheme）为 plaintext（h2c）。
 
 ## 4. 能力一览
 
@@ -565,7 +565,7 @@ if errors.As(err, &s3Err) && s3Err.IsNotFound() {
 ## 10. 安全约定
 
 - `secret` 由调用方**运行时注入**（环境变量 / 配置中心 / 密钥管理服务），SDK 不持久化、不写日志、不出现在任何错误文案中。
-- 生产环境 HTTP 链路必须 HTTPS；gRPC 链路默认 plaintext 仅适用于内网/开发环境，生产用 `WithGRPCDialOpts` 注入 TLS 凭证。
+- 生产环境 HTTP 链路必须 HTTPS；gRPC 链路缺省凭证按端点 scheme 选择（`https://` 端点自动 TLS，http/无 scheme 端点 plaintext 仅适用于内网/开发环境），自定义 TLS 配置用 `WithGRPCDialOpts` 注入。
 - 签名时间窗 ±15 分钟（平台判定），请保证部署机器时钟同步；偏差过大一律 401。
 - 按最小授权在平台用户中心签发密钥：只读场景用 `scope=ro`，限定桶场景配置桶白名单；写操作与跨桶访问会被平台 403 拒绝。
 - 不要把 `secret` 下发给前端/客户端代码；预签名链接才是给终端用户的下发形态。
