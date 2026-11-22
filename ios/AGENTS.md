@@ -14,7 +14,7 @@
 
 ```
 ├── ios.go              # 唯一入口：包注释 + Client/Option/NewClient/Close + 控制面 13 方法 + 数据面 36 方法 + 全部别名与转发
-├── ios_test.go         # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、双端点派生
+├── ios_test.go         # 门面测试：别名编译期等价、默认链路、选项、参数校验、Close 幂等、数据面同源派生
 ├── types/              # 公开：控制面请求/响应模型 + 错误模型（零依赖）
 │   ├── accesskey.go    # AccessKeyInfo（Secret 永不下发）
 │   ├── bucket.go       # BucketInfo/EmptyBucketResult
@@ -122,7 +122,7 @@ cd ios && protoc --proto_path=proto \
 
 同包测试、仅标准库断言、**禁止联网**（`proto/gen` 无测试属正常）：
 
-- `ios_test.go`（根包）：别名编译期等价、默认链路为 gRPC / `WithTransportHTTP` 切换、选项默认值与覆盖、必填参数与业务参数校验、`Close` 幂等、S3 端点派生（含 IPv6 方括号）。
+- `ios_test.go`（根包）：别名编译期等价、默认链路为 gRPC / `WithTransportHTTP` 切换、选项默认值与覆盖、必填参数与业务参数校验、`Close` 幂等、S3 端点派生（默认与控制面同源同端口——平台合并模式单端口部署为零配置默认形态；独立 `:9000` 数据面部署用 `WithS3Endpoint` 显式覆盖）。
 - `types/`：`Normalize` 默认值（Share/Recycle）、`APIError`（含 nil 接收者）与哨兵错误。
 - `sign/`：17 组黄金向量、`sign` 键剔除、`Value` 格式化逐类型（含 0/false 保留、毫秒时间戳不用科学计数法）。
 - `notify/`：黄金向量（黄金报文 + 黄金密钥 + 黄金签名逐字节一致）、大写签名归一、报文篡改 / 错误密钥 / 空参拒绝、字段完整性、缺头 / nil 头拒绝、坏 JSON 分层（验签过但载荷非法归普通错误而非 `ErrInvalidSign`）。

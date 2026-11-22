@@ -484,7 +484,7 @@ func handle(writer http.ResponseWriter, request *http.Request) {
 
 ## 7. 数据面（S3）要点
 
-- **双端点**：控制面走 `WithEndpoint`（可空，缺省回退官方平台 `DefaultEndpoint = https://ios.inis.cn`）；数据面走 `WithS3Endpoint`，缺省时从控制面端点派生（`scheme://host:9000`，IPv6 自动加方括号）。网关端口不是 9000 时必须显式注入 `WithS3Endpoint`。
+- **双端点**：控制面走 `WithEndpoint`（可空，缺省回退官方平台 `DefaultEndpoint = https://ios.inis.cn`）；数据面走 `WithS3Endpoint`，缺省时与控制面同源同端口（平台合并模式单端口部署为零配置默认形态，只保留 `scheme://host[:port]`、丢弃 path）。数据面独立端口（如 `:9000`）部署时必须显式注入 `WithS3Endpoint`。
 - **UNSIGNED-PAYLOAD**：请求体不参与签名（网关侧兼容 aws-chunked 与明文流），上传大文件不做全量哈希预读，流式直通；完整性由流式 MD5 与响应 ETag 回核兜底。
 - **秒传（L1 去重）**：`PutObject` 默认先探测——可 Seek 流本地全量 SHA-256 后签名 `POST ?instant`，命中零字节上行；未命中 / 旧网关 / 网络 / 协议错误静默回退原上传（`InstantUpload` 显式 `false` 关闭，`OnInstantHit` 感知命中）。
 - **用户元数据与缓存头**：`PutInput` / `UploadInput` / `CreateInput` 的 `Meta` 序列化为 `x-amz-meta-*`（键统一小写，按字典序装配），`CacheControl` 原样写入 `Cache-Control`；`GetObject` / `HeadObject` 的 `ObjectMeta.CacheControl` 回读透传值，备注名用 `ObjectMeta.Meta["name"]`。
@@ -579,8 +579,8 @@ A：逐项核对 ① `secret` 是否与平台签发的密钥一致；② 机器�
 **Q：数据面报 SignatureDoesNotMatch？**
 A：先核对 `WithRegion` 与平台网关区域一致（默认 `us-east-1`），再确认 `WithS3Endpoint` 指向的是 S3 网关端口而不是控制面端口。
 
-**Q：S3 端点派生出来的端口不对？**
-A：派生规则固定为 `scheme://host:9000`。网关不在 9000 时必须显式 `WithS3Endpoint("https://s3.example.com:9443")`。
+**Q：S3 端点不是与控制面同端口？**
+A：缺省派生规则为与控制面同源同端口（`scheme://host[:port]`），适配平台合并模式单端口部署。数据面独立端口部署时必须显式 `WithS3Endpoint("https://s3.example.com:9000")`。
 
 **Q：Webhook 收不到 / 验签失败？**
 A：先确认规则已写入（`GetBucketNotification` 回读非空）且目标地址平台可达；验签密钥必须取回读到的 `Secret`（PUT 时留空则由服务端生成，以自己臆测的值验签必然失败）；验签用**原始请求体**，任何先解码再重排的中间件都会破坏签名。

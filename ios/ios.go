@@ -4,7 +4,7 @@
 //
 //   - 数据面（S3 协议子集）：桶增删查、对象上传（单 PUT / 自动分片并发）/下载（Range）/
 //     元数据/删除/浏览、批量与拷贝、断点续传、桶配置族、STS、预签名链接、事件通知配置。
-//     直连平台 S3 网关（默认 :9000），SigV4 签名，全程流式。
+//     直连平台 S3 网关（默认与控制面同源，合并模式单端口部署），SigV4 签名，全程流式。
 //   - 控制面（平台开放接口）：凭据自检、管理视角桶列表、清空桶、分享链接、回收站、
 //     用量与配额视图。HTTP / gRPC 双链路对称（默认 gRPC，WithTransportHTTP 切换）。
 //
@@ -22,8 +22,8 @@
 // # 双平面地址
 //
 // 控制面地址经 WithEndpoint 指定（可空，缺省回退 DefaultEndpoint = 官方平台
-// https://ios.inis.cn）；数据面网关默认按
-// 「endpoint 的 scheme://host + :9000」派生，可用 WithS3Endpoint 显式覆盖：
+// https://ios.inis.cn）；数据面网关默认与控制面同源（合并模式单端口部署为零配置
+// 默认形态）；数据面独立端口部署时用 WithS3Endpoint 显式覆盖：
 //
 //	client, err := ios.NewClient(accessKey, secret,
 //	    ios.WithEndpoint("https://storage.example.com"),
@@ -260,8 +260,6 @@ const (
 	defaultUserAgent = "ios-go/0.1.0"
 	// defaultRegion - 数据面默认区域（与平台网关配置一致）
 	defaultRegion = "us-east-1"
-	// defaultS3Port - 数据面网关派生端口（缺省按 endpoint 的 scheme://host + 本端口派生）
-	defaultS3Port = "9000"
 	// defaultPartSize - 默认分片大小（8MB；平台约束单片 5MB 起）
 	defaultPartSize int64 = 8 << 20
 	// defaultConcurrency - 默认分片并发数
@@ -274,7 +272,7 @@ const (
 type Client struct {
 	// endpoint - 控制面平台地址（如 https://storage.example.com）
 	endpoint string
-	// s3Endpoint - 数据面 S3 网关地址（缺省按 endpoint 派生 scheme://host:9000）
+	// s3Endpoint - 数据面 S3 网关地址（缺省与控制面同源；独立数据面用 WithS3Endpoint 覆盖）
 	s3Endpoint string
 	// region - 数据面区域（默认 us-east-1）
 	region string
@@ -321,7 +319,7 @@ func WithEndpoint(addr string) Option {
 }
 
 // WithS3Endpoint - 数据面 S3 网关地址
-// 缺省按「控制面地址的 scheme://host + :9000」派生；网关分离部署时显式指定。
+// 缺省与控制面同源（合并模式单端口）；数据面独立端口部署时显式指定。
 /**
  * @param addr string - 网关地址，如 https://storage.example.com:9000
  */
@@ -507,7 +505,7 @@ func NewClient(accessKey, secret string, opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("%w：secret 不能为空", ErrInvalidRequest)
 	}
 
-	// 数据面网关缺省派生：scheme://host + :9000（显式端口不保留）
+	// 数据面网关缺省与控制面同源（合并模式单端口；独立数据面用 WithS3Endpoint 覆盖）
 	if this.s3Endpoint == "" {
 		this.s3Endpoint = deriveS3Endpoint(this.endpoint)
 		if this.s3Endpoint == "" {
@@ -552,7 +550,9 @@ func NewClient(accessKey, secret string, opts ...Option) (*Client, error) {
 	return this, nil
 }
 
-// deriveS3Endpoint - 数据面网关地址派生（scheme://host + :9000；IPv6 自动加方括号）
+// deriveS3Endpoint - 数据面网关地址派生（与控制面同源同端口：合并模式 [s3] merge 单端口部署
+// 为零配置默认形态；独立 :9000 数据面部署用 WithS3Endpoint 显式指定）。
+// 仅保留 scheme://host[:port]，丢弃 path（S3 路由从根路径起算）。
 func deriveS3Endpoint(endpoint string) string {
 
 	parsed, err := url.Parse(endpoint)
@@ -560,12 +560,7 @@ func deriveS3Endpoint(endpoint string) string {
 		return ""
 	}
 
-	host := parsed.Hostname()
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-
-	return parsed.Scheme + "://" + host + ":" + defaultS3Port
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 // Close - 释放底层连接（可重复调用；数据面无持有资源）

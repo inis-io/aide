@@ -148,8 +148,8 @@ func TestNewClientDefault(t *testing.T) {
 	if name := reflect.TypeOf(client.transport).String(); name != "*transport.grpcTransport" {
 		t.Fatalf("默认控制面链路应为 gRPC，实际：%s", name)
 	}
-	if client.s3Endpoint != "https://storage.example.com:9000" {
-		t.Fatalf("数据面网关派生不符合预期：%s", client.s3Endpoint)
+	if client.s3Endpoint != "https://storage.example.com" {
+		t.Fatalf("数据面网关应与控制面同源（合并模式），实际：%s", client.s3Endpoint)
 	}
 	if client.region != defaultRegion || client.timeout != defaultTimeout || client.userAgent != defaultUserAgent {
 		t.Fatalf("默认值装配不符合预期：region=%s timeout=%v ua=%s", client.region, client.timeout, client.userAgent)
@@ -205,12 +205,12 @@ func TestNewClientOptions(t *testing.T) {
 // TestNewClientValidation - 必填参数校验与 endpoint 缺省回退
 func TestNewClientValidation(t *testing.T) {
 
-	// endpoint 可空：缺省回退官方默认地址，数据面网关同步派生
+	// endpoint 可空：缺省回退官方默认地址，数据面网关与控制面同源
 	zero, err := NewClient("AK", "SK")
 	if err != nil {
 		t.Fatalf("缺省 endpoint 应允许构造：%v", err)
 	}
-	if zero.endpoint != DefaultEndpoint || zero.s3Endpoint != DefaultEndpoint+":9000" {
+	if zero.endpoint != DefaultEndpoint || zero.s3Endpoint != DefaultEndpoint {
 		t.Fatalf("缺省 endpoint 回退不符合预期：endpoint=%s s3=%s", zero.endpoint, zero.s3Endpoint)
 	}
 	_ = zero.Close()
@@ -245,11 +245,11 @@ func TestDeriveS3Endpoint(t *testing.T) {
 		// want - 期望派生结果
 		want string
 	}{
-		{endpoint: "https://storage.example.com", want: "https://storage.example.com:9000"},
-		{endpoint: "https://storage.example.com/", want: "https://storage.example.com:9000"},
-		{endpoint: "http://127.0.0.1:2000", want: "http://127.0.0.1:9000"},
-		{endpoint: "https://storage.example.com/base", want: "https://storage.example.com:9000"},
-		{endpoint: "http://[::1]:2000", want: "http://[::1]:9000"},
+		{endpoint: "https://storage.example.com", want: "https://storage.example.com"},
+		{endpoint: "https://storage.example.com/", want: "https://storage.example.com"},
+		{endpoint: "http://127.0.0.1:2000", want: "http://127.0.0.1:2000"},
+		{endpoint: "https://storage.example.com/base", want: "https://storage.example.com"},
+		{endpoint: "http://[::1]:2000", want: "http://[::1]:2000"},
 		{endpoint: "storage.example.com", want: ""},
 		{endpoint: "://bad", want: ""},
 	}
@@ -742,12 +742,12 @@ func TestImageProcessHelpers(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	ctx := context.Background()
 
-	// 拼链：派生数据面端点 + 处理串查询转义
+	// 拼链：同源数据面端点 + 处理串查询转义
 	raw, err := client.ImageProcessURL("photos", "a b.jpg", "image/resize,w_32,q_40")
 	if err != nil {
 		t.Fatalf("拼链失败：%v", err)
 	}
-	want := "https://storage.example.com:9000/photos/a%20b.jpg?x-inis-process=" +
+	want := "https://storage.example.com/photos/a%20b.jpg?x-inis-process=" +
 		url.QueryEscape("image/resize,w_32,q_40")
 	if raw != want {
 		t.Fatalf("处理链接不符：\n got %s\nwant %s", raw, want)
