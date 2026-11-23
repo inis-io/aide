@@ -294,7 +294,7 @@ activationToken / 客户端私钥 / 信封缓存只允许经 `Store` 持久化�
 
 ```go
 type Options struct {
-    ServerURL          string                 // 平台地址（必填），如 "https://licen-hub.inis.cn"
+    ServerURL          string                 // 平台地址（必填），如 "https://apis.inis.cn"
     ProjectNo          string                 // 项目编号（使用 BootstrapPublicKeys 时必填）
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
@@ -358,7 +358,7 @@ type Options struct {
 
 ```go
 client, err := licence.New(licence.Options{
-    ServerURL: "https://licen-hub.inis.cn", LicenseNo: "LIC-2026-000123",
+    ServerURL: "https://apis.inis.cn", LicenseNo: "LIC-2026-000123",
     Salt: "my-project-salt",
     PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "<平台按项目导出的公钥 hex>"},
     Version: "2.3.1",
@@ -657,7 +657,7 @@ type AutoOptions struct {
 }
 ```
 
-默认值：`DefaultServerURL = "https://licen-hub.inis.cn"`；`DefaultBootstrapPublicKeys` 仅含 `bootstrap-key-2026-01` 对应的官方公开根 `cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a`。
+默认值：`DefaultServerURL = "https://apis.inis.cn"`；`DefaultBootstrapPublicKeys` 仅含 `bootstrap-key-2026-01` 对应的官方公开根 `cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a`。
 
 执行顺序：读取 `auto.json` → 无元数据才 `ProvisionByPlan` → 验证 keyset → 写非机密元数据 → 复用 `New + Start` → 从签名信封回填 `InstanceNo`。强制指纹项目自动用挑战盐计算与激活一致的指纹，并复用 installSN 重试一次。任何失败原样返回，不得包装成激活成功。
 
@@ -1023,7 +1023,7 @@ func NewAdmin(options AdminOptions) (*AdminClient, error)
 
 ```go
 adm, _ := admin.NewAdmin(admin.AdminOptions{
-    ServerURL: "https://licen-hub.inis.cn", Account: "ops", Password: "secret",
+    ServerURL: "https://apis.inis.cn", Account: "ops", Password: "secret",
 })
 // adm.Qualification / adm.Projects / adm.Instances / adm.Licenses /
 // adm.SigningKeys / adm.Artifacts / adm.Versions / adm.UpgradeRecords / adm.Modules /

@@ -170,7 +170,7 @@ func (this *autoGRPCLicenseServer) Current(context.Context, *licencev1.CurrentLi
 
 // TestOfficialAutoDefaults - 官方零配置只内置公开地址与迁移后的 bootstrap 根公钥。
 func TestOfficialAutoDefaults(t *testing.T) {
-	if DefaultServerURL != "https://licen-hub.inis.cn" {
+	if DefaultServerURL != "https://apis.inis.cn" {
 		t.Fatalf("官方平台地址漂移: %s", DefaultServerURL)
 	}
 	if len(DefaultBootstrapPublicKeys) != 1 || DefaultBootstrapPublicKeys["bootstrap-key-2026-01"] != "cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a" {

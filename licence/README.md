@@ -86,13 +86,13 @@ import (
 )
 
 client, err := licence.New(licence.Options{
-	ServerURL: "https://licen-hub.inis.cn",
+	ServerURL: "https://apis.inis.cn",
 	Transport: licence.TransportGRPC,
 	// LicenseNo、Salt、PublicKeys 等照常填写
 })
 
 adm, err := admin.NewAdmin(admin.AdminOptions{ // Transport/GRPC 复用根包类型 licence.Transport / licence.GRPCOptions
-	ServerURL: "https://licen-hub.inis.cn",
+	ServerURL: "https://apis.inis.cn",
 	Transport: licence.TransportGRPC,
 	Account: "ops", Password: "secret",
 })
@@ -424,7 +424,7 @@ item = client.PlatformConfigMust("platform.some.key")   // 不存在时 panic
 
 ```go
 adm, err := admin.NewAdmin(admin.AdminOptions{
-	ServerURL: "https://licen-hub.inis.cn",
+	ServerURL: "https://apis.inis.cn",
 	Account:   "your-account",
 	Password:  "your-password", // 开启 2FA 时另传 TOTP
 })
@@ -708,7 +708,7 @@ activationToken / 客户端私钥 / 信封缓存只允许经 `Store` 持久化�
 
 ```go
 type Options struct {
-    ServerURL          string                 // 平台地址（必填），如 "https://licen-hub.inis.cn"
+    ServerURL          string                 // 平台地址（必填），如 "https://apis.inis.cn"
     ProjectNo          string                 // 项目编号（使用 BootstrapPublicKeys 时必填）
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
@@ -774,7 +774,7 @@ type Options struct {
 
 ```go
 client, err := licence.New(licence.Options{
-	ServerURL: "https://licen-hub.inis.cn", LicenseNo: "LIC-2026-000123",
+	ServerURL: "https://apis.inis.cn", LicenseNo: "LIC-2026-000123",
 	Salt: "my-project-salt",
 	PublicKeys: map[string]string{"license-key-INIS-202608-1a2b3c": "<平台按项目导出的公钥 hex>"},
 	Version: "2.3.1",
@@ -1373,7 +1373,7 @@ func NewAdmin(options AdminOptions) (*AdminClient, error)
 
 ```go
 adm, _ := admin.NewAdmin(admin.AdminOptions{
-	ServerURL: "https://licen-hub.inis.cn", Account: "ops", Password: "secret",
+	ServerURL: "https://apis.inis.cn", Account: "ops", Password: "secret",
 })
 // adm.Qualification / adm.Projects / adm.Instances / adm.Licenses /
 // adm.SigningKeys / adm.Artifacts / adm.Versions / adm.UpgradeRecords / adm.Modules /
