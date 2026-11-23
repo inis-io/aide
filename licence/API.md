@@ -657,7 +657,7 @@ type AutoOptions struct {
 }
 ```
 
-默认值：`DefaultServerURL = "https://apis.inis.cn"`；`DefaultBootstrapPublicKeys` 仅含 `bootstrap-key-2026-01` 对应的官方公开根 `cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a`。
+默认值：`DefaultServerURL = "https://apis.inis.cn"`；`DefaultBootstrapPublicKeys` 同时内置两个代际的官方公开根——`bootstrap-key-2026-01` = `cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a`（原根，私钥已随生产事故丢失且无法恢复而作废，条目仅为存量旧部署保留）与 `bootstrap-key-2026-02` = `82774729dbda2abb0f8ef5d5f05200700c80d127562136a80d3ee849b325763a`（2026-02 灾难恢复换根后的官方根，此后新签发以它为准）。验 keyset 时按 keyset 载荷的 `keyVersion` 精确选根，两根并存属设计内行为：同一客户端可同时信任多个代际，旧部署不必改代码或改配置即可继续工作。
 
 执行顺序：读取 `auto.json` → 无元数据才 `ProvisionByPlan` → 验证 keyset → 写非机密元数据 → 复用 `New + Start` → 从签名信封回填 `InstanceNo`。强制指纹项目自动用挑战盐计算与激活一致的指纹，并复用 installSN 重试一次。任何失败原样返回，不得包装成激活成功。
 

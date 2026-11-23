@@ -56,7 +56,7 @@
 | **手动许可证激活** | `licenseNo` + `Salt` + 项目编号与 bootstrap 根 | 继续使用 `New + Start`；官方平台使用内置根，自定义平台显式提供根 |
 | **管理面 CI/运维** | 平台管理端账号密码 | 仅 `admin.NewAdmin` 需要，禁止随交付项目分发 |
 
-SDK 自动签发不再需要 provision token，也不要求接入方导出或内置 license/release 工作公钥。平台用 bootstrap 根签署 keyset，SDK 验根后才接受其中的工作公钥；私钥永不下发。
+SDK 自动签发不再需要 provision token，也不要求接入方导出或内置 license/release 工作公钥。平台用 bootstrap 根签署 keyset，SDK 验根后才接受其中的工作公钥；私钥永不下发。内置信任表同时包含两个代际的官方根——`bootstrap-key-2026-01`（已作废原根，仅为存量旧部署保留）与 `bootstrap-key-2026-02`（灾难恢复换根后的官方根，新签发以它为准），验 keyset 时按 `keyVersion` 精确选根，换根不影响存量部署。
 
 安全约定（SDK 已强制，了解一下即可）：
 

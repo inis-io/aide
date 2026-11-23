@@ -168,13 +168,23 @@ func (this *autoGRPCLicenseServer) Current(context.Context, *licencev1.CurrentLi
 	return &licencev1.RuntimeResponse{Status: LicenceProtocol.StatusValid, ServerTime: time.Now().UnixMilli(), KeysetJson: keysetRaw, EnvelopeJson: envelopeRaw}, nil
 }
 
-// TestOfficialAutoDefaults - 官方零配置只内置公开地址与迁移后的 bootstrap 根公钥。
+// TestOfficialAutoDefaults - 官方零配置只内置公开地址与两个代际的 bootstrap 根公钥：
+// 2026-01 为作废原根（仅为存量旧部署保留），2026-02 为灾难恢复换根后的新根。
 func TestOfficialAutoDefaults(t *testing.T) {
 	if DefaultServerURL != "https://apis.inis.cn" {
 		t.Fatalf("官方平台地址漂移: %s", DefaultServerURL)
 	}
-	if len(DefaultBootstrapPublicKeys) != 1 || DefaultBootstrapPublicKeys["bootstrap-key-2026-01"] != "cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a" {
-		t.Fatalf("官方 bootstrap 根漂移: %+v", DefaultBootstrapPublicKeys)
+	roots := map[string]string{
+		"bootstrap-key-2026-01": "cbc89be1e4fc10ed0411ac1fc4f26a6e24aec42a815fe8c09decfd405586ae6a",
+		"bootstrap-key-2026-02": "82774729dbda2abb0f8ef5d5f05200700c80d127562136a80d3ee849b325763a",
+	}
+	if len(DefaultBootstrapPublicKeys) != len(roots) {
+		t.Fatalf("官方 bootstrap 根数量漂移: %+v", DefaultBootstrapPublicKeys)
+	}
+	for keyVersion, publicKey := range roots {
+		if DefaultBootstrapPublicKeys[keyVersion] != publicKey {
+			t.Fatalf("官方 bootstrap 根 %s 漂移: %+v", keyVersion, DefaultBootstrapPublicKeys)
+		}
 	}
 }
 
