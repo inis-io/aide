@@ -50,9 +50,10 @@ type customerUnbindChallengeBody struct {
 }
 
 type customerUnbindResponse struct {
-	Status     string `json:"status"`
-	ServerTime int64  `json:"serverTime"`
-	Message    string `json:"message"`
+	Status       string `json:"status"`
+	ServerTime   int64  `json:"serverTime"`
+	Message      string `json:"message"`
+	RetryAfterMs int64  `json:"retryAfterMs,omitempty"`
 }
 
 type customerUnbindOptionsResponse struct {
@@ -65,12 +66,13 @@ type customerUnbindOptionsResponse struct {
 }
 
 type customerUnbindChallengeResponse struct {
-	Status      string `json:"status"`
-	ChallengeNo string `json:"challengeNo"`
-	ExpiresAt   int64  `json:"expiresAt"`
-	Destination string `json:"destination"`
-	ServerTime  int64  `json:"serverTime"`
-	Message     string `json:"message"`
+	Status       string `json:"status"`
+	ChallengeNo  string `json:"challengeNo"`
+	ExpiresAt    int64  `json:"expiresAt"`
+	Destination  string `json:"destination"`
+	ServerTime   int64  `json:"serverTime"`
+	Message      string `json:"message"`
+	RetryAfterMs int64  `json:"retryAfterMs,omitempty"`
 }
 
 func (this *Client) customerUnbindToken(action string) (string, error) {
@@ -83,11 +85,15 @@ func (this *Client) customerUnbindToken(action string) (string, error) {
 	return token, nil
 }
 
-func customerUnbindStatusError(status, message string) error {
+func customerUnbindStatusError(status, message string, retryAfterMs ...int64) error {
 	if status == "" {
 		status = "ERROR"
 	}
-	return &ProvisionError{Status: status, Message: message}
+	var retry int64
+	if len(retryAfterMs) > 0 {
+		retry = retryAfterMs[0]
+	}
+	return &ProvisionError{Status: status, Message: message, RetryAfterMs: retry}
 }
 
 // CustomerUnbindOptions - 读取 2FA、邮箱、短信、密码的实际可用方式与脱敏目的地。
@@ -145,7 +151,7 @@ func (this *Client) CustomerUnbindChallenge(ctx context.Context, channel string)
 	}
 	this.updateClockOffset(response.ServerTime)
 	if response.Status != "OK" {
-		return CustomerUnbindChallenge{}, customerUnbindStatusError(response.Status, response.Message)
+		return CustomerUnbindChallenge{}, customerUnbindStatusError(response.Status, response.Message, response.RetryAfterMs)
 	}
 	return CustomerUnbindChallenge{ChallengeNo: response.ChallengeNo, ExpiresAt: response.ExpiresAt, Destination: response.Destination}, nil
 }
@@ -204,7 +210,7 @@ func (this *Client) CustomerUnbind(ctx context.Context, input CustomerUnbindInpu
 	}
 	this.updateClockOffset(response.ServerTime)
 	if response.Status != "OK" {
-		return customerUnbindStatusError(response.Status, response.Message)
+		return customerUnbindStatusError(response.Status, response.Message, response.RetryAfterMs)
 	}
 	return nil
 }

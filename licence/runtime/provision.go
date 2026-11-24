@@ -86,6 +86,9 @@ type ProvisionError struct {
 	Status string
 	// Message - 平台提示
 	Message string
+	// RetryAfterMs - 限流退避提示（仅 Status=RATE_LIMITED 且平台下发时 > 0）：
+	// 当前限流窗口剩余毫秒，调用方按此时长退避后重试；为 0 时由调用方自定退避节奏。
+	RetryAfterMs int64
 }
 
 // Error - 错误文本。
@@ -272,7 +275,9 @@ func finishProvision(response provisionResponse) (ProvisionResult, error) {
 		return ProvisionResult{}, conflict
 	}
 	if response.Status != "OK" {
-		return ProvisionResult{}, &ProvisionError{Status: response.Status, Message: response.Message}
+		return ProvisionResult{}, &ProvisionError{
+			Status: response.Status, Message: response.Message, RetryAfterMs: response.RetryAfterMs,
+		}
 	}
 	if strings.TrimSpace(response.LicenseNo) == "" || strings.TrimSpace(response.Salt) == "" {
 		return ProvisionResult{}, errors.New("申领响应缺少许可证参数")

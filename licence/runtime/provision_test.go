@@ -262,7 +262,7 @@ func TestProvisionByPlanActivationConflictHTTP(t *testing.T) {
 func TestProvisionByPlanBusinessError(t *testing.T) {
 
 	server := newFakeProvisionServer(t, func(map[string]any) (string, map[string]any) {
-		return "RATE_LIMITED", map[string]any{"message": "请求过于频繁"}
+		return "RATE_LIMITED", map[string]any{"message": "请求过于频繁", "retryAfterMs": 3599000}
 	})
 	_, err := ProvisionByPlan(t.Context(), ProvisionOptions{
 		ServerURL: server.server.URL, ProjectNo: "INIS-AUTO",
@@ -277,6 +277,9 @@ func TestProvisionByPlanBusinessError(t *testing.T) {
 	}
 	if provisionErr.Status != "RATE_LIMITED" || provisionErr.Message != "请求过于频繁" {
 		t.Fatalf("业务状态/提示透传不符: %s %s", provisionErr.Status, provisionErr.Message)
+	}
+	if provisionErr.RetryAfterMs != 3599000 {
+		t.Fatalf("限流退避提示透传不符: %d", provisionErr.RetryAfterMs)
 	}
 	if provisionErr.Error() == "" {
 		t.Fatal("错误文本不应为空")

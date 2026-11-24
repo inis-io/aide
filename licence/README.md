@@ -824,8 +824,9 @@ type CustomerView struct {
     BoundAt     int64  // 绑定时间（毫秒）
 }
 type ProvisionError struct {
-    Status  string // FINGERPRINT_REQUIRED / MIGRATION_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
-    Message string
+    Status       string // FINGERPRINT_REQUIRED / MIGRATION_INVALID / QUOTA_EXCEEDED / RATE_LIMITED / ...
+    Message      string
+    RetryAfterMs int64  // 限流退避提示（仅 RATE_LIMITED 且平台下发时 > 0）：窗口剩余毫秒，按此时长退避重试
 }
 ```
 

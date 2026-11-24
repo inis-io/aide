@@ -78,7 +78,7 @@ func starCannedBill() map[string]any {
 		"settleNo": "SET-2026-000001", "amountFen": int64(100000), "refundFen": int64(40000),
 		"sourceFen": int64(12000), "targetFen": int64(30000), "platformFen": int64(18000),
 		"targetLines": []map[string]any{{"instanceId": "INS-PEER-0001", "fen": int64(30000), "views": int64(600)}},
-		"settledAt": int64(starCannedSettleAt),
+		"settledAt":   int64(starCannedSettleAt),
 	}
 }
 
@@ -88,7 +88,7 @@ func starExpectedBill() StarSettleBill {
 		SettleNo: "SET-2026-000001", AmountFen: 100000, RefundFen: 40000,
 		SourceFen: 12000, TargetFen: 30000, PlatformFen: 18000,
 		TargetLines: []StarSettleTargetLine{{InstanceId: "INS-PEER-0001", Fen: 30000, Views: 600}},
-		SettledAt: starCannedSettleAt,
+		SettledAt:   starCannedSettleAt,
 	}
 }
 
@@ -519,7 +519,7 @@ func (this *starFakeGRPCServer) PromoteOrderSettle(ctx context.Context, request 
 			SettleNo: "SET-2026-000001", AmountFen: 100000, RefundFen: 40000,
 			SourceFen: 12000, TargetFen: 30000, PlatformFen: 18000,
 			TargetLines: []*starv1.StarSettleTargetLine{{InstanceId: "INS-PEER-0001", Fen: 30000, Views: 600}},
-			SettledAt: starCannedSettleAt,
+			SettledAt:   starCannedSettleAt,
 		},
 	}, nil
 }
@@ -610,9 +610,9 @@ func newStarGRPCClient(t *testing.T, fake *starFake) *Client {
 	fake.setClientPublicKey(activateApisClient(t, client))
 	client.transport = &grpcRuntimeTransport{
 		client: client, conn: conn,
-		starDirectory:  starv1.NewStarDirectoryServiceClient(conn),
-		starIndex:      starv1.NewStarIndexServiceClient(conn),
-		starBilling:    starv1.NewStarBillingServiceClient(conn),
+		starDirectory:   starv1.NewStarDirectoryServiceClient(conn),
+		starIndex:       starv1.NewStarIndexServiceClient(conn),
+		starBilling:     starv1.NewStarBillingServiceClient(conn),
 		starArbitration: starv1.NewStarArbitrationServiceClient(conn),
 	}
 	client.Star = &StarService{client: client}

@@ -132,8 +132,8 @@ type PlansCatalogResult struct {
 
 // plansCatalogData - 目录响应 data（双协议同形：HTTP 为服务端原文，gRPC 为传输层合成）
 type plansCatalogData struct {
-	Plans       []PlanCatalogItem     `json:"plans"`
-	CurrentPlan *PlanCurrentSnapshot  `json:"currentPlan"`
+	Plans       []PlanCatalogItem    `json:"plans"`
+	CurrentPlan *PlanCurrentSnapshot `json:"currentPlan"`
 }
 
 // PlansCatalog - 在售套餐目录查询（只读，不带幂等键）。

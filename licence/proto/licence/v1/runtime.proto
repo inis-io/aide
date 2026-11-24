@@ -143,6 +143,9 @@ message ProvisionResponse {
   ProvisionCustomerView customer = 11;
   // conflict - 激活码换证冲突对比载荷（仅 status=ACTIVATION_CONFLICT 时下发，此时不消费激活码）
   ProvisionConflictView conflict = 12;
+  // retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发）：当前限流窗口剩余毫秒，
+  // 客户端按此时长退避后重试，未下发（0）时由调用方自定退避节奏。
+  int64 retry_after_ms = 13;
 }
 
 // ProvisionCustomerView - 许可证已绑定的客户账号视图（仅展示脱敏信息）。
@@ -183,6 +186,8 @@ message CustomerBindResponse {
   string message = 2;
   // customer - 绑定成功后的客户账号视图
   ProvisionCustomerView customer = 3;
+  // retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+  int64 retry_after_ms = 4;
 }
 
 message CustomerUnbindOptionsRequest {}
@@ -212,6 +217,8 @@ message CustomerUnbindChallengeResponse {
   string destination = 4;
   int64 server_time = 5;
   string message = 6;
+  // retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+  int64 retry_after_ms = 7;
 }
 
 // CustomerUnbindRequest - 解绑凭据只在请求体与内存中使用，禁止落盘或写日志。
@@ -229,6 +236,8 @@ message CustomerUnbindResponse {
   string status = 1;
   string message = 2;
   int64 server_time = 3;
+  // retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+  int64 retry_after_ms = 4;
 }
 
 // CustomerBindPrepareRequest - 一次性授权预注册上下文。
@@ -245,6 +254,8 @@ message CustomerBindPrepareResponse {
   int64 expires_at = 4;
   int64 server_time = 5;
   ProvisionCustomerView customer = 6;  // 已绑定证的脱敏归属（status=CUSTOMER_BOUND 时返回）
+  // retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+  int64 retry_after_ms = 7;
 }
 
 // RuntimeResponse - 许可证运行面统一响应。

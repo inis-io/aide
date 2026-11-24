@@ -62,6 +62,7 @@ type provisionResponse struct {
 	Reissued      bool              `json:"reissued"`
 	Keyset        json.RawMessage   `json:"keyset"`
 	Message       string            `json:"message"`
+	RetryAfterMs  int64             `json:"retryAfterMs,omitempty"`
 	Customer      *customerViewJSON `json:"customer,omitempty"`
 	Conflict      *conflictViewJSON `json:"conflict,omitempty"`
 }

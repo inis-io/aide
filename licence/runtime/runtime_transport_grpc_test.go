@@ -454,6 +454,7 @@ type runtimeProvisionCodeServer struct {
 	confirmReplace     bool
 	status             string
 	message            string
+	retryAfterMs       int64
 	licenseNo          string
 	fingerprintHash    string
 	requireFingerprint bool
@@ -487,7 +488,10 @@ func (this *runtimeProvisionCodeServer) ProvisionByPlan(ctx context.Context, req
 	if code == "" {
 		code = "OK"
 	}
-	response := &licencev1.ProvisionResponse{Status: code, ServerTime: time.Now().UnixMilli(), Message: this.message, Conflict: this.conflict}
+	response := &licencev1.ProvisionResponse{
+		Status: code, ServerTime: time.Now().UnixMilli(), Message: this.message,
+		Conflict: this.conflict, RetryAfterMs: this.retryAfterMs,
+	}
 	if code != "OK" {
 		return response, nil
 	}
@@ -597,6 +601,22 @@ func TestGRPCActivateByCodeRejected(t *testing.T) {
 	}
 	if provisionErr.Status != "ACTIVATION_INVALID" || provisionErr.Message != "激活码无效或已过期" {
 		t.Fatalf("gRPC 业务拒绝透传不符: %+v", provisionErr)
+	}
+}
+
+// TestGRPCProvisionRateLimitedRetryAfter - gRPC 限流退避提示：retry_after_ms 经 provisionMap
+// 合成同形 JSON 后透传为 *ProvisionError.RetryAfterMs（与 HTTP 侧语义一致）。
+func TestGRPCProvisionRateLimitedRetryAfter(t *testing.T) {
+
+	server := &runtimeProvisionCodeServer{status: "RATE_LIMITED", message: "请求过于频繁", retryAfterMs: 599000}
+	client := newProvisionCodeGRPCClient(t, server)
+	_, err := client.ActivateByCode(context.Background(), "ABCD-EFGH-IJKL", false)
+	provisionErr, ok := err.(*ProvisionError)
+	if !ok {
+		t.Fatalf("gRPC 限流拒绝应可断言为 *ProvisionError，实际 %T", err)
+	}
+	if provisionErr.Status != "RATE_LIMITED" || provisionErr.RetryAfterMs != 599000 {
+		t.Fatalf("gRPC 限流退避提示透传不符: %+v", provisionErr)
 	}
 }
 

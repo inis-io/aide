@@ -195,6 +195,9 @@ func provisionMap(response *licencev1.ProvisionResponse) map[string]any {
 	if response.GetMessage() != "" {
 		result["message"] = response.GetMessage()
 	}
+	if response.GetRetryAfterMs() > 0 {
+		result["retryAfterMs"] = response.GetRetryAfterMs()
+	}
 	if len(response.GetKeysetJson()) > 0 {
 		result["keyset"] = json.RawMessage(response.GetKeysetJson())
 	}
@@ -221,6 +224,9 @@ func customerBindMap(response *licencev1.CustomerBindResponse) map[string]any {
 	if response.GetMessage() != "" {
 		result["message"] = response.GetMessage()
 	}
+	if response.GetRetryAfterMs() > 0 {
+		result["retryAfterMs"] = response.GetRetryAfterMs()
+	}
 	if customer := response.GetCustomer(); customer != nil {
 		result["customer"] = map[string]any{
 			"maskAccount": customer.GetMaskAccount(),
@@ -232,9 +238,13 @@ func customerBindMap(response *licencev1.CustomerBindResponse) map[string]any {
 
 // customerUnbindMap - 客户账号解绑响应 → 与 HTTP 同形的 JSON。
 func customerUnbindMap(response *licencev1.CustomerUnbindResponse) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"status": response.GetStatus(), "serverTime": response.GetServerTime(), "message": response.GetMessage(),
 	}
+	if response.GetRetryAfterMs() > 0 {
+		result["retryAfterMs"] = response.GetRetryAfterMs()
+	}
+	return result
 }
 
 // customerUnbindOptionsMap - 解绑验证选项 → 与 HTTP 同形的 JSON。
@@ -257,11 +267,15 @@ func customerUnbindOptionsMap(response *licencev1.CustomerUnbindOptionsResponse)
 
 // customerUnbindChallengeMap - 解绑验证码挑战 → 与 HTTP 同形的 JSON。
 func customerUnbindChallengeMap(response *licencev1.CustomerUnbindChallengeResponse) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"status": response.GetStatus(), "challengeNo": response.GetChallengeNo(),
 		"expiresAt": response.GetExpiresAt(), "destination": response.GetDestination(),
 		"serverTime": response.GetServerTime(), "message": response.GetMessage(),
 	}
+	if response.GetRetryAfterMs() > 0 {
+		result["retryAfterMs"] = response.GetRetryAfterMs()
+	}
+	return result
 }
 
 // customerBindPrepareMap - 授权预注册响应 → 与 HTTP 同形的 JSON。
@@ -269,6 +283,9 @@ func customerBindPrepareMap(response *licencev1.CustomerBindPrepareResponse) map
 	result := map[string]any{
 		"status": response.GetStatus(), "serverTime": response.GetServerTime(),
 		"requestNo": response.GetRequestNo(), "expiresAt": response.GetExpiresAt(), "message": response.GetMessage(),
+	}
+	if response.GetRetryAfterMs() > 0 {
+		result["retryAfterMs"] = response.GetRetryAfterMs()
 	}
 	if customer := response.GetCustomer(); customer != nil {
 		result["customer"] = map[string]any{

@@ -391,7 +391,10 @@ type ProvisionResponse struct {
 	// customer - 客户账号视图（仅许可证已绑定客户账号时下发，未绑定为 null）
 	Customer *ProvisionCustomerView `protobuf:"bytes,11,opt,name=customer,proto3" json:"customer,omitempty"`
 	// conflict - 激活码换证冲突对比载荷（仅 status=ACTIVATION_CONFLICT 时下发，此时不消费激活码）
-	Conflict      *ProvisionConflictView `protobuf:"bytes,12,opt,name=conflict,proto3" json:"conflict,omitempty"`
+	Conflict *ProvisionConflictView `protobuf:"bytes,12,opt,name=conflict,proto3" json:"conflict,omitempty"`
+	// retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发）：当前限流窗口剩余毫秒，
+	// 客户端按此时长退避后重试，未下发（0）时由调用方自定退避节奏。
+	RetryAfterMs  int64 `protobuf:"varint,13,opt,name=retry_after_ms,json=retryAfterMs,proto3" json:"retry_after_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -508,6 +511,13 @@ func (x *ProvisionResponse) GetConflict() *ProvisionConflictView {
 		return x.Conflict
 	}
 	return nil
+}
+
+func (x *ProvisionResponse) GetRetryAfterMs() int64 {
+	if x != nil {
+		return x.RetryAfterMs
+	}
+	return 0
 }
 
 // ProvisionCustomerView - 许可证已绑定的客户账号视图（仅展示脱敏信息）。
@@ -771,7 +781,9 @@ type CustomerBindResponse struct {
 	Status  string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	// customer - 绑定成功后的客户账号视图
-	Customer      *ProvisionCustomerView `protobuf:"bytes,3,opt,name=customer,proto3" json:"customer,omitempty"`
+	Customer *ProvisionCustomerView `protobuf:"bytes,3,opt,name=customer,proto3" json:"customer,omitempty"`
+	// retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+	RetryAfterMs  int64 `protobuf:"varint,4,opt,name=retry_after_ms,json=retryAfterMs,proto3" json:"retry_after_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -825,6 +837,13 @@ func (x *CustomerBindResponse) GetCustomer() *ProvisionCustomerView {
 		return x.Customer
 	}
 	return nil
+}
+
+func (x *CustomerBindResponse) GetRetryAfterMs() int64 {
+	if x != nil {
+		return x.RetryAfterMs
+	}
+	return 0
 }
 
 type CustomerUnbindOptionsRequest struct {
@@ -1044,13 +1063,15 @@ func (x *CustomerUnbindChallengeRequest) GetChannel() string {
 }
 
 type CustomerUnbindChallengeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	ChallengeNo   string                 `protobuf:"bytes,2,opt,name=challenge_no,json=challengeNo,proto3" json:"challenge_no,omitempty"`
-	ExpiresAt     int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	Destination   string                 `protobuf:"bytes,4,opt,name=destination,proto3" json:"destination,omitempty"`
-	ServerTime    int64                  `protobuf:"varint,5,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
-	Message       string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Status      string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ChallengeNo string                 `protobuf:"bytes,2,opt,name=challenge_no,json=challengeNo,proto3" json:"challenge_no,omitempty"`
+	ExpiresAt   int64                  `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Destination string                 `protobuf:"bytes,4,opt,name=destination,proto3" json:"destination,omitempty"`
+	ServerTime  int64                  `protobuf:"varint,5,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	Message     string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	// retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+	RetryAfterMs  int64 `protobuf:"varint,7,opt,name=retry_after_ms,json=retryAfterMs,proto3" json:"retry_after_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1125,6 +1146,13 @@ func (x *CustomerUnbindChallengeResponse) GetMessage() string {
 		return x.Message
 	}
 	return ""
+}
+
+func (x *CustomerUnbindChallengeResponse) GetRetryAfterMs() int64 {
+	if x != nil {
+		return x.RetryAfterMs
+	}
+	return 0
 }
 
 // CustomerUnbindRequest - 解绑凭据只在请求体与内存中使用，禁止落盘或写日志。
@@ -1207,10 +1235,12 @@ func (x *CustomerUnbindRequest) GetPassword() string {
 
 // CustomerUnbindResponse - 解绑授权账号响应。
 type CustomerUnbindResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	ServerTime    int64                  `protobuf:"varint,3,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Status     string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Message    string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	ServerTime int64                  `protobuf:"varint,3,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	// retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+	RetryAfterMs  int64 `protobuf:"varint,4,opt,name=retry_after_ms,json=retryAfterMs,proto3" json:"retry_after_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1262,6 +1292,13 @@ func (x *CustomerUnbindResponse) GetMessage() string {
 func (x *CustomerUnbindResponse) GetServerTime() int64 {
 	if x != nil {
 		return x.ServerTime
+	}
+	return 0
+}
+
+func (x *CustomerUnbindResponse) GetRetryAfterMs() int64 {
+	if x != nil {
+		return x.RetryAfterMs
 	}
 	return 0
 }
@@ -1321,13 +1358,15 @@ func (x *CustomerBindPrepareRequest) GetState() string {
 
 // CustomerBindPrepareResponse - 预注册授权请求结果。
 type CustomerBindPrepareResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	RequestNo     string                 `protobuf:"bytes,3,opt,name=request_no,json=requestNo,proto3" json:"request_no,omitempty"`
-	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	ServerTime    int64                  `protobuf:"varint,5,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
-	Customer      *ProvisionCustomerView `protobuf:"bytes,6,opt,name=customer,proto3" json:"customer,omitempty"` // 已绑定证的脱敏归属（status=CUSTOMER_BOUND 时返回）
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Status     string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Message    string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	RequestNo  string                 `protobuf:"bytes,3,opt,name=request_no,json=requestNo,proto3" json:"request_no,omitempty"`
+	ExpiresAt  int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	ServerTime int64                  `protobuf:"varint,5,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	Customer   *ProvisionCustomerView `protobuf:"bytes,6,opt,name=customer,proto3" json:"customer,omitempty"` // 已绑定证的脱敏归属（status=CUSTOMER_BOUND 时返回）
+	// retry_after_ms - 限流退避提示（仅 status=RATE_LIMITED 时下发，语义同 ProvisionResponse.retry_after_ms）
+	RetryAfterMs  int64 `protobuf:"varint,7,opt,name=retry_after_ms,json=retryAfterMs,proto3" json:"retry_after_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1402,6 +1441,13 @@ func (x *CustomerBindPrepareResponse) GetCustomer() *ProvisionCustomerView {
 		return x.Customer
 	}
 	return nil
+}
+
+func (x *CustomerBindPrepareResponse) GetRetryAfterMs() int64 {
+	if x != nil {
+		return x.RetryAfterMs
+	}
+	return 0
 }
 
 // RuntimeResponse - 许可证运行面统一响应。
@@ -4779,7 +4825,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	" \x01(\tR\x0eactivationCode\x12,\n" +
 	"\x12current_license_no\x18\v \x01(\tR\x10currentLicenseNo\x12(\n" +
 	"\x10release_old_seat\x18\f \x01(\bR\x0ereleaseOldSeat\x12'\n" +
-	"\x0fconfirm_replace\x18\r \x01(\bR\x0econfirmReplaceJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\rtemplate_codeR\x0fprovision_token\"\xcb\x03\n" +
+	"\x0fconfirm_replace\x18\r \x01(\bR\x0econfirmReplaceJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\rtemplate_codeR\x0fprovision_token\"\xf1\x03\n" +
 	"\x11ProvisionResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -4798,7 +4844,8 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	" \x01(\fR\n" +
 	"keysetJson\x12F\n" +
 	"\bcustomer\x18\v \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\x12F\n" +
-	"\bconflict\x18\f \x01(\v2*.licenhub.licence.v1.ProvisionConflictViewR\bconflict\"U\n" +
+	"\bconflict\x18\f \x01(\v2*.licenhub.licence.v1.ProvisionConflictViewR\bconflict\x12$\n" +
+	"\x0eretry_after_ms\x18\r \x01(\x03R\fretryAfterMs\"U\n" +
 	"\x15ProvisionCustomerView\x12!\n" +
 	"\fmask_account\x18\x01 \x01(\tR\vmaskAccount\x12\x19\n" +
 	"\bbound_at\x18\x02 \x01(\x03R\aboundAt\"\xbf\x01\n" +
@@ -4819,11 +4866,12 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\n" +
 	"seat_limit\x18\x04 \x01(\x05R\tseatLimit\")\n" +
 	"\x13CustomerBindRequest\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\tR\x04code\"\x90\x01\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\"\xb6\x01\n" +
 	"\x14CustomerBindResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12F\n" +
-	"\bcustomer\x18\x03 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\"\x1e\n" +
+	"\bcustomer\x18\x03 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\x12$\n" +
+	"\x0eretry_after_ms\x18\x04 \x01(\x03R\fretryAfterMs\"\x1e\n" +
 	"\x1cCustomerUnbindOptionsRequest\"G\n" +
 	"\x19CustomerUnbindDestination\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x14\n" +
@@ -4837,7 +4885,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"serverTime\x12\x18\n" +
 	"\amessage\x18\x06 \x01(\tR\amessage\":\n" +
 	"\x1eCustomerUnbindChallengeRequest\x12\x18\n" +
-	"\achannel\x18\x01 \x01(\tR\achannel\"\xd8\x01\n" +
+	"\achannel\x18\x01 \x01(\tR\achannel\"\xfe\x01\n" +
 	"\x1fCustomerUnbindChallengeResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12!\n" +
 	"\fchallenge_no\x18\x02 \x01(\tR\vchallengeNo\x12\x1d\n" +
@@ -4846,21 +4894,23 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\vdestination\x18\x04 \x01(\tR\vdestination\x12\x1f\n" +
 	"\vserver_time\x18\x05 \x01(\x03R\n" +
 	"serverTime\x12\x18\n" +
-	"\amessage\x18\x06 \x01(\tR\amessage\"\xa2\x01\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\x12$\n" +
+	"\x0eretry_after_ms\x18\a \x01(\x03R\fretryAfterMs\"\xa2\x01\n" +
 	"\x15CustomerUnbindRequest\x12\x1e\n" +
 	"\vtwo_fa_code\x18\x01 \x01(\tR\ttwoFaCode\x12\x16\n" +
 	"\x06method\x18\x02 \x01(\tR\x06method\x12\x12\n" +
 	"\x04code\x18\x03 \x01(\tR\x04code\x12!\n" +
 	"\fchallenge_no\x18\x04 \x01(\tR\vchallengeNo\x12\x1a\n" +
-	"\bpassword\x18\x05 \x01(\tR\bpassword\"k\n" +
+	"\bpassword\x18\x05 \x01(\tR\bpassword\"\x91\x01\n" +
 	"\x16CustomerUnbindResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vserver_time\x18\x03 \x01(\x03R\n" +
-	"serverTime\"U\n" +
+	"serverTime\x12$\n" +
+	"\x0eretry_after_ms\x18\x04 \x01(\x03R\fretryAfterMs\"U\n" +
 	"\x1aCustomerBindPrepareRequest\x12!\n" +
 	"\fredirect_uri\x18\x01 \x01(\tR\vredirectUri\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\tR\x05state\"\xf6\x01\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\"\x9c\x02\n" +
 	"\x1bCustomerBindPrepareResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -4870,7 +4920,8 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12\x1f\n" +
 	"\vserver_time\x18\x05 \x01(\x03R\n" +
 	"serverTime\x12F\n" +
-	"\bcustomer\x18\x06 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\"\xb2\x02\n" +
+	"\bcustomer\x18\x06 \x01(\v2*.licenhub.licence.v1.ProvisionCustomerViewR\bcustomer\x12$\n" +
+	"\x0eretry_after_ms\x18\a \x01(\x03R\fretryAfterMs\"\xb2\x02\n" +
 	"\x0fRuntimeResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +

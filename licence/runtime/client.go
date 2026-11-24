@@ -458,12 +458,13 @@ type customerBindPrepareBody struct {
 }
 
 type customerBindPrepareResponse struct {
-	Status     string        `json:"status"`
-	ServerTime int64         `json:"serverTime"`
-	RequestNo  string        `json:"requestNo"`
-	ExpiresAt  int64         `json:"expiresAt"`
-	Customer   *CustomerView `json:"customer"`
-	Message    string        `json:"message"`
+	Status       string        `json:"status"`
+	ServerTime   int64         `json:"serverTime"`
+	RequestNo    string        `json:"requestNo"`
+	ExpiresAt    int64         `json:"expiresAt"`
+	Customer     *CustomerView `json:"customer"`
+	Message      string        `json:"message"`
+	RetryAfterMs int64         `json:"retryAfterMs,omitempty"`
 }
 
 // CustomerBindPrepare - 预注册一次性账号授权请求，防止开放回跳和票据上下文错配。
@@ -507,7 +508,9 @@ func (this *Client) CustomerBindPrepare(ctx context.Context, redirectURI, state 
 		if status == "" {
 			status = "ERROR"
 		}
-		return CustomerBindPrepareResult{}, &ProvisionError{Status: status, Message: response.Message}
+		return CustomerBindPrepareResult{}, &ProvisionError{
+			Status: status, Message: response.Message, RetryAfterMs: response.RetryAfterMs,
+		}
 	}
 	return CustomerBindPrepareResult{RequestNo: response.RequestNo, ExpiresAt: response.ExpiresAt}, nil
 }
@@ -519,9 +522,10 @@ type customerBindBody struct {
 
 // customerBindResponse - 客户账号绑定统一响应（HTTP 为平台原文，gRPC 由传输层合成）。
 type customerBindResponse struct {
-	Status   string            `json:"status"`
-	Message  string            `json:"message"`
-	Customer *customerViewJSON `json:"customer,omitempty"`
+	Status       string            `json:"status"`
+	Message      string            `json:"message"`
+	RetryAfterMs int64             `json:"retryAfterMs,omitempty"`
+	Customer     *customerViewJSON `json:"customer,omitempty"`
 }
 
 // CustomerBind - 客户账号绑定（一次性授权票据；activation-sign-v1 实例签名防重放）。
@@ -559,7 +563,9 @@ func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBind
 		if status == "" {
 			status = "ERROR"
 		}
-		return CustomerBindResult{}, &ProvisionError{Status: status, Message: response.Message}
+		return CustomerBindResult{}, &ProvisionError{
+			Status: status, Message: response.Message, RetryAfterMs: response.RetryAfterMs,
+		}
 	}
 	result := CustomerBindResult{}
 	if response.Customer != nil {
