@@ -20,6 +20,8 @@ type activateBody struct {
 	ClientPublicKey string `json:"clientPublicKey"`
 	ClientTime      int64  `json:"clientTime,omitempty"`
 	DeviceName      string `json:"deviceName,omitempty"`
+	// SiteDomain - 站点域名（可选，客户端部署站点标识，供平台实例列表展示）
+	SiteDomain string `json:"siteDomain,omitempty"`
 }
 
 // ErrNotFound - 许可证或实例信息无效（HTTP 404 / gRPC NotFound 归一的凭证终态）。
@@ -34,6 +36,8 @@ type validateBody struct {
 	Feature         string           `json:"feature,omitempty"`
 	Usage           map[string]int64 `json:"usage,omitempty"`
 	ClientTime      int64            `json:"clientTime,omitempty"`
+	// SiteDomain - 站点域名（可选，随心跳上报，平台非空才覆盖实例域名）
+	SiteDomain string `json:"siteDomain,omitempty"`
 }
 
 // provisionBody - 装机自动申领请求体（sdk_auto：projectNo + installSN 定位，无项目级令牌）。
@@ -135,6 +139,7 @@ func (this *Client) activateLocked(ctx context.Context) error {
 		LicenseNo: this.options.LicenseNo, InstanceNo: this.options.InstanceNo,
 		FingerprintHash: this.fingerprint, ClientPublicKey: publicKey,
 		ClientTime: time.Now().UnixMilli(), DeviceName: this.options.DeviceName,
+		SiteDomain: this.options.SiteDomain,
 	})
 	if err != nil {
 		return err
@@ -189,7 +194,7 @@ func (this *Client) validateLocked(ctx context.Context) error {
 	body, err := json.Marshal(validateBody{
 		LicenseNo: this.options.LicenseNo, FingerprintHash: this.fingerprint,
 		Version: this.options.Version, Usage: usage,
-		ClientTime: time.Now().UnixMilli(),
+		ClientTime: time.Now().UnixMilli(), SiteDomain: this.options.SiteDomain,
 	})
 	if err != nil {
 		return err

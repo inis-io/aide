@@ -380,13 +380,26 @@ type runtimeSeatServer struct {
 	licencev1.UnimplementedLicenseRuntimeServiceServer
 	t          *testing.T
 	deviceName string
+	// siteDomain - activate/validate 捕获的站点域名
+	siteDomain string
+	// validateDomain - validate 捕获的站点域名（与 activate 分开记录）
+	validateDomain string
 }
 
 func (s *runtimeSeatServer) Activate(_ context.Context, request *licencev1.ActivateRequest) (*licencev1.RuntimeResponse, error) {
 	s.deviceName = request.GetDeviceName()
+	s.siteDomain = request.GetSiteDomain()
 	return &licencev1.RuntimeResponse{
 		Status: LicenceProtocol.StatusValid, ServerTime: time.Now().UnixMilli(),
 		ActivationNo: "ACT-2026-000007", SeatNo: "SEAT-2026-000007",
+		ExpiresAt: time.Now().UnixMilli() + 7*24*3600*1000,
+	}, nil
+}
+
+func (s *runtimeSeatServer) Validate(_ context.Context, request *licencev1.ValidateRequest) (*licencev1.RuntimeResponse, error) {
+	s.validateDomain = request.GetSiteDomain()
+	return &licencev1.RuntimeResponse{
+		Status: LicenceProtocol.StatusValid, ServerTime: time.Now().UnixMilli(),
 		ExpiresAt: time.Now().UnixMilli() + 7*24*3600*1000,
 	}, nil
 }
@@ -438,6 +451,62 @@ func TestGRPCRuntimeActivateMapsDeviceNameAndSeatNo(t *testing.T) {
 	}
 	if response.ExpiresAt <= 0 {
 		t.Fatalf("expiresAt 回填映射不符: %s", string(raw))
+	}
+}
+
+// TestGRPCRuntimeSiteDomain - gRPC：siteDomain 随 activate/validate 双请求上送（site_domain 字段映射）
+func TestGRPCRuntimeSiteDomain(t *testing.T) {
+
+	listener := bufconn.Listen(1 << 20)
+	server := grpc.NewServer()
+	seatServer := &runtimeSeatServer{t: t}
+	licencev1.RegisterLicenseRuntimeServiceServer(server, seatServer)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	seed, _, err := LicenceProtocol.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{options: Options{HTTPTimeout: time.Second}, state: runtimeState{ActivationToken: "token", ClientSeed: hex.EncodeToString(seed)}}
+	transport := &grpcRuntimeTransport{client: client, conn: conn, license: licencev1.NewLicenseRuntimeServiceClient(conn)}
+
+	activate, err := json.Marshal(activateBody{
+		LicenseNo: "LIC-2026-000123", FingerprintHash: "fp-hash", ClientPublicKey: "pub", SiteDomain: "https://demo.example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := transport.RoundTrip(context.Background(), http.MethodPost, "/api/v1/licenses/activate", activate, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK {
+		t.Fatalf("activate code=%d", code)
+	}
+	if seatServer.siteDomain != "https://demo.example.com" {
+		t.Fatalf("siteDomain 未随 gRPC activate 上送: %q", seatServer.siteDomain)
+	}
+
+	validate, err := json.Marshal(validateBody{
+		LicenseNo: "LIC-2026-000123", FingerprintHash: "fp-hash", Version: "1.0.0", SiteDomain: "https://demo.example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err = transport.RoundTrip(context.Background(), http.MethodPost, "/api/v1/licenses/validate", validate, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK {
+		t.Fatalf("validate code=%d", code)
+	}
+	if seatServer.validateDomain != "https://demo.example.com" {
+		t.Fatalf("siteDomain 未随 gRPC validate 上送: %q", seatServer.validateDomain)
 	}
 }
 

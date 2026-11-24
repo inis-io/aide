@@ -29,8 +29,10 @@ type ActivateRequest struct {
 	ClientPublicKey string                 `protobuf:"bytes,4,opt,name=client_public_key,json=clientPublicKey,proto3" json:"client_public_key,omitempty"`
 	ClientTime      int64                  `protobuf:"varint,5,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
 	DeviceName      string                 `protobuf:"bytes,6,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// site_domain - 站点域名（可选，客户端部署站点标识，供平台实例列表展示）
+	SiteDomain    string `protobuf:"bytes,7,opt,name=site_domain,json=siteDomain,proto3" json:"site_domain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ActivateRequest) Reset() {
@@ -105,6 +107,13 @@ func (x *ActivateRequest) GetDeviceName() string {
 	return ""
 }
 
+func (x *ActivateRequest) GetSiteDomain() string {
+	if x != nil {
+		return x.SiteDomain
+	}
+	return ""
+}
+
 type ValidateRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	LicenseNo       string                 `protobuf:"bytes,1,opt,name=license_no,json=licenseNo,proto3" json:"license_no,omitempty"`
@@ -113,8 +122,10 @@ type ValidateRequest struct {
 	Feature         string                 `protobuf:"bytes,4,opt,name=feature,proto3" json:"feature,omitempty"`
 	Usage           map[string]int64       `protobuf:"bytes,5,rep,name=usage,proto3" json:"usage,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	ClientTime      int64                  `protobuf:"varint,6,opt,name=client_time,json=clientTime,proto3" json:"client_time,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// site_domain - 站点域名（可选，随心跳上报，平台非空才覆盖实例域名）
+	SiteDomain    string `protobuf:"bytes,7,opt,name=site_domain,json=siteDomain,proto3" json:"site_domain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ValidateRequest) Reset() {
@@ -187,6 +198,13 @@ func (x *ValidateRequest) GetClientTime() int64 {
 		return x.ClientTime
 	}
 	return 0
+}
+
+func (x *ValidateRequest) GetSiteDomain() string {
+	if x != nil {
+		return x.SiteDomain
+	}
+	return ""
 }
 
 type CurrentLicenseRequest struct {
@@ -4781,7 +4799,7 @@ var File_licence_v1_runtime_proto protoreflect.FileDescriptor
 
 const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\n" +
-	"\x18licence/v1/runtime.proto\x12\x13licenhub.licence.v1\"\xea\x01\n" +
+	"\x18licence/v1/runtime.proto\x12\x13licenhub.licence.v1\"\x8b\x02\n" +
 	"\x0fActivateRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12\x1f\n" +
@@ -4792,7 +4810,9 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\vclient_time\x18\x05 \x01(\x03R\n" +
 	"clientTime\x12\x1f\n" +
 	"\vdevice_name\x18\x06 \x01(\tR\n" +
-	"deviceName\"\xb1\x02\n" +
+	"deviceName\x12\x1f\n" +
+	"\vsite_domain\x18\a \x01(\tR\n" +
+	"siteDomain\"\xd2\x02\n" +
 	"\x0fValidateRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12)\n" +
@@ -4801,7 +4821,9 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\afeature\x18\x04 \x01(\tR\afeature\x12E\n" +
 	"\x05usage\x18\x05 \x03(\v2/.licenhub.licence.v1.ValidateRequest.UsageEntryR\x05usage\x12\x1f\n" +
 	"\vclient_time\x18\x06 \x01(\x03R\n" +
-	"clientTime\x1a8\n" +
+	"clientTime\x12\x1f\n" +
+	"\vsite_domain\x18\a \x01(\tR\n" +
+	"siteDomain\x1a8\n" +
 	"\n" +
 	"UsageEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

@@ -16,7 +16,7 @@ defaults:
 #      docs/md/license-core/许可证运行面接口契约.md 为准，改行前先对齐契约）
 runtime:
   # keyset = 响应附带 bootstrap 根签名的项目工作公钥集合；HTTP 字段 keyset，gRPC 字段 keyset_json bytes。
-  - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, "deviceName,keyset"]
+  - [Client.Activate, POST, /api/v1/licenses/activate, LicenseRuntimeService/Activate, public, "", license, write, critical, false, "deviceName,siteDomain,keyset"]
   # activationCode = 激活码入座；migrationCode 已下线，仅为旧请求识别返回 MIGRATION_REMOVED，SDK 不再提供公开入口。
   # 激活码换证（Client.ActivateByCode）携带 currentLicenseNo 时请求带 activation-sign-v1 签名，
   # 成功返回目标许可证与 customer 视图；付费证冲突返回 ACTIVATION_CONFLICT + conflict 对比载荷（不消费码）。
@@ -35,7 +35,7 @@ runtime:
   - [Client.CustomerUnbindChallenge, POST, /api/v1/licenses/customer-unbind/challenge, LicenseRuntimeService/CustomerUnbindChallenge, activation-sign-v1, "", license, write, high, false, "challengeNo,expiresAt,destination"]
   # 解绑授权账号：分级验证后释放席位并回退基础免费套餐，历史订单仅作凭证。
   - [Client.CustomerUnbind, POST, /api/v1/licenses/customer-unbind, LicenseRuntimeService/CustomerUnbind, activation-sign-v1, "", license, write, critical, false, ""]
-  - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, keyset]
+  - [Client.Validate, POST, /api/v1/licenses/validate, LicenseRuntimeService/Validate, activation-sign-v1, "", license, write, normal, true, "siteDomain,keyset"]
   - [Client.Current, GET, /api/v1/licenses/current, LicenseRuntimeService/Current, activation-sign-v1, "", license, read, normal, true, keyset]
   - [Client.CheckUpdate, POST, /api/v1/updates/check, UpdateRuntimeService/Check, activation-sign-v1, "", update, read, normal, true, keyset]
   - [Client.ReportUpdate, POST, /api/v1/updates/report, UpdateRuntimeService/Report, activation-sign-v1, "", update, write, normal, true]

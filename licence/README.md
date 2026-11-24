@@ -243,6 +243,7 @@ licence.Options{
 开发/预发许可证可配置「多机席位」（载荷 `bindingPolicy: "seats"` + `seatLimit: N`；单机许可证为 `single` + 1，历史信封缺省也按此解释）：平台为每台机器登记一条席位记录，**一个 Client 实例独占一机一席**——同机反复 `Start` 复用原席位，不同机器各占一席，占满后新机激活被拒。
 
 - **机器名称**：`Options.DeviceName` 仅供平台席位列表展示，缺省取 `os.Hostname()`（去空格、限长 128）；`client.DeviceName()` 返回实际生效值，`client.SeatNo()` 返回本机席位编号（排障用，激活后才有值）。
+- **站点域名**：`Options.SiteDomain` 是客户端部署站点标识（去空白、限长 256，缺省为空、不取主机名），随 activate 与 validate 心跳上送，平台落库部署实例 `domain` 列（心跳非空才覆盖），供平台实例/许可证列表识别客户站点；`client.SiteDomain()` 返回实际生效值。
 - **指纹即席位身份键**：同机指纹必须长期稳定、异机必须不同。克隆镜像/容器等因子雷同场景必须注入 `Options.Fingerprint` 或 `Options.Provider` 区分，否则会出现「同机抢多席」或「异机挤一席」。
 
 席位状态码处置语义（**与 `EXPIRED` 的自动引导不同，SDK 不做任何自动恢复**）：
@@ -713,6 +714,7 @@ type Options struct {
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
     DeviceName         string                 // 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
+    SiteDomain         string                 // 站点域名（可选，供平台实例/许可证列表识别站点；随 activate/validate 上送，缺省为空）
     Salt               string                 // 指纹盐（必填，与实例登记时一致）
     PublicKeys         map[string]string      // 静态 license 公钥（与 BootstrapPublicKeys 至少一种）
     ReleasePublicKeys  map[string]string      // 静态 release 公钥（可由动态 keyset 提供）
@@ -760,6 +762,7 @@ type Options struct {
 | `Status` | `func (this *Client) Status() string` | 当前授权状态（状态码见 §12.2），业务据此放行/降级 |
 | `SeatNo` | `func (this *Client) SeatNo() string` | 当前机器的席位编号（尚未激活或历史服务端未返回时为空；仅展示/排障） |
 | `DeviceName` | `func (this *Client) DeviceName() string` | 实际生效的机器名称（`Options.DeviceName` 或其缺省主机名，与激活上送值一致） |
+| `SiteDomain` | `func (this *Client) SiteDomain() string` | 实际生效的站点域名（`Options.SiteDomain`，去空白限长 256，缺省为空串） |
 | `Envelope` | `func (this *Client) Envelope() (Envelope, bool)` | 当前缓存信封（第二返回值标识是否存在） |
 | `GetBool` | `func (this *Client) GetBool(code string) (bool, bool)` | 布尔权益读取：载荷 `entitlements[code]`（键缺省/类型不符返回 false, false；不含状态闸门，需配合 `Status()`） |
 | `GetInt` | `func (this *Client) GetInt(code string) (int64, bool)` | 整数权益读取：载荷 `entitlements[code]`（小数或非数值返回 0, false） |
@@ -803,6 +806,7 @@ type ProvisionOptions struct {
     StorageDir     string        // install.sn 持久化目录（默认 ./runtime/licence）
     InstallSN      string        // 安装唯一标识（可选，为空懒生成 UUID v4 并持久化）
     DeviceName     string        // 机器名称（可选）
+    SiteDomain     string        // 站点域名（可选，供平台实例/许可证列表识别站点）
     Fingerprint    string        // 显式指纹哈希（可选，与运行面一致）
     Provider       FingerprintProvider // 自定义指纹源（可选）
     Transport      Transport     // 默认 HTTP；可选 TransportGRPC

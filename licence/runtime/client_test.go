@@ -46,6 +46,10 @@ type fakePlatform struct {
 	clientPublicKey string
 	// deviceName - activate 上报的设备名称
 	deviceName string
+	// activateSiteDomain - activate 上报的站点域名
+	activateSiteDomain string
+	// validateSiteDomain - validate 上报的站点域名
+	validateSiteDomain string
 	// tokenHash - 激活令牌哈希（SHA-256 hex，库存哈希不存原文）
 	tokenHash string
 	// expiresAt - 激活有效期截止（毫秒）
@@ -378,6 +382,13 @@ func (this *fakePlatform) handleActivate(writer http.ResponseWriter, body []byte
 	}
 	this.clientPublicKey = params.ClientPublicKey
 	this.deviceName = params.DeviceName
+	// 站点域名为新增字段，经通用探针捕获（契约兼容只追加字段的旧服务端）
+	var probe map[string]any
+	if err := json.Unmarshal(body, &probe); err == nil {
+		if value, ok := probe["siteDomain"].(string); ok {
+			this.activateSiteDomain = value
+		}
+	}
 	token := LicenceProtocol.Licence.Nonce() + LicenceProtocol.Licence.Nonce() + LicenceProtocol.Licence.Nonce() // 48 字节 hex
 	sum := sha256.Sum256([]byte(token))
 	this.tokenHash = hex.EncodeToString(sum[:])
@@ -407,6 +418,14 @@ func (this *fakePlatform) handleValidate(writer http.ResponseWriter, request *ht
 
 	if !this.credential(writer, request, body) {
 		return
+	}
+
+	// 站点域名经通用探针捕获（契约兼容只追加字段的旧服务端）
+	var probe map[string]any
+	if err := json.Unmarshal(body, &probe); err == nil {
+		if value, ok := probe["siteDomain"].(string); ok {
+			this.validateSiteDomain = value
+		}
 	}
 
 	status := this.status()
@@ -2127,5 +2146,76 @@ func TestClientCustomerBindNotFound(t *testing.T) {
 	_, err = client.CustomerBind(t.Context(), "ABCD-EFGH")
 	if err == nil || err.Error() != "许可证或实例信息无效" {
 		t.Fatalf("404 应归一为「许可证或实例信息无效」，实际 %v", err)
+	}
+}
+
+// TestClientSiteDomainReport - 站点域名随 activate 与 validate 心跳双通道上送，New 归一去空白
+func TestClientSiteDomainReport(t *testing.T) {
+
+	platform := newFakePlatform(t)
+	options := testOptions(platform, t.TempDir())
+	options.SiteDomain = "  https://demo.example.com  "
+	client, err := New(options)
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if client.SiteDomain() != "https://demo.example.com" {
+		t.Fatalf("SiteDomain 归一失败: %q", client.SiteDomain())
+	}
+	if err = client.Start(t.Context()); err != nil {
+		t.Fatalf("Start 失败: %v", err)
+	}
+	defer client.Stop()
+
+	platform.mu.Lock()
+	activateDomain := platform.activateSiteDomain
+	platform.mu.Unlock()
+	if activateDomain != "https://demo.example.com" {
+		t.Fatalf("站点域名未随激活上报: %q", activateDomain)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		platform.mu.Lock()
+		calls := platform.validateCalls
+		domain := platform.validateSiteDomain
+		platform.mu.Unlock()
+		if calls > 0 {
+			if domain != "https://demo.example.com" {
+				t.Fatalf("站点域名未随 validate 心跳上报: %q", domain)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("validate 心跳未发生")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestClientSiteDomainNormalize - 站点域名归一：去空白、超 256 截断、缺省为空（不取主机名）
+func TestClientSiteDomainNormalize(t *testing.T) {
+
+	platform := newFakePlatform(t)
+
+	options := testOptions(platform, t.TempDir())
+	options.SiteDomain = ""
+	client, err := New(options)
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if client.SiteDomain() != "" {
+		t.Fatalf("缺省站点域名应为空串: %q", client.SiteDomain())
+	}
+
+	long := strings.Repeat("a", 300)
+	options = testOptions(platform, t.TempDir())
+	options.SiteDomain = long
+	client, err = New(options)
+	if err != nil {
+		t.Fatalf("New 失败: %v", err)
+	}
+	if len(client.SiteDomain()) != 256 {
+		t.Fatalf("站点域名超长未截断: %d", len(client.SiteDomain()))
 	}
 }

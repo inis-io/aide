@@ -76,6 +76,8 @@ message ActivateRequest {
   string client_public_key = 4;
   int64 client_time = 5;
   string device_name = 6;
+  // site_domain - 站点域名（可选，客户端部署站点标识，供平台实例列表展示）
+  string site_domain = 7;
 }
 
 message ValidateRequest {
@@ -85,6 +87,8 @@ message ValidateRequest {
   string feature = 4;
   map<string, int64> usage = 5;
   int64 client_time = 6;
+  // site_domain - 站点域名（可选，随心跳上报，平台非空才覆盖实例域名）
+  string site_domain = 7;
 }
 
 message CurrentLicenseRequest {

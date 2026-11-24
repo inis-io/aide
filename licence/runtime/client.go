@@ -55,6 +55,8 @@ type Options struct {
 	InstanceNo string
 	// DeviceName - 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
 	DeviceName string
+	// SiteDomain - 站点域名（可选，客户端部署站点标识，供平台实例/许可证列表展示；缺省为空不取主机名）
+	SiteDomain string
 	// Salt - 指纹盐（必填，与实例登记时使用的盐一致）
 	Salt string
 	// PublicKeys - 静态 license 验签公钥表（与 BootstrapPublicKeys 至少一种，支持多版本并存轮换）
@@ -209,6 +211,7 @@ func New(options Options) (*Client, error) {
 	if len(options.DeviceName) > 128 {
 		options.DeviceName = options.DeviceName[:128]
 	}
+	options.SiteDomain = normalizeSiteDomain(options.SiteDomain)
 	if options.RefreshInterval <= 0 {
 		options.RefreshInterval = 12 * time.Hour
 	}
@@ -329,6 +332,20 @@ func (this *Client) SeatNo() string {
 // 与激活上送、平台席位列表展示的值一致，仅展示/排障用途。
 func (this *Client) DeviceName() string {
 	return this.options.DeviceName
+}
+
+// SiteDomain - 实际生效的站点域名（Options.SiteDomain，New 时已归一化；缺省为空串）。
+func (this *Client) SiteDomain() string {
+	return this.options.SiteDomain
+}
+
+// normalizeSiteDomain - 站点域名归一（去空白/限长 256，缺省保持空串、不取主机名）。
+func normalizeSiteDomain(siteDomain string) string {
+	value := strings.TrimSpace(siteDomain)
+	if len(value) > 256 {
+		value = value[:256]
+	}
+	return value
 }
 
 // StorageDir - 本地安全存储根目录（Options.StorageDir，New 时已归一化）。

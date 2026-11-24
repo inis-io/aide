@@ -510,6 +510,7 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 		request := &licencev1.ActivateRequest{
 			LicenseNo: input.LicenseNo, InstanceNo: input.InstanceNo, FingerprintHash: input.FingerprintHash,
 			ClientPublicKey: input.ClientPublicKey, ClientTime: input.ClientTime, DeviceName: input.DeviceName,
+			SiteDomain: input.SiteDomain,
 		}
 		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Activate_FullMethodName, request, false)
 		if err != nil {
@@ -531,6 +532,7 @@ func (this *grpcRuntimeTransport) RoundTrip(ctx context.Context, method, request
 		request := &licencev1.ValidateRequest{
 			LicenseNo: input.LicenseNo, FingerprintHash: input.FingerprintHash, Version: input.Version,
 			Feature: input.Feature, Usage: input.Usage, ClientTime: input.ClientTime,
+			SiteDomain: input.SiteDomain,
 		}
 		callCtx, cancel, err := this.invokeContext(ctx, licencev1.LicenseRuntimeService_Validate_FullMethodName, request, withSign)
 		if err != nil {

@@ -299,6 +299,7 @@ type Options struct {
     LicenseNo          string                 // 许可证编号（必填），格式 LIC-{年}-XXXXXX
     InstanceNo         string                 // 部署实例编号（可选，许可证绑定实例时上送）
     DeviceName         string                 // 机器名称（可选，仅供席位列表展示；缺省取 os.Hostname）
+    SiteDomain         string                 // 站点域名（可选，供平台实例/许可证列表识别站点；随 activate/validate 上送，缺省为空）
     Salt               string                 // 指纹盐（必填，与实例登记时一致）
     PublicKeys         map[string]string      // 静态 license 公钥（与 BootstrapPublicKeys 至少一种）
     ReleasePublicKeys  map[string]string      // 静态 release 公钥（可由动态 keyset 提供）
@@ -345,6 +346,7 @@ type Options struct {
 | `Status` | `func (this *Client) Status() string` | 当前授权状态（状态码见 §2.2），业务据此放行/降级 |
 | `SeatNo` | `func (this *Client) SeatNo() string` | 当前机器的席位编号（尚未激活或历史服务端未返回时为空；仅展示/排障） |
 | `DeviceName` | `func (this *Client) DeviceName() string` | 实际生效的机器名称（`Options.DeviceName` 或其缺省主机名，与激活上送值一致） |
+| `SiteDomain` | `func (this *Client) SiteDomain() string` | 实际生效的站点域名（`Options.SiteDomain`，去空白限长 256，缺省为空串） |
 | `Envelope` | `func (this *Client) Envelope() (Envelope, bool)` | 当前缓存信封（第二返回值标识是否存在） |
 | `GetBool` | `func (this *Client) GetBool(code string) (bool, bool)` | 布尔权益读取：载荷 `entitlements[code]`（键缺省/类型不符返回 false, false；不含状态闸门，需配合 `Status()`） |
 | `GetInt` | `func (this *Client) GetInt(code string) (int64, bool)` | 整数权益读取：载荷 `entitlements[code]`（小数或非数值返回 0, false） |
@@ -641,6 +643,7 @@ type AutoOptions struct {
     InstallSN          string
     InstanceNo         string
     DeviceName         string
+    SiteDomain         string            // 站点域名（可选，供平台实例/许可证列表识别站点）
     Fingerprint        string
     Provider           FingerprintProvider
     Store              Store

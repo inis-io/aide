@@ -37,6 +37,8 @@ type AutoOptions struct {
 	InstanceNo string
 	// DeviceName - 机器名称（可选，缺省取 os.Hostname）。
 	DeviceName string
+	// SiteDomain - 站点域名（可选，客户端部署站点标识，供平台实例/许可证列表展示；缺省为空不取主机名）。
+	SiteDomain string
 	// Fingerprint - 显式指纹哈希（可选，覆盖自动采集）。
 	Fingerprint string
 	// Provider - 自定义指纹提供者（可选）。
@@ -152,7 +154,8 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 	client, err := New(Options{
 		ServerURL: opts.ServerURL, ProjectNo: opts.ProjectNo,
 		LicenseNo: metadata.LicenseNo, InstanceNo: metadata.InstanceNo,
-		DeviceName: opts.DeviceName, Salt: metadata.Salt, BootstrapPublicKeys: roots,
+		DeviceName: opts.DeviceName, SiteDomain: opts.SiteDomain,
+		Salt: metadata.Salt, BootstrapPublicKeys: roots,
 		StorageDir: opts.StorageDir, Fingerprint: opts.Fingerprint, Provider: opts.Provider, Store: opts.Store,
 		Version: opts.AppVersion, RefreshInterval: opts.RefreshInterval, HTTPTimeout: opts.HTTPTimeout,
 		Transport: opts.Transport, GRPC: opts.GRPC, OnStatusChange: opts.OnStatusChange,

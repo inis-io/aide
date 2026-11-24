@@ -184,6 +184,11 @@ licence/
 - `Options.DeviceName` 仅供平台席位列表展示（缺省 `os.Hostname()`，去空格限长 128）；
   proto 契约为 `ActivateRequest.device_name`（上送）与 `RuntimeResponse.seat_no`（回填），
   HTTP 对应字段 `deviceName`/`seatNo`，双协议映射必须同时维护。
+- `Options.SiteDomain` 是客户端部署站点标识（去空白限长 256，缺省为空、不取主机名），
+  供平台实例/许可证列表识别客户站点；随 activate 与 validate 心跳双通道上送，
+  proto 契约为 `ActivateRequest.site_domain` 与 `ValidateRequest.site_domain`（字段 7），
+  HTTP 对应字段 `siteDomain`；平台落库 `deployment_instances.domain`，心跳非空才覆盖，
+  双协议映射必须同时维护。
 - `SEAT_LIMIT_EXCEEDED`（仅 activate 返回）与 `SEAT_RELEASED`（validate/current 返回）是
   非自动恢复终态：后台循环停摆（tick 特判），SDK 不自动重试/重激活。
 - `SEAT_RELEASED` 处置红线：只清除信封与派生缓存（项目/平台配置快照、配置同步水位、
