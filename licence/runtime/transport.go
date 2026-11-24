@@ -22,6 +22,10 @@ type activateBody struct {
 	DeviceName      string `json:"deviceName,omitempty"`
 }
 
+// ErrNotFound - 许可证或实例信息无效（HTTP 404 / gRPC NotFound 归一的凭证终态）。
+// 调用方可用 errors.Is 判定：AutoStart 的 auto.json 恢复遇此错误会丢弃旧凭证转重新申领。
+var ErrNotFound = errors.New("许可证或实例信息无效")
+
 // validateBody - 校验请求体（契约 §2.2）
 type validateBody struct {
 	LicenseNo       string           `json:"licenseNo"`
@@ -142,7 +146,7 @@ func (this *Client) activateLocked(ctx context.Context) error {
 	}
 	if code == http.StatusNotFound {
 		this.setStatus(LicenceProtocol.StatusNotFound)
-		return errors.New("许可证或实例信息无效")
+		return ErrNotFound
 	}
 
 	var response runtimeResponse
@@ -199,7 +203,7 @@ func (this *Client) validateLocked(ctx context.Context) error {
 	}
 	if code == http.StatusNotFound {
 		this.setStatus(LicenceProtocol.StatusNotFound)
-		return errors.New("许可证或实例信息无效")
+		return ErrNotFound
 	}
 
 	var response runtimeResponse
@@ -268,7 +272,7 @@ func (this *Client) currentLocked(ctx context.Context) (LicenceProtocol.Envelope
 	}
 	if code == http.StatusNotFound {
 		this.setStatus(LicenceProtocol.StatusNotFound)
-		return LicenceProtocol.Envelope{}, errors.New("许可证或实例信息无效")
+		return LicenceProtocol.Envelope{}, ErrNotFound
 	}
 
 	var response runtimeResponse

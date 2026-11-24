@@ -467,7 +467,7 @@ func (this *grpcRuntimeTransport) mapCommandError(err error) error {
 	grpcStatus, _ := status.FromError(err)
 	switch grpcStatus.Code() {
 	case codes.NotFound:
-		return errors.New("许可证或实例信息无效")
+		return ErrNotFound
 	case codes.FailedPrecondition:
 		// 服务端消息已带"许可证非放行态：{status}"，直接透传保持双协议一致
 		return errors.New(grpcStatus.Message())

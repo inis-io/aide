@@ -26,6 +26,7 @@ type autoTestPlatform struct {
 	provisionRequests       int
 	provisioned             int
 	activateRequests        int
+	activateNotFound        int // 接下来 N 次 activate 返回 404（模拟 hub 数据重置后凭证失效）
 	provisionFingerprint    string
 	provisionActivationCode string
 	activateFingerprint     string
@@ -62,6 +63,24 @@ func (this *autoTestPlatform) activate(fingerprint string) {
 	this.activateRequests++
 	this.activateFingerprint = fingerprint
 	this.autoMu.Unlock()
+}
+
+// failActivates - 设置接下来 N 次 activate 返回 404（随后自动恢复）。
+func (this *autoTestPlatform) failActivates(n int) {
+	this.autoMu.Lock()
+	this.activateNotFound = n
+	this.autoMu.Unlock()
+}
+
+// activateRejected - 本次 activate 是否应返回 404。
+func (this *autoTestPlatform) activateRejected() bool {
+	this.autoMu.Lock()
+	defer this.autoMu.Unlock()
+	if this.activateNotFound <= 0 {
+		return false
+	}
+	this.activateNotFound--
+	return true
 }
 
 func (this *autoTestPlatform) counts() (requests, provisioned, activations int, provisionFingerprint, activateFingerprint string) {
@@ -117,6 +136,10 @@ func (this *autoTestPlatform) httpServer() *httptest.Server {
 				return
 			}
 			this.activate(body.FingerprintHash)
+			if this.activateRejected() {
+				writeNotFound(writer)
+				return
+			}
 			this.writeRuntime(writer)
 		case "/api/v1/licenses/validate", "/api/v1/licenses/current":
 			this.writeRuntime(writer)
@@ -351,5 +374,86 @@ func TestAutoStartRejectsUntrustedProvision(t *testing.T) {
 	_, _, activations, _, _ := platform.counts()
 	if activations != 0 {
 		t.Fatalf("未验根前不得发起激活: %d", activations)
+	}
+}
+
+// TestAutoStartNotFoundSelfHeal - 本地凭证已丢失（清理过状态文件）但 auto.json 残留时，
+// 恢复激活遇平台 NOT_FOUND：自动丢弃旧凭证与 auto.json 转重新申领，无需人工删文件。
+func TestAutoStartNotFoundSelfHeal(t *testing.T) {
+	platform := newAutoTestPlatform(t)
+	server := platform.httpServer()
+	dir := t.TempDir()
+	opts := AutoOptions{
+		ProjectNo: platform.projectNo, AppVersion: "1.0.0",
+		ServerURL: server.URL, BootstrapPublicKeys: platform.roots(),
+		StorageDir: dir, Provider: func() (string, error) { return "heal-machine", nil },
+		DisableCommands: true, DisableConsumptionReport: true, HTTPTimeout: 2 * time.Second,
+	}
+
+	first, err := AutoStartWithOptions(t.Context(), opts)
+	if err != nil {
+		t.Fatalf("首装失败: %v", err)
+	}
+	if err = first.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requests, provisioned, activations, _, _ := platform.counts()
+	if provisioned != 1 || activations != 1 {
+		t.Fatalf("首装计数异常: provision=%d activate=%d", provisioned, activations)
+	}
+
+	// 模拟「已按运维指引清理本地加密状态，但 auto.json 残留 + 平台侧许可证已不存在」：
+	// 恢复路径无本地 token 必须重新激活，平台对旧证返回 404（仅一次，之后平台已重建）
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := 0
+	for _, entry := range entries {
+		if entry.Name() == autoMetadataFile {
+			continue
+		}
+		if err = os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			t.Fatal(err)
+		}
+		removed++
+	}
+	if removed == 0 {
+		t.Fatal("首装后应存在加密状态文件")
+	}
+	platform.failActivates(1)
+
+	second, err := AutoStartWithOptions(t.Context(), opts)
+	if err != nil {
+		t.Fatalf("NOT_FOUND 自愈后应自动恢复: %v", err)
+	}
+	if second.Client == nil || !second.Provisioned {
+		t.Fatalf("自愈必须重新申领: %+v", second)
+	}
+	if err = second.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requestsAfter, provisionedAfter, activationsAfter, _, _ := platform.counts()
+	if provisionedAfter != provisioned+1 || activationsAfter != activations+2 {
+		t.Fatalf("自愈应重新申领并重新激活: provision=%d→%d activate=%d→%d",
+			provisioned, provisionedAfter, activations, activationsAfter)
+	}
+	if requestsAfter <= requests {
+		t.Fatalf("自愈必须重新发起申领请求: %d→%d", requests, requestsAfter)
+	}
+	// 自愈后 auto.json 重建，第三次启动恢复成功且不重复申领
+	third, err := AutoStartWithOptions(t.Context(), opts)
+	if err != nil {
+		t.Fatalf("自愈后重启恢复失败: %v", err)
+	}
+	if third.Client == nil || third.Provisioned {
+		t.Fatalf("自愈后重启应走 auto.json 恢复: %+v", third)
+	}
+	if err = third.Client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, provisionedFinal, _, _, _ := platform.counts()
+	if provisionedFinal != provisionedAfter {
+		t.Fatalf("自愈后重启不得重复申领: %d→%d", provisionedAfter, provisionedFinal)
 	}
 }

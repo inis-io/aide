@@ -129,7 +129,7 @@ func (this *Client) ReportCommand(ctx context.Context, commandNo string, result 
 	}
 	this.updateClockOffset(response.ServerTime)
 	if response.Status == LicenceProtocol.StatusNotFound {
-		return errors.New("许可证或实例信息无效")
+		return ErrNotFound
 	}
 	if response.Status == LicenceProtocol.StatusError {
 		return errors.New("服务端故障：" + response.Message)

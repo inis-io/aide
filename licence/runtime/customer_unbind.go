@@ -107,7 +107,7 @@ func (this *Client) CustomerUnbindOptions(ctx context.Context) (CustomerUnbindOp
 	}
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotFound {
-			return CustomerUnbindOptions{}, errors.New("许可证或实例信息无效")
+			return CustomerUnbindOptions{}, ErrNotFound
 		}
 		return CustomerUnbindOptions{}, fmt.Errorf("解绑验证选项请求失败（HTTP %d）", statusCode)
 	}
@@ -141,7 +141,7 @@ func (this *Client) CustomerUnbindChallenge(ctx context.Context, channel string)
 	}
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotFound {
-			return CustomerUnbindChallenge{}, errors.New("许可证或实例信息无效")
+			return CustomerUnbindChallenge{}, ErrNotFound
 		}
 		return CustomerUnbindChallenge{}, fmt.Errorf("解绑验证码发送失败（HTTP %d）", statusCode)
 	}
@@ -200,7 +200,7 @@ func (this *Client) CustomerUnbind(ctx context.Context, input CustomerUnbindInpu
 	}
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotFound {
-			return errors.New("许可证或实例信息无效")
+			return ErrNotFound
 		}
 		return fmt.Errorf("客户解绑请求失败（HTTP %d）", statusCode)
 	}

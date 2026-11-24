@@ -205,7 +205,7 @@ func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo,
 		return UpdateInfo{}, err
 	}
 	if code == http.StatusNotFound {
-		return UpdateInfo{}, errors.New("许可证或实例信息无效")
+		return UpdateInfo{}, ErrNotFound
 	}
 
 	var response checkUpdateResponse
@@ -394,7 +394,7 @@ func (this *Client) ReportUpgrade(ctx context.Context, report UpgradeReport) (st
 		return "", err
 	}
 	if code == http.StatusNotFound {
-		return "", errors.New("许可证或实例信息无效")
+		return "", ErrNotFound
 	}
 	var response runtimeResponse
 	if err = json.Unmarshal(raw, &response); err != nil {
@@ -432,7 +432,7 @@ func (this *Client) ReportUpgradeLog(ctx context.Context, recordNo string, lines
 		return err
 	}
 	if code == http.StatusNotFound {
-		return errors.New("许可证或实例信息无效")
+		return ErrNotFound
 	}
 	var response runtimeResponse
 	if err = json.Unmarshal(raw, &response); err != nil {

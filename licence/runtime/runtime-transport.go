@@ -220,7 +220,7 @@ func (this *httpRuntimeTransport) PullCommands(ctx context.Context, licenseNo st
 		return commandPullResult{}, err
 	}
 	if response.StatusCode == http.StatusNotFound {
-		return commandPullResult{}, errors.New("许可证或实例信息无效")
+		return commandPullResult{}, ErrNotFound
 	}
 	var result struct {
 		Status     string        `json:"status"`

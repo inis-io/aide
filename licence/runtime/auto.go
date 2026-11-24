@@ -92,6 +92,7 @@ type autoMetadata struct {
 
 // AutoStart - 官方平台 projectNo-only 自动授权入口。
 // 首次装机自动申领并激活；后续启动复用 auto.json 与加密状态，不重复申领。
+// auto.json 恢复遇平台判定凭证无效（NOT_FOUND）时自动丢弃旧凭证转重新申领（自愈）。
 func AutoStart(ctx context.Context, projectNo string, appVersion ...string) (AutoResult, error) {
 	if len(appVersion) > 1 {
 		return AutoResult{}, errors.New("appVersion 最多只能传一个")
@@ -179,6 +180,18 @@ func AutoStartWithOptions(ctx context.Context, opts AutoOptions) (AutoResult, er
 		client.commitKeyset(candidate)
 	}
 	if err = client.Start(ctx); err != nil {
+		// 自愈：auto.json 恢复的旧凭证已被平台判定无效（hub 数据重置/证书被清理），
+		// 继续保留 auto.json 会陷入永久失败——丢弃旧凭证与加密状态后转重新申领。
+		// manual 项目会被平台 PROVISION_DISABLED 明确拦住，不产生静默发证，语义安全。
+		if !provisioned && errors.Is(err, ErrNotFound) {
+			_ = client.Reset()
+			_ = client.Close()
+			_ = removeAutoMetadata(opts.StorageDir)
+			healed := opts
+			// 激活码只用于首次申领入座；自愈一律走常规申领，不复用可能已消费的旧码
+			healed.ActivationCode = ""
+			return AutoStartWithOptions(ctx, healed)
+		}
 		return closeWithError(err)
 	}
 
@@ -227,6 +240,15 @@ func loadAutoMetadata(storageDir, projectNo string) (autoMetadata, bool, error) 
 		return autoMetadata{}, false, errors.New("auto.json 缺少许可证编号或指纹盐")
 	}
 	return metadata, true, nil
+}
+
+// removeAutoMetadata - 删除 auto.json（不存在视为成功）；仅自愈弃证路径使用。
+func removeAutoMetadata(storageDir string) error {
+	err := os.Remove(filepath.Join(storageDir, autoMetadataFile))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // saveAutoMetadata - 以 0600 权限原子写入非机密元数据。

@@ -488,7 +488,7 @@ func (this *Client) CustomerBindPrepare(ctx context.Context, redirectURI, state 
 	}
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotFound {
-			return CustomerBindPrepareResult{}, errors.New("许可证或实例信息无效")
+			return CustomerBindPrepareResult{}, ErrNotFound
 		}
 		return CustomerBindPrepareResult{}, fmt.Errorf("授权预注册请求失败（HTTP %d）", statusCode)
 	}
@@ -550,7 +550,7 @@ func (this *Client) CustomerBind(ctx context.Context, code string) (CustomerBind
 	}
 	if statusCode != http.StatusOK {
 		if statusCode == http.StatusNotFound {
-			return CustomerBindResult{}, errors.New("许可证或实例信息无效")
+			return CustomerBindResult{}, ErrNotFound
 		}
 		return CustomerBindResult{}, fmt.Errorf("客户绑定请求失败（HTTP %d）", statusCode)
 	}
@@ -627,7 +627,7 @@ func (this *Client) ActivateByCode(ctx context.Context, code string, confirmRepl
 		// 非 200 不解析 body：404（含 gRPC NotFound 归一）锚定模糊凭证终态，其余按传输层错误上报。
 		if statusCode != http.StatusOK {
 			if statusCode == http.StatusNotFound {
-				return provisionResponse{}, errors.New("许可证或实例信息无效")
+				return provisionResponse{}, ErrNotFound
 			}
 			return provisionResponse{}, fmt.Errorf("激活码请求失败（HTTP %d）", statusCode)
 		}
@@ -1217,7 +1217,7 @@ func (this *Client) reportConsumption(ctx context.Context, items []platformConfi
 		return err
 	}
 	if code == http.StatusNotFound {
-		return errors.New("许可证或实例信息无效")
+		return ErrNotFound
 	}
 	var response platformConfigConsumeResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
