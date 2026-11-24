@@ -145,8 +145,11 @@ type CallbackFunc func(ctx context.Context, event *CallbackEvent) (Ack, error)
 
 // CallbackOptions - 回调接收端配置
 type CallbackOptions struct {
-	// PublicKeys - keyVersion 到 hex 公钥的映射
+	// PublicKeys - keyVersion 到 hex 公钥的映射（静态表，构造时拷贝）
 	PublicKeys map[string]string
+	// PublicKeysProvider - 动态公钥源（可选）；非空时每次验签实时读取并覆盖 PublicKeys，
+	// 适配 keyset 动态下发模式（传 (*LicenceRuntime.Client).PublicKeys 即可跟随轮换）。
+	PublicKeysProvider func() map[string]string
 	// TimeWindow - occurredAt 防重放窗口，默认正负 5 分钟
 	TimeWindow time.Duration
 	// DedupTTL - nonce 和 deliveryNo 去重时长，默认 10 分钟
@@ -188,12 +191,16 @@ func NewCallbackHandler(options CallbackOptions) *CallbackHandler {
 		publicKeys[version] = key
 	}
 	options.PublicKeys = publicKeys
-	return &CallbackHandler{
+	handler := &CallbackHandler{
 		options:    options,
 		handlers:   make(map[string]CallbackFunc),
 		nonces:     make(map[string]callbackDedupItem),
 		deliveries: make(map[string]callbackDedupItem),
 	}
+	if options.PublicKeysProvider != nil {
+		handler.publicKeys = options.PublicKeysProvider
+	}
+	return handler
 }
 
 // OnEvent - 注册精确事件或前缀通配处理器
