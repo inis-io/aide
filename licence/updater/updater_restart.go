@@ -48,7 +48,8 @@ func (this *Updater) detectDaemon() bool {
 //
 //	exit-code：swap 完成后以 RestartExitCode 退出，由外部守护拉起新二进制
 //	auto：探测到守护 → exit-code；无守护 → respawn 拉起自身（设计 §5.4）
-//	respawn：os.StartProcess 同 argv/env 拉起自身 → 父进程退出 0
+//	respawn：os.StartProcess 同 argv/env 拉起自身 → 父进程退出 0；
+//	  守护环境（Docker/systemd/Windows 服务）下自动退化为 exit-code（respawn 在容器里必死）
 //	callback：仅通知，重启时机由客户自控（K8s 滚动更新/多副本轮替）
 func (this *Updater) executeRestart(ctx context.Context, mode string) {
 
@@ -57,6 +58,13 @@ func (this *Updater) executeRestart(ctx context.Context, mode string) {
 		this.logf(ctx, "以 exit-code(%d) 退出，等待守护拉起", this.options.RestartExitCode)
 		exitProcess(this.options.RestartExitCode)
 	case "respawn":
+		// 守护环境（Docker/systemd/Windows 服务）下 respawn 必死：父进程 exit(0) 即 PID1 结束，
+		// 新进程随 PID 命名空间销毁，且 on-failure 类策略对零退出码不拉起（如 1Panel Go 运行环境
+		// restart: on-failure:5）——平台侧发版误选 respawn 会直接打死服务，强制退化为 exit-code
+		if this.detectDaemon() {
+			this.logf(ctx, "守护环境下 respawn 不可用，退化为 exit-code(%d)", this.options.RestartExitCode)
+			exitProcess(this.options.RestartExitCode)
+		}
 		this.respawn(ctx)
 	case "auto":
 		if this.detectDaemon() {
