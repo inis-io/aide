@@ -578,6 +578,7 @@ func fromProtoBucketInfos(source []*openv1.BucketInfo) []types.BucketInfo {
 	for _, item := range source {
 		buckets = append(buckets, types.BucketInfo{
 			Name:         item.GetName(),
+			Remark:       item.GetRemark(),
 			Region:       item.GetRegion(),
 			Acl:          item.GetAcl(),
 			Versioning:   item.GetVersioning(),

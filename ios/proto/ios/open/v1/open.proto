@@ -58,6 +58,7 @@ message BucketInfo {
   string storage_class = 6;  // 默认存储级别
   int64  create_at     = 7;  // 创建时间（毫秒）
   int64  update_at     = 8;  // 更新时间（毫秒）
+  string remark        = 9;  // 备注（管理面展示用）
 }
 
 // Share - 分享链接（令牌制，支持永久与吊销）

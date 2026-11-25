@@ -596,6 +596,7 @@ A：控制面单次调用默认 10 秒（`WithTimeout` 可调）。数据面是�
 - P2 已落地：数据面 `ResumeUpload` 断点续传（含 `ListMultipartUploads` / `AbortMultipartUpload` 会话治理）、`DeleteObjects` 批量删除、`CopyObject` 服务端拷贝、STS `GetSessionToken`（`WithSessionToken` 全链路）、桶配置族（CORS / Versioning / Lifecycle）、`PutObject` 秒传探测（`InstantUpload` / `OnInstantHit`）。
 - P3 已落地：事件通知 `notify` 子包（`ParseEvent` 解析 + 验签、`VerifyEvent`）、桶通知配置族（`GetBucketNotification` / `PutBucketNotification` / `DeleteBucketNotification`）、`examples/webhook` 接收器示例；服务端同步增强：通知 `Secret` 经属主签名端点回读可见、投递号在重试间稳定（幂等键语义）。
 - `ios/v0.2.0`：公共桶契约追加（`BucketInfo` 的 `shared` / `sharePrefix` / `shareMaxObjects` / `shareMaxBytes` / `allowExts`）与数据面 `Meta` / `CacheControl`（含 `CreateMultipartUploadEx`），全部追加式升级。
+- `ios/v0.2.4`：`BucketInfo` 追加 `remark` 字段（平台桶备注，HTTP/gRPC 双链路同步，追加式升级）。
 - 后续规划：更多示例（备份脚本、静态资源同步、CI 产物上传）与事件类型扩展。
 - 契约源文件 `proto/ios/open/v1/open.proto` 是控制面唯一事实源；平台后端复制同一份文件生成服务端桩。
 - SDK 方法签名稳定，能力上线后以新增方法方式扩展（不破坏现有接口）。

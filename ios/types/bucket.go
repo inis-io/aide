@@ -6,6 +6,8 @@ package types
 type BucketInfo struct {
 	// Name - 桶名（全局唯一）
 	Name string `json:"name"`
+	// Remark - 备注（管理面展示用）
+	Remark string `json:"remark"`
 	// Region - 区域
 	Region string `json:"region"`
 	// Acl - 预置 ACL（private/public-read/public-read-write）
