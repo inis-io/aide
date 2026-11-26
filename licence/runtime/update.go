@@ -172,6 +172,8 @@ type checkUpdateResponse struct {
 	Manifest   json.RawMessage `json:"manifest"`
 	Keyset     json.RawMessage `json:"keyset"`
 	Message    string          `json:"message"`
+	// CurrentManifest - 客户端上报版本对应的已发布版本签名清单（二进制完整性自校验锚点，无匹配版本时缺省）
+	CurrentManifest json.RawMessage `json:"currentManifest"`
 }
 
 // CheckUpdate - 在线更新检查（契约：阶段五 /api/v1/updates/check）
@@ -227,6 +229,20 @@ func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo,
 	if err != nil {
 		return UpdateInfo{}, err
 	}
+	releaseKeys := this.candidatePublicKeys(candidate, true)
+	// 二进制完整性自校验：平台附带当前版本签名清单时比对本机锚点哈希（验签失败按篡改处理，fail-closed）
+	if len(response.CurrentManifest) > 0 {
+		currentManifest, err := this.verifyManifestWithKeys(response.CurrentManifest, releaseKeys)
+		if err != nil {
+			return UpdateInfo{}, err
+		}
+		for _, artifact := range currentManifest.Payload.Artifacts {
+			if !this.verifyArtifactWithKeys(artifact, currentManifest.Payload.Version, releaseKeys) {
+				return UpdateInfo{}, errors.New("当前版本发布物签名验签失败：" + artifact.ArtifactNo)
+			}
+		}
+		this.evaluateBinaryIntegrity(currentManifest, osArch)
+	}
 	if !response.Update {
 		if candidate != nil {
 			this.commitKeyset(candidate)
@@ -235,7 +251,6 @@ func (this *Client) CheckUpdate(ctx context.Context, osArch string) (UpdateInfo,
 		return info, nil
 	}
 
-	releaseKeys := this.candidatePublicKeys(candidate, true)
 	manifest, err := this.verifyManifestWithKeys(response.Manifest, releaseKeys)
 	if err != nil {
 		return UpdateInfo{}, err

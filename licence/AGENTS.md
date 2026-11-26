@@ -10,7 +10,10 @@
   `runtime/` = 运行面 `Client` + `AutoStart` / `AutoStartWithOptions`（`auto.go`/`defaults.go`）+
   传输/指纹/安全存储/SaaS/在线更新/无 token 装机申领（`ProvisionByPlan`，支持一次性激活码
   `ActivationCode` 入座客户既有许可证席位）/账号绑定（`Client.CustomerBindPrepare` 预注册固定许可证、回跳地址与 state，门户只按 requestNo 确认；已绑定预注册返回 `CUSTOMER_BOUND + Customer`，不创建请求，供接入方自愈归属；`Client.CustomerBind` 消费门户授权票据，均为 activation-sign-v1 实例签名；`Client.CustomerUnbindOptions` 读取分级验证选项、`Client.CustomerUnbindChallenge` 按 email/sms 发码、`Client.CustomerUnbind` 以 `{Method,Code,ChallengeNo,Password}` 经 2FA/邮箱/短信/密码验证撤回套餐并释放席位）/激活码（仅未激活、未绑定的新实例首次申领入座；旧 `Client.ActivateByCode` 仅保留协议兼容，当前平台对 currentLicenseNo 一律拒绝且不消费码；首次缺指纹先挑战且不消费码，SDK 计算指纹后重试一次）/
-  配置回推/套餐/实例指令；
+  配置回推/套餐/实例指令；二进制完整性自校验（`integrity.go`：CheckUpdate 响应附带的当前版本
+  签名清单 `currentManifest` 验签后与本机启动锚点 SHA-256 比对，三态状态机
+  `BinaryIntegrity()`（unknown 无锚 fail-open / ok / violation 建议业务侧 fail-closed），
+  锚点进程内只算一次避免在线更新换包窗口误判）；
   `protocol/` = 平台契约镜像层（信封/keyset/载荷/签发验签/状态码/版本范围/canonical 助手）；
   `admin/` = 管理面 `AdminClient`；`updater/` = 在线更新执行器；`callback/` = 回调接收端
   `CallbackHandler` + 事件订阅器 `EventSubscriber`（含事件常量）；`config/` = 配置定义与

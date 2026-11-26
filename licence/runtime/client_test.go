@@ -701,6 +701,34 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 		return
 	}
 
+	// 当前版本签名清单（二进制完整性自校验锚点）：客户端上报版本精确命中已发布版本时签发附带
+	var currentManifest any
+	for _, version := range this.versions {
+		if version.version != params.Version {
+			continue
+		}
+		artifacts, err := this.signManifestArtifacts(version)
+		if err != nil {
+			break
+		}
+		manifest, err := issueManifest(ManifestPayload{
+			ProjectId: "PRJ-2026-000001", InstanceId: "INS-2026-000001",
+			Version: version.version, BuildNumber: version.buildNumber,
+			SourceVersionRange: version.sourceRange, MinUpgradeVersion: version.minUpgrade,
+			Artifacts: artifacts,
+			IssuedAt:  time.Now().UTC().Format(time.RFC3339), KeyVersion: "release-key-2026-01", Nonce: LicenceProtocol.Licence.Nonce(),
+			UpdatePolicy: version.policy,
+		}, this.releaseSeed)
+		if err == nil {
+			if this.tamperManifest {
+				tampered, _ := LicenceProtocol.SignPayload([]byte("tampered-manifest"), this.releaseSeed)
+				manifest.Signature = tampered
+			}
+			currentManifest = manifest
+		}
+		break
+	}
+
 	for index, version := range this.versions {
 		if cmp, _ := LicenceProtocol.CompareVersion(version.version, params.Version); cmp <= 0 {
 			continue
@@ -746,12 +774,20 @@ func (this *fakePlatform) handleUpdateCheck(writer http.ResponseWriter, request 
 			manifest.Signature = tampered
 		}
 		_ = index
-		writeJson(writer, map[string]any{
+		response := map[string]any{
 			"status": status, "serverTime": time.Now().UnixMilli(), "update": true, "manifest": manifest,
-		})
+		}
+		if currentManifest != nil {
+			response["currentManifest"] = currentManifest
+		}
+		writeJson(writer, response)
 		return
 	}
-	writeJson(writer, map[string]any{"status": status, "serverTime": time.Now().UnixMilli(), "update": false})
+	response := map[string]any{"status": status, "serverTime": time.Now().UnixMilli(), "update": false}
+	if currentManifest != nil {
+		response["currentManifest"] = currentManifest
+	}
+	writeJson(writer, response)
 }
 
 // signManifestArtifacts - 为假版本签发发布物清单项（多发布物优先，否则回退单 artifactData 兼容既有用例）

@@ -894,6 +894,9 @@ func (this *grpcRuntimeTransport) roundTripExtended(ctx context.Context, method,
 		if len(response.GetManifestJson()) > 0 {
 			result["manifest"] = json.RawMessage(response.GetManifestJson())
 		}
+		if len(response.GetCurrentManifestJson()) > 0 {
+			result["currentManifest"] = json.RawMessage(response.GetCurrentManifestJson())
+		}
 		if len(response.GetKeysetJson()) > 0 {
 			result["keyset"] = json.RawMessage(response.GetKeysetJson())
 		}

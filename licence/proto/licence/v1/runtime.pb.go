@@ -1655,15 +1655,18 @@ func (x *UpdateCheckRequest) GetClientTime() int64 {
 }
 
 type UpdateCheckResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	ServerTime    int64                  `protobuf:"varint,2,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
-	Update        bool                   `protobuf:"varint,3,opt,name=update,proto3" json:"update,omitempty"`
-	ManifestJson  []byte                 `protobuf:"bytes,4,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
-	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
-	KeysetJson    []byte                 `protobuf:"bytes,6,opt,name=keyset_json,json=keysetJson,proto3" json:"keyset_json,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Status       string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ServerTime   int64                  `protobuf:"varint,2,opt,name=server_time,json=serverTime,proto3" json:"server_time,omitempty"`
+	Update       bool                   `protobuf:"varint,3,opt,name=update,proto3" json:"update,omitempty"`
+	ManifestJson []byte                 `protobuf:"bytes,4,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
+	Message      string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	KeysetJson   []byte                 `protobuf:"bytes,6,opt,name=keyset_json,json=keysetJson,proto3" json:"keyset_json,omitempty"`
+	// 客户端上报版本对应的已发布版本签名清单（无匹配已发布版本时为空）：
+	// 供 SDK 二进制完整性自校验比对发布物 SHA-256，与可升级清单 manifest_json 互不替代。
+	CurrentManifestJson []byte `protobuf:"bytes,7,opt,name=current_manifest_json,json=currentManifestJson,proto3" json:"current_manifest_json,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *UpdateCheckResponse) Reset() {
@@ -1734,6 +1737,13 @@ func (x *UpdateCheckResponse) GetMessage() string {
 func (x *UpdateCheckResponse) GetKeysetJson() []byte {
 	if x != nil {
 		return x.KeysetJson
+	}
+	return nil
+}
+
+func (x *UpdateCheckResponse) GetCurrentManifestJson() []byte {
+	if x != nil {
+		return x.CurrentManifestJson
 	}
 	return nil
 }
@@ -4964,7 +4974,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\aos_arch\x18\x03 \x01(\tR\x06osArch\x12\x18\n" +
 	"\aversion\x18\x04 \x01(\tR\aversion\x12\x1f\n" +
 	"\vclient_time\x18\x05 \x01(\x03R\n" +
-	"clientTime\"\xc6\x01\n" +
+	"clientTime\"\xfa\x01\n" +
 	"\x13UpdateCheckResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x1f\n" +
 	"\vserver_time\x18\x02 \x01(\x03R\n" +
@@ -4973,7 +4983,8 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\rmanifest_json\x18\x04 \x01(\fR\fmanifestJson\x12\x18\n" +
 	"\amessage\x18\x05 \x01(\tR\amessage\x12\x1f\n" +
 	"\vkeyset_json\x18\x06 \x01(\fR\n" +
-	"keysetJson\"\x8f\x02\n" +
+	"keysetJson\x122\n" +
+	"\x15current_manifest_json\x18\a \x01(\fR\x13currentManifestJson\"\x8f\x02\n" +
 	"\x13UpdateReportRequest\x12\x1d\n" +
 	"\n" +
 	"license_no\x18\x01 \x01(\tR\tlicenseNo\x12\x1b\n" +

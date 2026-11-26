@@ -162,6 +162,10 @@ type Client struct {
 	retryDelay time.Duration
 	// startedAt - 客户端创建时间（指令 runtime_info 的 uptime 统计起点）
 	startedAt time.Time
+	// integrityAnchor - 二进制启动锚点哈希（进程内只算一次，见 integrity.go）
+	integrityAnchor integrityAnchor
+	// integrity - 二进制完整性状态（CheckUpdate 比对平台签名的当前版本清单后更新）
+	integrity integrityState
 
 	// Apis - API 商城 typed 方法包挂载点（apis 子包；New 时构造，生命周期跟随本 Client）
 	Apis *apis.Client

@@ -291,6 +291,9 @@ message UpdateCheckResponse {
   bytes manifest_json = 4;
   string message = 5;
   bytes keyset_json = 6;
+  // 客户端上报版本对应的已发布版本签名清单（无匹配已发布版本时为空）：
+  // 供 SDK 二进制完整性自校验比对发布物 SHA-256，与可升级清单 manifest_json 互不替代。
+  bytes current_manifest_json = 7;
 }
 
 message UpdateReportRequest {
