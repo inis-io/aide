@@ -77,6 +77,18 @@ var LookupPublicKey = LicenceRuntime.LookupPublicKey
 var New = LicenceRuntime.New
 var NewGRPCConn = LicenceRuntime.NewGRPCConn
 
+// ============================= 二进制完整性自校验（镜像 runtime 包） =============================
+
+// 三态状态机：Unknown（无锚/未评估）与 OK 不拦截；Violation = 自哈希与平台签名发布物
+// 不一致（疑似 patch），业务侧按无授权/免费版回落（fail-closed）。
+const (
+	BinaryIntegrityUnknown   = LicenceRuntime.BinaryIntegrityUnknown
+	BinaryIntegrityOK        = LicenceRuntime.BinaryIntegrityOK
+	BinaryIntegrityViolation = LicenceRuntime.BinaryIntegrityViolation
+)
+
+type BinaryIntegrityState = LicenceRuntime.BinaryIntegrityState
+
 // ============================= SaaS 租户与菜单（镜像 runtime 包） =============================
 
 type (
