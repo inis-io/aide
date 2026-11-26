@@ -3774,6 +3774,7 @@ type PlanCatalogItem struct {
 	Summary          string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`                                           // 一句话卖点
 	EntitlementsJson []byte                 `protobuf:"bytes,6,opt,name=entitlements_json,json=entitlementsJson,proto3" json:"entitlements_json,omitempty"` // 权益表 JSON 原文（map：模块编码 → bool/数值），原样透传不重序列化
 	Options          []*PlanCatalogOption   `protobuf:"bytes,7,rep,name=options,proto3" json:"options,omitempty"`
+	SaleStatus       string                 `protobuf:"bytes,8,opt,name=sale_status,json=saleStatus,proto3" json:"sale_status,omitempty"` // 售卖状态（on = 在售；off = 停售：选项照常下发、仅不可下单）。v0.9.42 追加，HTTP 侧同名 saleStatus
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -3855,6 +3856,13 @@ func (x *PlanCatalogItem) GetOptions() []*PlanCatalogOption {
 		return x.Options
 	}
 	return nil
+}
+
+func (x *PlanCatalogItem) GetSaleStatus() string {
+	if x != nil {
+		return x.SaleStatus
+	}
+	return ""
 }
 
 // PlanCurrentSnapshot - 当前生效付费套餐快照
@@ -5162,7 +5170,7 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"sale_price\x18\x03 \x01(\x01R\tsalePrice\x12!\n" +
 	"\fdiscount_tag\x18\x04 \x01(\tR\vdiscountTag\x12!\n" +
 	"\ffounder_left\x18\x05 \x01(\x05R\vfounderLeft\x12#\n" +
-	"\rcredit_amount\x18\x06 \x01(\x01R\fcreditAmount\"\x80\x02\n" +
+	"\rcredit_amount\x18\x06 \x01(\x01R\fcreditAmount\"\xa1\x02\n" +
 	"\x0fPlanCatalogItem\x12\x1b\n" +
 	"\tplan_code\x18\x01 \x01(\tR\bplanCode\x12\x1b\n" +
 	"\tplan_name\x18\x02 \x01(\tR\bplanName\x12\x14\n" +
@@ -5170,7 +5178,9 @@ const file_licence_v1_runtime_proto_rawDesc = "" +
 	"\x05badge\x18\x04 \x01(\tR\x05badge\x12\x18\n" +
 	"\asummary\x18\x05 \x01(\tR\asummary\x12+\n" +
 	"\x11entitlements_json\x18\x06 \x01(\fR\x10entitlementsJson\x12@\n" +
-	"\aoptions\x18\a \x03(\v2&.licenhub.licence.v1.PlanCatalogOptionR\aoptions\"\x8a\x01\n" +
+	"\aoptions\x18\a \x03(\v2&.licenhub.licence.v1.PlanCatalogOptionR\aoptions\x12\x1f\n" +
+	"\vsale_status\x18\b \x01(\tR\n" +
+	"saleStatus\"\x8a\x01\n" +
 	"\x13PlanCurrentSnapshot\x12\x1b\n" +
 	"\tplan_code\x18\x01 \x01(\tR\bplanCode\x12\x1b\n" +
 	"\tplan_name\x18\x02 \x01(\tR\bplanName\x12\x18\n" +

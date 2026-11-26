@@ -551,6 +551,7 @@ message PlanCatalogItem {
   string summary = 5;             // 一句话卖点
   bytes entitlements_json = 6;    // 权益表 JSON 原文（map：模块编码 → bool/数值），原样透传不重序列化
   repeated PlanCatalogOption options = 7;
+  string sale_status = 8;         // 售卖状态（on = 在售；off = 停售：选项照常下发、仅不可下单）。v0.9.42 追加，HTTP 侧同名 saleStatus
 }
 
 // PlanCurrentSnapshot - 当前生效付费套餐快照

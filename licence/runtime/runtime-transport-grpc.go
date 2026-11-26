@@ -1892,7 +1892,8 @@ func planCatalogItemMap(item *licencev1.PlanCatalogItem) map[string]any {
 		entitlements = json.RawMessage(item.GetEntitlementsJson())
 	}
 	return map[string]any{
-		"planCode": item.GetPlanCode(), "planName": item.GetPlanName(), "grade": item.GetGrade(),
+		"planCode": item.GetPlanCode(), "planName": item.GetPlanName(),
+		"saleStatus": item.GetSaleStatus(), "grade": item.GetGrade(),
 		"badge": item.GetBadge(), "summary": item.GetSummary(),
 		"entitlements": entitlements, "options": options,
 	}
